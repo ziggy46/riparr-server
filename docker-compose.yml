@@ -1,0 +1,31 @@
+services:
+  riparr:
+    build:
+      context: .
+      args:
+        # "yes" means you have read and accept MakeMKV's licence:
+        # https://www.makemkv.com/eula/
+        MAKEMKV_ACCEPT_EULA: "no"
+    image: riparr-server:local
+    container_name: riparr
+    restart: unless-stopped
+    # Share discovery (mDNS and a LAN sweep) can't see past Docker's bridge network, so
+    # the setup wizard finds nothing and you type your NAS's address instead. Host
+    # networking makes discovery work; drop the ports: section if you turn it on.
+    # network_mode: host
+    ports:
+      - "9797:9797"
+    devices:
+      # Both nodes for the drive. MakeMKV talks to the SCSI generic one (/dev/sg*),
+      # and its number is not always 0 -- `lsscsi -g` on the host shows which it is.
+      - /dev/sr0:/dev/sr0
+      - /dev/sg0:/dev/sg0
+    volumes:
+      - ./data:/data
+      - ./staging:/srv/staging
+      # Optional: rip straight into your library instead of copying over SMB.
+      # Mount the share on the host, then bind it here. Only the default share
+      # in Riparr uses this path.
+      # - /mnt/nas/media:/srv/library
+    environment:
+      TZ: Etc/UTC
