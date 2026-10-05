@@ -478,12 +478,19 @@ select option { background: var(--dropdown); }
 /* Darkened from the theme's button colour: white on Servarr's #5d9cec is 2.8:1, and
    the primary button is the one label that has to be readable. Mixing towards black
    keeps each theme's hue while getting white text past 4.5:1. */
-.btn.primary {
-  --btn-solid: color-mix(in srgb, var(--btn) 70%, #000);
-  border-color: var(--btn-solid); background: var(--btn-solid); color: #fff;
-}
-.btn.primary:hover:not(:disabled) {
-  --btn-solid: color-mix(in srgb, var(--btn-hover) 62%, #000);
+.btn.primary { border-color: var(--btn); background: var(--btn); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: var(--btn-hover); border-color: var(--btn-hover); }
+/* Behind @supports because a custom property holding a colour the browser can't parse
+   would leave the button transparent rather than falling back. */
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  .btn.primary {
+    --btn-solid: color-mix(in srgb, var(--btn) 70%, #000);
+    border-color: var(--btn-solid); background: var(--btn-solid);
+  }
+  .btn.primary:hover:not(:disabled) {
+    --btn-solid: color-mix(in srgb, var(--btn-hover) 62%, #000);
+    border-color: var(--btn-solid); background: var(--btn-solid);
+  }
 }
 
 .btn.danger { border-color: var(--bad); background: var(--bad); color: #fff; }

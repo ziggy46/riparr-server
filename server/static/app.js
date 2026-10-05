@@ -1573,7 +1573,7 @@ function tray(drives, optical, canRip) {
       <p>Already in your library: you ripped <b>${esc(name)}</b> ${esc(ago(k.ripped_at))}.</p>
       ${canRip ? `<div class="btn-row tray-go">
         <button class="btn" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip it again</button>
-        <a class="btn" href="#/discs/${encodeURIComponent(k.fingerprint)}">See it in Discs</a>
+        <a class="btn" href="#/discs">See it in Discs</a>
       </div>` : ""}
       ${driveLine(d)}
     </div>`;
