@@ -14,10 +14,9 @@ line. GuinpinSoft's position is that a DVD is already backed up by copying it, w
 true of an encrypted ISO and not of a folder that plays.
 
 So DVDs go through `dvdbackup -M`, which mirrors the whole disc through libdvdread --
-and libdvdread decrypts CSS only if libdvdcss is installed. Neither ships on the box by
-default, and libdvdcss is not in Debian at all. `packaging/dvdtools-install.sh` puts
-them there, through the same one-way root door MakeMKV's installer uses; this module
-reports whether that has happened and asks for it if not.
+and libdvdread decrypts CSS only if libdvdcss is installed. dvdbackup is in the image;
+libdvdcss is not in Debian at all, and is compiled on the container's first start by
+deploy/build-tools.sh. This module reports whether that has happened.
 
 ## What is promised and what is not
 
@@ -93,7 +92,7 @@ def can_backup(family):
         t = dvd_tools()
         if t["ready"]:
             return True, ""
-        return False, "the DVD backup tools aren't installed (rebuild the image or run deploy/install-tools.sh)"
+        return False, "the DVD backup tools (libdvdcss) aren't installed yet: they're compiled when the container starts, and the container log says why if that failed"
     if family in ("bluray", "uhd"):
         if P.MOCK or shutil.which("makemkvcon") or os.path.exists("/usr/local/bin/makemkvcon"):
             return True, ""
@@ -102,10 +101,11 @@ def can_backup(family):
 
 
 # ── installing them ──
-# Part of the image here, like MakeMKV: deploy/install-tools.sh installs dvdbackup and
-# builds libdvdcss when the image is built. Nothing installs from the web page.
-INSTALL_HINT = ("The DVD backup tools are built into the Riparr Server image. "
-                "Rebuild the image: docker compose build --no-cache")
+# dvdbackup is in the image; libdvdcss is compiled into /data on the container's first
+# start, by deploy/build-tools.sh. Nothing installs from the web page.
+INSTALL_HINT = ("libdvdcss is compiled when the container starts. If it's missing, the "
+                "container log says why (usually no internet on the first start); "
+                "restart the container to try again.")
 
 
 def status():

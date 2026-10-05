@@ -38,11 +38,11 @@ BUY_URL = "https://www.makemkv.com/buy/"
 # It requires a descriptive User-Agent and publishes the timestamp after which it wants
 # to be asked again; both are honoured.
 AYRA_KEY_API = "https://cable.ayra.ch/makemkv/api.php?json"
-USER_AGENT = "riparr/%s (+https://github.com/jackharvest/riparr)"
+USER_AGENT = "riparr-server/%s (+https://github.com/ziggy46/riparr-server)"
 
 # The pinned release, its checksums, and every place it can be fetched from, all read
-# from packaging/makemkv-manifest.json so that this service and the root installer
-# (tools/makemkv-install.sh) can never disagree about what they are downloading.
+# from packaging/makemkv-manifest.json so that this service and the builder
+# (deploy/build-tools.sh) can never disagree about what they are downloading.
 #
 # Why mirrors: makemkv.com was down for the whole of August 2026. An appliance whose
 # first-run setup cannot complete because somebody else's web server is having a month
@@ -313,14 +313,14 @@ def _db_get(key, default=None):
 
 # ── installing ──
 # Upstream builds MakeMKV from the web page, through a root path unit the unprivileged
-# service can poke. Here MakeMKV is part of the deployment: the Docker image builds it,
-# from deploy/install-tools.sh. A web service that can compile and
-# install software as root is not something a server should carry, so this only says
-# where to go.
+# service can poke. Here the container's entrypoint compiles it on start, as root, before
+# Riparr runs (deploy/build-tools.sh). A web service that can compile and install
+# software as root is not something a server should carry, so this only says where to go.
 INSTALL_HINT = (
-    "MakeMKV is built into the Riparr Server image rather than installed from this "
-    "page. Set MAKEMKV_ACCEPT_EULA to \"yes\" in docker-compose.yml, then rebuild: "
-    "docker compose up -d --build")
+    "MakeMKV is compiled when the container starts, once you've accepted its licence: "
+    "set MAKEMKV_ACCEPT_EULA=yes in the container's environment (docker-compose.yml) "
+    "and restart it. The first start takes a few minutes; the container log shows "
+    "progress, and why if it fails.")
 
 
 # ── the current beta key ──

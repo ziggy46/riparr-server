@@ -1,10 +1,9 @@
 .git
+.github
 **/.venv
 **/__pycache__
 data
 staging
-docs/img
-tools/preparer
-tools/flasher
-packaging/dmg
-packaging/windows
+docs
+tools
+*.md

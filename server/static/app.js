@@ -1826,9 +1826,9 @@ function destPath(share, folder) {
 function backupToolsLine(t) {
   if (!t) return "";
   if (t.ready) return `<span class="test-out ok">DVD backups are ready.</span>`;
-  return `<span class="test-out warn">DVD backups need dvdbackup and libdvdcss, and this
-    image is missing them. Rebuild it with <code>docker compose build --no-cache</code>.
-    Until then, DVDs are ripped as film files and Blu-rays are backed up as normal.</span>`;
+  return `<span class="test-out warn">DVD backups need libdvdcss, which hasn't been
+    compiled yet. ${esc(t.message || "")} Until then, DVDs are ripped as film files and
+    Blu-rays are backed up as normal.</span>`;
 }
 
 /* Ripping — what comes off the disc, and how it gets out. */

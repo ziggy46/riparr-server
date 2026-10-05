@@ -1,14 +1,68 @@
-#!/bin/sh
-# Container entrypoint: make sure the persistent paths exist, then run the service.
-set -e
+#!/bin/bash
+# Container entrypoint. Starts as root to do the few things that need it, then runs
+# Riparr as PUID:PGID:
+#
+#   1. a user for PUID/PGID, so files Riparr writes belong to you rather than root
+#   2. MakeMKV and libdvdcss, built into /data the first time and reused after that
+#   3. the optical-drive watcher (devwatch.sh), which stays running as root
+#   4. Riparr itself, unprivileged
+set -uo pipefail
 
-mkdir -p "$(dirname "${RIPARR_DB:-/data/riparr.db}")" "${RIPARR_STAGING:-/srv/staging}" \
-         "${HOME:-/data}"
+PUID="${PUID:-1000}"
+PGID="${PGID:-1000}"
+export PGID
+DATA="$(dirname "${RIPARR_DB:-/data/riparr.db}")"
+STAGING="${RIPARR_STAGING:-/srv/staging}"
+mkdir -p "$DATA" "$STAGING" "$DATA/tools"
 
-if ! ls /dev/sr* >/dev/null 2>&1; then
-  echo "riparr: no optical drive visible in this container (/dev/sr*)." >&2
-  echo "riparr: pass it through, e.g. --device /dev/sr0 --device /dev/sg1" >&2
+say() { echo "riparr: $*"; }
+off() { case "${1:-}" in ""|0|no|false|off) return 0 ;; *) return 1 ;; esac; }
+
+# ── 1. the account ──
+if [ "$PUID" != 0 ]; then
+  if ! getent group "$PGID" >/dev/null; then
+    groupadd -o -g "$PGID" riparr
+  fi
+  if getent passwd riparr >/dev/null; then
+    usermod -o -u "$PUID" -g "$PGID" riparr >/dev/null
+  else
+    # A real passwd entry, not just a number: smbclient looks the uid up.
+    useradd -o -u "$PUID" -g "$PGID" -d "$DATA" -s /usr/sbin/nologin -M riparr
+  fi
+  # Only what isn't already ours, so a full staging folder isn't re-chowned on every
+  # start. Never the library: that is the user's, and may be a NAS mount.
+  find "$DATA" "$STAGING" \( ! -user "$PUID" -o ! -group "$PGID" \) \
+       -exec chown -h "$PUID:$PGID" {} + 2>/dev/null
 fi
 
-exec /opt/riparr/.venv/bin/python -m uvicorn riparr.main:app \
-  --host "${RIPARR_HOST:-0.0.0.0}" --port "${RIPARR_PORT:-9797}" "$@"
+# ── 2. MakeMKV and libdvdcss ──
+if off "${RIPARR_MOCK:-}"; then
+  bash /opt/riparr/deploy/build-tools.sh libdvdcss
+  bash /opt/riparr/deploy/build-tools.sh makemkv
+  [ "$PUID" != 0 ] && chown -R "$PUID:$PGID" "$DATA/tools" 2>/dev/null
+fi
+
+# ── 3. optical drives ──
+if off "${RIPARR_MOCK:-}" && ! off "${RIPARR_DEVWATCH:-1}"; then
+  bash /opt/riparr/deploy/devwatch.sh --once
+  bash /opt/riparr/deploy/devwatch.sh &
+fi
+if off "${RIPARR_MOCK:-}" && ! ls /dev/sr* >/dev/null 2>&1; then
+  say "no optical drive visible yet. Riparr will pick one up when it appears, as long as"
+  say "  the container has device_cgroup_rules: [\"b 11:* rmw\", \"c 21:* rmw\"]."
+fi
+
+# ── 4. Riparr ──
+umask "${UMASK:-022}"
+CMD=(/opt/riparr/.venv/bin/python -m uvicorn riparr.main:app
+     --host "${RIPARR_HOST:-0.0.0.0}" --port "${RIPARR_PORT:-9797}" "$@")
+if [ "$PUID" = 0 ]; then
+  exec "${CMD[@]}"
+fi
+# The watcher gives drive nodes our group. Nodes passed in with devices: and no watcher
+# keep the host's group, so join whatever groups those have too.
+GIDS="$(stat -c '%g' /dev/sr* /dev/sg* 2>/dev/null | grep -vx 0 | sort -u | paste -sd, -)"
+say "running as uid $PUID, gid $PGID${GIDS:+, groups $GIDS}"
+if [ -n "$GIDS" ]; then GROUPS_ARG="--groups=$GIDS"; else GROUPS_ARG="--clear-groups"; fi
+exec setpriv --reuid="$PUID" --regid="$PGID" "$GROUPS_ARG" --inh-caps=-all \
+     env HOME="$DATA" "${CMD[@]}"

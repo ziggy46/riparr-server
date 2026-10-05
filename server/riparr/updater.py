@@ -2,7 +2,7 @@
 Checking for a new release.
 
 Upstream Riparr replaces its own files in place, because an appliance with no screen
-has nobody to do it. A container does: the image is the unit
+has nobody to do it. A container doesn't: the image is the unit
 of deployment, and a process rewriting itself underneath Docker would be undone by the
 next `docker compose up` anyway. So this only looks, and says how to update.
 
@@ -25,7 +25,7 @@ def current_version():
 
 
 def how_to_update():
-    return "git pull && docker compose up -d --build"
+    return "docker compose pull && docker compose up -d"
 
 
 def check(repo=REPO, timeout=8):

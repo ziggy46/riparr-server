@@ -1,25 +1,33 @@
 services:
   riparr:
-    build:
-      context: .
-      args:
-        # "yes" means you have read and accept MakeMKV's licence:
-        # https://www.makemkv.com/eula/
-        MAKEMKV_ACCEPT_EULA: "no"
-    image: riparr-server:local
+    image: ghcr.io/ziggy46/riparr-server:latest
+    # To build it yourself from this checkout instead:  docker compose build
+    build: .
     container_name: riparr
     restart: unless-stopped
-    # Share discovery (mDNS and a LAN sweep) can't see past Docker's bridge network, so
-    # the setup wizard finds nothing and you type your NAS's address instead. Host
-    # networking makes discovery work; drop the ports: section if you turn it on.
-    # network_mode: host
+    environment:
+      # "yes" means you have read and accept MakeMKV's licence:
+      # https://www.makemkv.com/eula/  The first start then compiles MakeMKV into
+      # ./data, which takes a few minutes; later starts reuse it.
+      MAKEMKV_ACCEPT_EULA: "no"
+      # Who owns the files Riparr writes. `id` on the host shows yours.
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      # Networks to look for your NAS on, if the setup wizard's scan finds nothing.
+      # RIPARR_SCAN_SUBNETS: "192.168.1.0/24"
     ports:
       - "9797:9797"
-    devices:
-      # Both nodes for the drive. MakeMKV talks to the SCSI generic one (/dev/sg*),
-      # and its number is not always 0 -- `lsscsi -g` on the host shows which it is.
-      - /dev/sr0:/dev/sr0
-      - /dev/sg0:/dev/sg0
+    # Lets Riparr use any optical drive the host has, and pick one up when it's plugged
+    # in later, without naming device nodes: sr* is block major 11, sg* char major 21.
+    device_cgroup_rules:
+      - "b 11:* rmw"
+      - "c 21:* rmw"
+    # Or name the drive's nodes yourself instead (`lsscsi -g` on the host). Keep the
+    # same names inside as outside.
+    # devices:
+    #   - /dev/sr0:/dev/sr0
+    #   - /dev/sg2:/dev/sg2
     volumes:
       - ./data:/data
       - ./staging:/srv/staging
@@ -27,5 +35,3 @@ services:
       # Mount the share on the host, then bind it here. Only the default share
       # in Riparr uses this path.
       # - /mnt/nas/media:/srv/library
-    environment:
-      TZ: Etc/UTC
