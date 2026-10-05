@@ -6,9 +6,22 @@ The section for each version is pulled straight into that version's release note
 this file is the release notes. Write it for somebody who wants to know whether to
 bother updating.
 
+If updating to a release takes more than `docker compose pull && docker compose up -d`,
+put the command in that release's notes on GitHub, on a line of its own:
+`<!-- riparr-update: the command -->`. From 0.6.0 on, Riparr shows that instead of its
+built-in instruction, on System → Updates and in the update notification. GitHub
+doesn't display the line.
+
 ---
 
 ## 0.6.0
+
+**Coming from 0.5.1?** Its update message says `git pull && docker compose up -d --build`;
+don't use that as-is. Your edited `docker-compose.yml` stops `git pull`, and the licence
+setting has moved. Run `git stash && git pull` (or download the new
+`docker-compose.yml`), set `MAKEMKV_ACCEPT_EULA: "yes"`, `PUID` and `PGID` under
+`environment:`, then `docker compose pull && docker compose up -d`. Keep your `data`
+folder. The first start compiles MakeMKV and changes the owner of `data` and `staging`.
 
 **A ready-made image.** `ghcr.io/ziggy46/riparr-server`, for amd64 and arm64. No more
 building it yourself: download `docker-compose.yml` and `docker compose up -d`.
@@ -30,11 +43,6 @@ the database, staged rips and anything in a bind-mounted library are owned by yo
 **The share scan can see your LAN.** From inside Docker the setup wizard was scanning
 Docker's own network and finding nothing. Type your network into the new box under the
 scan (e.g. `192.168.1.0/24`), or set `RIPARR_SCAN_SUBNETS`.
-
-**If you're on 0.5.1:** your `docker-compose.yml` built the image with a
-`MAKEMKV_ACCEPT_EULA` build arg. Replace it with the new one, set `MAKEMKV_ACCEPT_EULA`,
-`PUID` and `PGID` under `environment:`, and keep your `data` folder. The first start
-compiles MakeMKV and fixes the ownership of `data` and `staging`.
 
 ## 0.5.1 — Riparr Server, first release
 

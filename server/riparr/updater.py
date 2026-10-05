@@ -28,6 +28,26 @@ def how_to_update():
     return "docker compose pull && docker compose up -d"
 
 
+# A release can say how to update to it, overriding how_to_update() above. The line goes
+# anywhere in the release notes, as an HTML comment so GitHub doesn't show it:
+#
+#     <!-- riparr-update: docker compose pull && docker compose up -d -->
+#
+# This exists because the instruction is otherwise fixed in the version already running.
+# 0.5.1 told everybody to `git pull && docker compose up -d --build` for 0.6.0, which no
+# longer worked, and nothing published afterwards could change what 0.5.1 said.
+UPDATE_HINT_RE = re.compile(r"<!--\s*riparr-update:\s*(.+?)\s*-->", re.I | re.S)
+
+
+def release_how(notes):
+    """(the release's own update instruction or None, the notes without it)."""
+    m = UPDATE_HINT_RE.search(notes or "")
+    if not m:
+        return None, notes or ""
+    how = " ".join(m.group(1).split())[:300] or None
+    return how, UPDATE_HINT_RE.sub("", notes).strip()
+
+
 def check(repo=REPO, timeout=8):
     """Never raises. A server with no internet still has to run."""
     url = "%s/repos/%s/releases/latest" % (GITHUB_API, repo)
@@ -49,11 +69,14 @@ def check(repo=REPO, timeout=8):
 
     latest = (data.get("tag_name") or "").lstrip("v")
     newer = _newer(latest, __version__)
+    how, notes = release_how(data.get("body"))
+    if how:
+        base["how"] = how
     return dict(base,
                 status="update" if newer else "current",
                 latest=latest,
                 tag=data.get("tag_name"),
-                notes=data.get("body") or "",
+                notes=notes,
                 published=data.get("published_at"),
                 url=data.get("html_url"),
                 message=("Version %s is available." % latest) if newer

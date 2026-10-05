@@ -142,6 +142,27 @@ with mock.patch.object(updater, "__version__", "0.5.1"):
         check("offline never raises", updater.check()["status"], "offline")
 check("install never installs", updater.install()["ok"], False)
 
+
+def release_with(body):
+    return lambda *a, **k: _Resp(json.dumps({"tag_name": "v9.9.9", "body": body,
+                                             "html_url": "https://example"}).encode())
+
+
+with mock.patch.object(updater.urllib.request, "urlopen", release_with(
+        "Notes.\n<!-- riparr-update: git stash && git pull -->\nMore notes.")):
+    r = updater.check()
+    check("a release can say how to update to it", r["how"], "git stash && git pull")
+    check("and that line is left out of the notes shown", "riparr-update" in r["notes"], False)
+    check("the rest of the notes are kept", ("Notes." in r["notes"], "More notes." in r["notes"]),
+          (True, True))
+with mock.patch.object(updater.urllib.request, "urlopen", release_with(
+        "<!--   RIPARR-UPDATE:   git stash\n   && git pull   -->")):
+    check("spacing and case don't matter, and it can wrap",
+          updater.check()["how"], "git stash && git pull")
+with mock.patch.object(updater.urllib.request, "urlopen", release_with("Just notes.")):
+    check("without one, the built-in instruction is used",
+          updater.check()["how"], updater.how_to_update())
+
 print("the password reset file")
 from riparr import main  # noqa: E402  (imported late: it reads RIPARR_DB at import)
 db.create_user("admin", "a-test-password")
