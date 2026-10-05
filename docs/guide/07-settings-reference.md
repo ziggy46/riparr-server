@@ -41,21 +41,22 @@ as happens, its own site asks everyone to use the free beta key, and Riparr says
 rather than showing a Buy button that leads nowhere.
 
 > MakeMKV is made by GuinpinSoft, not by Riparr, and its licence agreement is between
-> you and them. You accept it by setting the `MAKEMKV_ACCEPT_EULA: "yes"` build arg in
-> `docker-compose.yml`; MakeMKV is then compiled into the image when you build it.
-> Nothing is installed from the web UI.
+> you and them. You accept it by setting `MAKEMKV_ACCEPT_EULA: "yes"` in
+> `docker-compose.yml`; the container then compiles MakeMKV on its first start. Nothing
+> is installed from the web UI.
 
-Every MakeMKV download during the build is checked against a checksum pinned in
-`packaging/makemkv-manifest.json`, so the build gets the right file or fails.
+Every MakeMKV download is checked against a checksum pinned in
+`packaging/makemkv-manifest.json`, and mirrors are tried in order if makemkv.com is
+down, so the build gets the right file or fails.
 
 **Settings → General** also tracks makemkv.com and its forum separately, because they are
 different machines and fail independently. Both publish the free key, and one is usually
 up when the other is not.
 
 **A new version of MakeMKV** arrives with a Riparr release, once the pin in
-`packaging/makemkv-manifest.json` is updated. To get it, pull and rebuild the image:
-`git pull && docker compose up -d --build`. The version you have keeps working until you
-do.
+`packaging/makemkv-manifest.json` is updated. To get it, update Riparr
+(`docker compose pull && docker compose up -d`); the first start after that compiles the
+new version. The version you have keeps working until you do.
 
 ## Library
 
@@ -309,10 +310,10 @@ Riparr checks the GitHub releases of `ziggy46/riparr-server` every six hours and
 you when it finds one — once per version, not every six hours.** It does not install
 anything itself.
 
-To update, from your checkout:
+To update:
 
 ```
-git pull && docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
 Your settings, shares and history are in the `/data` volume and carry over.

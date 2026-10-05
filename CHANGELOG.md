@@ -8,6 +8,34 @@ bother updating.
 
 ---
 
+## 0.6.0
+
+**A ready-made image.** `ghcr.io/ziggy46/riparr-server`, for amd64 and arm64. No more
+building it yourself: download `docker-compose.yml` and `docker compose up -d`.
+
+**MakeMKV compiles on the first start**, into your `data` folder, once
+`MAKEMKV_ACCEPT_EULA` is `"yes"` in the container's environment. It's no longer in the
+image, because MakeMKV's licence has to be accepted by whoever runs it. Later starts take
+seconds. libdvdcss is compiled the same way.
+
+**Optical drives are found on their own.** The compose file now allows optical drives as
+a class (`device_cgroup_rules`) instead of naming device nodes, and the container makes
+the nodes itself. No more looking up `/dev/sg` numbers, and a USB drive can be unplugged
+and replugged without restarting the container. `devices:` still works if you prefer it.
+
+**Files belong to you.** Riparr runs as `PUID`/`PGID` (default 1000) instead of root, so
+the database, staged rips and anything in a bind-mounted library are owned by your user.
+`UMASK` sets their permissions.
+
+**The share scan can see your LAN.** From inside Docker the setup wizard was scanning
+Docker's own network and finding nothing. Type your network into the new box under the
+scan (e.g. `192.168.1.0/24`), or set `RIPARR_SCAN_SUBNETS`.
+
+**If you're on 0.5.1:** your `docker-compose.yml` built the image with a
+`MAKEMKV_ACCEPT_EULA` build arg. Replace it with the new one, set `MAKEMKV_ACCEPT_EULA`,
+`PUID` and `PGID` under `environment:`, and keep your `data` folder. The first start
+compiles MakeMKV and fixes the ownership of `data` and `staging`.
+
 ## 0.5.1 — Riparr Server, first release
 
 **Runs in Docker.** `docker compose up -d --build` builds an image with MakeMKV, dvdbackup

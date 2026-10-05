@@ -40,27 +40,25 @@ want detail.
 
 ## Get started
 
-Find the drive's two device nodes on the host:
-
 ```sh
-lsscsi -g        # e.g.  cd/dvd  HL-DT-ST BD-RE BU40N  /dev/sr0  /dev/sg2
+mkdir riparr && cd riparr
+curl -fsSLO https://raw.githubusercontent.com/ziggy46/riparr-server/main/docker-compose.yml
 ```
 
-Then clone this repo and edit `docker-compose.yml`:
-
-- set `MAKEMKV_ACCEPT_EULA: "yes"` once you've read [MakeMKV's licence](https://www.makemkv.com/eula/)
-- put your drive's `/dev/sr*` and `/dev/sg*` under `devices:`
-
-Then:
+In `docker-compose.yml`, set `MAKEMKV_ACCEPT_EULA: "yes"` once you've read
+[MakeMKV's licence](https://www.makemkv.com/eula/), and `PUID`/`PGID` to your user (`id`
+shows them). Then:
 
 ```sh
-docker compose up -d --build
+docker compose up -d
 ```
 
-Open `http://<server>:9797`. The first build compiles MakeMKV, which takes a few minutes.
+Open `http://<server>:9797`. The first start compiles MakeMKV, which takes a few minutes;
+`docker logs -f riparr` shows progress. Optical drives are picked up automatically,
+including a USB drive plugged in later, with no device names to look up.
 
 **[The full Docker guide](docs/guide/02-docker.md)** covers volumes, ripping straight into
-a mounted library, stable device names, Proxmox, updating and password reset.
+a mounted library, Proxmox, updating and password reset.
 
 ## What you'll need
 
@@ -80,18 +78,19 @@ server already has:
 
 | Upstream | Riparr Server |
 |---|---|
-| Preparer app writes an SD card and installs over SSH | `docker compose up -d --build` |
+| Preparer app writes an SD card and installs over SSH | `docker compose up -d`, image on ghcr.io |
 | Detects real hardware by the board's device tree | Any Linux is real hardware; `RIPARR_MOCK=1` simulates |
-| MakeMKV built on the box from the web page | MakeMKV and the DVD tools are built into the image |
-| Updates itself in place | Checks for releases; you pull and rebuild |
+| MakeMKV built on the box from the web page | Compiled on the container's first start, once you accept its licence |
+| Updates itself in place | Checks for releases; you pull the new image |
+| Runs as a dedicated `riparr` account | Runs as your `PUID`/`PGID` |
 | Wi-Fi, status LED, restart/shutdown, USB-C socket fix | Removed: the host handles these |
 | Mounts the library share as root at boot | Optional bind mount at `/srv/library` |
 | Password reset file on the SD card's boot partition | `riparr-reset` file in the `/data` volume |
 
 ## Where it's at
 
-Pre-1.0, like upstream. The container builds and runs, and the interface works in
-both live and simulated modes. **Rips with a real drive passed through haven't been
+Pre-1.0, like upstream. The image builds and runs, MakeMKV compiles on first start, and
+the interface works in both live and simulated modes. **Rips with a real drive passed through haven't been
 tested yet in this fork**, so if you're first, [an issue](../../issues) with your drive
 and host is genuinely useful.
 
@@ -123,7 +122,7 @@ on, ship the source too.
 | Themes | [theme.park](https://github.com/themepark-dev/theme.park) — MIT |
 | Icons | [Font Awesome Free](https://fontawesome.com/license/free) — CC BY 4.0 · brand marks from [Simple Icons](https://simpleicons.org/) — CC0 |
 | Wordmark | [Russo One](server/static/fonts/RussoOne-OFL.txt) — SIL OFL 1.1 |
-| Disc reading | [MakeMKV](https://www.makemkv.com/) — proprietary, by GuinpinSoft. **Not shipped with Riparr Server.** It's downloaded and compiled when you build the image, after you accept its licence. makemkv.com goes down for weeks at a time, so the build tries a list of mirrors in order, and every download is checked against a hash pinned in this repo |
+| Disc reading | [MakeMKV](https://www.makemkv.com/) — proprietary, by GuinpinSoft. **Not shipped with Riparr Server**, and not in the image. The container downloads and compiles it on first start, after you accept its licence. makemkv.com goes down for weeks at a time, so it tries a list of mirrors in order, and every download is checked against a hash pinned in this repo. libdvdcss is fetched and compiled the same way |
 
 Riparr Server isn't affiliated with or endorsed by upstream Riparr, Sonarr, Radarr,
 GuinpinSoft or anyone else named here. Those names belong to them.

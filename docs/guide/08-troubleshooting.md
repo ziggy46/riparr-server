@@ -25,7 +25,7 @@ prerequisite whether or not it's met, so the row that isn't green is your answer
 
 | Row | Means |
 |---|---|
-| **Riparr can read discs** | MakeMKV is in the image. Red means it was built without `MAKEMKV_ACCEPT_EULA: "yes"` — see [below](#riparr-cant-read-discs) |
+| **Riparr can read discs** | MakeMKV has been compiled. Red means `MAKEMKV_ACCEPT_EULA` isn't `"yes"`, or the build failed — see [below](#riparr-cant-read-discs) |
 | **The MakeMKV key is current** | There's a key and it hasn't lapsed. Amber means it lapses within a week — rips fail the day it does |
 | **A drive to read them in** | An optical drive is visible inside the container. A working drive shows up here even with no disc in the tray |
 | **Somewhere to put the files** | A library share is configured *and* has been tested |
@@ -39,25 +39,25 @@ Riparr *could* rip, not that you've asked it to. Then read the next section.
 
 ## No drive found
 
-The container only sees the devices you pass to it.
+1. **Check the host sees it:** `lsscsi -g` on the host should show a `cd/dvd` line. If it
+   doesn't, it's a cable, power or USB-adapter problem, not Riparr.
+2. **Check the container is allowed optical drives.** `docker-compose.yml` needs:
 
-1. **Find the drive on the host:**
-
+   ```yaml
+   device_cgroup_rules:
+     - "b 11:* rmw"
+     - "c 21:* rmw"
    ```
-   lsscsi -g
-   ```
 
-   The optical drive is the `cd/dvd` line. It has two device nodes: `/dev/srN` and the
-   SCSI-generic `/dev/sgN` at the end of the line.
-2. **Pass both in** under `devices:` in `docker-compose.yml`. MakeMKV needs the `sg` node
-   as well as the `sr` one — passing only `/dev/sr0` is the usual mistake.
-3. **Recreate the container:** `docker compose up -d`.
+   Then `docker compose up -d` to recreate the container. `docker logs riparr` should
+   say `optical device /dev/sr0 is present`.
+3. **Using `devices:` instead?** Pass **both** nodes from `lsscsi -g`, the `/dev/srN`
+   and the `/dev/sgN`, with the same names inside. MakeMKV reads through the `sg` node,
+   so passing only `/dev/sr0` is the usual mistake. A USB drive that's been replugged
+   needs `docker compose restart` in this setup, and its `sg` number may have changed.
 
-**A USB drive that was unplugged and plugged back in** needs the container restarted —
-device nodes are fixed when the container starts. Its `sg` number may also have changed,
-so run `lsscsi -g` again and update `devices:` if it has. See
-[Run it in Docker](02-docker.md#optional-a-device-name-that-doesnt-move) for a name that
-doesn't move.
+**Docker inside a Proxmox LXC** only sees what the LXC was given, so pass both nodes into
+the LXC first. See [Run it in Docker](02-docker.md#on-proxmox).
 
 ## Nothing happens when I insert a disc
 
@@ -75,18 +75,20 @@ all. If it isn't, see [No drive found](#no-drive-found).
 
 ## Riparr can't read discs
 
-MakeMKV is compiled into the image at build time, and only if you have accepted its
-licence. Set the build arg in `docker-compose.yml`:
+MakeMKV is compiled the first time the container starts, and only once you've accepted
+its licence. In `docker-compose.yml`:
 
 ```
 MAKEMKV_ACCEPT_EULA: "yes"
 ```
 
-then rebuild: `docker compose up -d --build`. The MakeMKV section of the web UI says the
-same thing — nothing is installed from there.
+then `docker compose up -d`. Watch `docker logs -f riparr` for `building MakeMKV` and
+`built MakeMKV`. If it says `FAILED`, it prints the end of the build log, and the whole
+log is in `data/tools/MakeMKV-build.log`. The usual cause is no internet access on that
+first start; restart the container to try again. Nothing is installed from the web UI.
 
 **Rips fail with a key error:** paste a current key on the MakeMKV key setting. It is
-stored in `/data`, so it survives rebuilds. See
+stored in `/data`, so it survives updates. See
 [the MakeMKV key](07-settings-reference.md#makemkv-key).
 
 ## The rip failed
@@ -148,12 +150,13 @@ Then check:
 
 ## Permission denied in the logs
 
-The container writes to `/data`, `/srv/staging` and, if you use it, `/srv/library`. If
-`docker logs riparr` shows permission errors on one of them, check the ownership and
-permissions of the host directory behind that volume or bind mount.
+Riparr runs as `PUID`:`PGID` (1000:1000 unless you set them). It fixes the ownership of
+`/data` and `/srv/staging` itself on every start, so a permission error is almost
+always about `/srv/library`: the host mount of your NAS share has to be writable by that
+user. A share mounted read-only on the host is read-only in the container too.
 
-For straight-to-library mode, the host mount of your NAS share must also be writable —
-a share mounted read-only on the host is read-only in the container too.
+Files Riparr creates are owned by `PUID`:`PGID`. If Plex or Jellyfin can't read them, set
+`PGID` to a group they're in, and `UMASK: "002"` to make new files group-writable.
 
 ## Everything is slow
 
