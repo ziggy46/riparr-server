@@ -8,7 +8,7 @@ bother updating.
 
 ---
 
-## Riparr Server (fork of 0.5.0)
+## 0.5.1 — Riparr Server, first release
 
 **Runs in Docker.** `docker compose up -d --build` builds an image with MakeMKV, dvdbackup
 and libdvdcss compiled in. Pass the drive's `/dev/sr*` and `/dev/sg*` through and open
