@@ -26,8 +26,6 @@ name the URL -- it gets an opaque token for a URL *we* resolved -- because an en
 that fetches whatever a caller asks for is an open proxy sitting inside the LAN.
 """
 import difflib
-import io
-import os
 import re
 import threading
 import time

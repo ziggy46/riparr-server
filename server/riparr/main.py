@@ -97,7 +97,6 @@ def _startup():
     _check_password_reset()
     SY.start_scheduler()
     RIP.start()
-    BK.start()
 
 
 # ─────────────────────────────── auth ───────────────────────────────
@@ -1228,10 +1227,6 @@ class MakeMKVKey(BaseModel):
     key: str
 
 
-class MakeMKVInstall(BaseModel):
-    accept_eula: bool = False
-
-
 @app.get("/api/makemkv")
 def makemkv(user=Depends(require_user)):
     return MK.info()
@@ -1259,36 +1254,13 @@ def makemkv_sites(user=Depends(require_user)):
     return {"sites": sites, "checking": checking}
 
 
-@app.post("/api/makemkv/install")
-def makemkv_install(body: MakeMKVInstall, user=Depends(require_user)):
-    """Refuses without consent. MakeMKV's EULA is between the user and GuinpinSoft (D14)."""
-    r = MK.start_install(body.accept_eula)
-    if not r.get("ok"):
-        raise HTTPException(status_code=400, detail=r["error"])
-    db.set("makemkv_eula_accepted_at", int(time.time()))
-    return r
-
-
-@app.get("/api/makemkv/install")
-def makemkv_install_status(user=Depends(require_user)):
-    return MK.install_status()
-
-
 # ── full-disc backup's DVD half ──
-# MakeMKV backs up Blu-ray and UHD itself. DVDs need dvdbackup and libdvdcss, which the
-# root side installs through its own one-way door (backup.py explains why).
+# MakeMKV backs up Blu-ray and UHD itself. DVDs need dvdbackup and libdvdcss, which are
+# built into the image.
 
 @app.get("/api/backup/tools")
 def backup_tools(user=Depends(require_user)):
     return BK.status()
-
-
-@app.post("/api/backup/tools")
-def backup_tools_install(user=Depends(require_user)):
-    r = BK.request_install()
-    if not r.get("ok"):
-        raise HTTPException(status_code=400, detail=r["error"])
-    return r
 
 
 @app.get("/api/makemkv/renewal")

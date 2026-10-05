@@ -73,39 +73,6 @@ async function offerBetaKey(intoSel, inputSel, opts = {}) {
   };
 }
 
-/* Poll until the box answers again after a restart, then reload. The service is gone
-   for most of this, so every failure here is expected and silent. */
-/* `startAfter` because the two things this waits for are an order of magnitude apart. A
-   whole-box reboot takes about a minute and the box answers for a few seconds after
-   being asked, so polling immediately would reload into a page that is about to be torn
-   down -- hence the original 12s. A service restart is about two seconds, and making
-   somebody stare at a stale page for twelve of them to guard against the first case is
-   how "did that work?" happens. */
-async function waitForBoxBack({ startAfter = 12000 } = {}) {
-  const started = Date.now();
-  const tick = async () => {
-    if (Date.now() - started > 5 * 60 * 1000) {
-      showWaiting("Still not back. Check the box has power, then reload this page.",
-                  { retry: true, spin: false });
-      return;
-    }
-    try {
-      const r = await fetch("/api/setup/state", { cache: "no-store" });
-      if (r.ok) { location.reload(); return; }
-    } catch (e) { /* expected while it is down */ }
-    setTimeout(tick, 3000);
-  };
-  // Never poll instantly: the box is still up for the moment after being asked and
-  // would answer straight away, reloading into a page about to be torn down.
-  setTimeout(tick, startAfter);
-}
-
-function signalBars(pct) {
-  const n = pct == null ? 0 : pct >= 75 ? 4 : pct >= 55 ? 3 : pct >= 35 ? 2 : 1;
-  return `<span class="sig">${[1, 2, 3, 4]
-    .map(i => `<i class="${i <= n ? "lit" : ""}"></i>`).join("")}</span>`;
-}
-
 function capacityPhrase(st) {
   // The server decides the wording, because the meaning depends on D11's rip mode and
   // on how many of each kind of disc actually fit. Re-deriving it here is how the
@@ -692,31 +659,6 @@ async function showRenewalNotice() {
   if (buy) buy.addEventListener("click", close);
   d.addEventListener("cancel", (e) => { e.preventDefault(); close(); });
   d.showModal();
-}
-
-function pollMakeMKV(into = "#mk-progress") {
-  const box = $(into);
-  if (!box) return;
-  const timer = setInterval(async () => {
-    let st;
-    try { st = await api.get("/api/makemkv/install"); } catch (e) { return; }
-    if (st.phase === "done") {
-      clearInterval(timer);
-      box.innerHTML = `<div class="result ok"><b>Installed</b>${esc(st.message)}</div>`;
-      toast("MakeMKV installed", "ok");
-      return;
-    }
-    if (st.phase === "error") {
-      clearInterval(timer);
-      box.innerHTML = `<div class="result bad"><b>${esc(st.message)}</b>
-        ${st.detail ? `<div class="why">${esc(st.detail)}</div>` : ""}</div>`;
-      const btn = $("#mk-install") || $("#mk-upgrade");
-      if (btn) btn.disabled = false;
-      return;
-    }
-    box.innerHTML = `<div class="result busy"><span class="spin"></span>${esc(st.message || "Working…")}
-      <div class="bar" style="margin-top:10px"><i style="width:${(st.progress * 100).toFixed(0)}%"></i></div></div>`;
-  }, 700);
 }
 
 /* ════════════════════ views ════════════════════ */
@@ -1864,12 +1806,9 @@ function destPath(share, folder) {
 function backupToolsLine(t) {
   if (!t) return "";
   if (t.ready) return `<span class="test-out ok">DVD backups are ready.</span>`;
-  if (t.installing) return `<span class="test-out">${esc(t.message || "Installing the DVD backup tools…")}</span>`;
-  const why = t.phase === "error"
-    ? `<span class="test-out bad">${esc(t.message || "The install didn't finish.")}</span>`
-    : `<span class="test-out warn">DVDs need two extra tools, which aren't installed yet.
-         Until they are, DVDs are ripped as film files and Blu-rays are backed up as normal.</span>`;
-  return `${why}${t.can_install ? `<button class="btn" data-backup-tools>Install them</button>` : ""}`;
+  return `<span class="test-out warn">DVD backups need dvdbackup and libdvdcss, and this
+    image is missing them. Rebuild it with <code>docker compose build --no-cache</code>.
+    Until then, DVDs are ripped as film files and Blu-rays are backed up as normal.</span>`;
 }
 
 /* Ripping — what comes off the disc, and how it gets out. */
@@ -2322,7 +2261,8 @@ function sitesBody(sites, checking, keyTopic) {
             <div class="site-why">${esc(x.why)}</div>
             ${!x.up && x.key === "site" ? `
               <div class="site-do">${icon("circle-info")} <span>An installed MakeMKV
-                keeps working — this only stops Riparr <b>installing or updating</b> it.
+                keeps working — this only stops a <b>rebuild</b> of the image from downloading it
+                (the build falls back to mirrors).
                 If you need a key, the forum below is a separate machine and is usually
                 still up.</span></div>` : ""}
             ${!x.up && x.key === "forum" ? `
@@ -2845,71 +2785,11 @@ function renderSidebar(section, sub) {
     }
     return html;
   }).join("") + `<div class="side-foot">
-    <div id="side-makemkv"></div>
     <div class="cap">${
       st ? `${capacityPhrase(st.storage)}<br><span class="muted">${esc(st.hostname)}</span>` : ""
     }</div>
     <div class="side-ver">${st && st.version ? `Riparr ${esc(st.version)}` : ""}</div>
   </div>`;
-  paintMakeMKVStrip();
-}
-
-/* ── a build that follows you between pages ──
-   Compiling MakeMKV takes several minutes on this hardware, and setup deliberately lets
-   you carry on while it runs — the next step is naming shares and needs nothing from it.
-   But the progress lived only on the page that started it, so leaving that page made the
-   build vanish: no way to tell "still building" from "finished" from "failed", while Auto
-   Rip stays unavailable until it is done. That is the one long-running job on the box
-   that the user is expected to walk away from, so it reports from the sidebar instead,
-   on every page.
-
-   Painted from a variable rather than owned by the poller, because the sidebar is rebuilt
-   on every route change and the strip has to survive that. */
-const mkState = { phase: null, message: "", progress: 0 };
-
-function paintMakeMKVStrip() {
-  const box = $("#side-makemkv");
-  if (!box) return;
-  const s = mkState;
-  if (!s.phase || s.phase === "idle") { box.innerHTML = ""; return; }
-  if (s.phase === "done") {
-    box.innerHTML = `<div class="mk-strip ok">MakeMKV ready</div>`;
-    return;
-  }
-  if (s.phase === "error") {
-    box.innerHTML = `<a class="mk-strip bad" href="#/settings/makemkv">MakeMKV build failed</a>`;
-    return;
-  }
-  const pct = Math.max(0, Math.min(100, Math.round((s.progress || 0) * 100)));
-  box.innerHTML = `<a class="mk-strip busy" href="#/settings/makemkv" title="${esc(s.message || "")}">
-    <div class="mk-line"><span>Building MakeMKV</span><b>${pct}%</b></div>
-    <span class="mk-bar"><i style="width:${pct}%"></i></span></a>`;
-}
-
-let mkTimer = null;
-function watchMakeMKV() {
-  if (mkTimer) return;
-  const tick = async () => {
-    let st;
-    try { st = await api.get("/api/makemkv/install"); } catch (e) { return; }
-    const phase = st.phase || "idle";
-    // Nothing has ever been started: stop asking rather than polling for ever.
-    if (phase === "idle" && !mkState.phase) { clearInterval(mkTimer); mkTimer = null; return; }
-    mkState.phase = phase;
-    mkState.message = st.message || "";
-    mkState.progress = st.progress || 0;
-    paintMakeMKVStrip();
-    if (phase === "done" || phase === "error") {
-      clearInterval(mkTimer); mkTimer = null;
-      // A finished build is worth seeing once and is then just clutter beside the
-      // hostname. A failed one stays, because it needs somebody to do something.
-      if (phase === "done") {
-        setTimeout(() => { mkState.phase = null; paintMakeMKVStrip(); }, 25000);
-      }
-    }
-  };
-  tick();
-  mkTimer = setInterval(tick, 3000);
 }
 
 /* ════════════════════ router ════════════════════ */
@@ -3115,29 +2995,6 @@ function wireContent(section, sub) {
       out.textContent = e.message;
     }
     $$("[data-signal-test]").forEach(x => x.disabled = false);
-  });
-
-  // Installing the DVD tools is a root oneshot that takes a few minutes, so the button
-  // hands over to a poll that repaints the one line, bounded at ten minutes.
-  $$("[data-backup-tools]").forEach(b => b.onclick = async () => {
-    b.disabled = true;
-    try {
-      await api.post("/api/backup/tools", {});
-    } catch (e) {
-      toast(e.message, "bad");
-      b.disabled = false;
-      return;
-    }
-    for (let i = 0; i < 200; i++) {
-      await new Promise(r => setTimeout(r, 3000));
-      const box = $("#backup-tools");
-      if (!box) return;                          // navigated away
-      let t;
-      try { t = await api.get("/api/backup/tools"); } catch (e) { continue; }
-      box.innerHTML = backupToolsLine(t);
-      if (t.ready) { toast("DVD backups are ready", "ok"); return; }
-      if (!t.installing && t.phase === "error") return;
-    }
   });
 
   $$("[data-test-notify]").forEach(b => b.onclick = async () => {
@@ -3812,7 +3669,6 @@ async function boot() {
   renderChrome();
   // A build started during setup outlives the wizard, and the queue page is where people
   // land afterwards wondering why Auto Rip is still greyed out.
-  if (state.status.makemkv && !state.status.makemkv.installed) watchMakeMKV();
   if (!location.hash) location.hash = "#/queue";
   route();
   showRenewalNotice();

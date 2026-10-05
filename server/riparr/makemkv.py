@@ -12,17 +12,14 @@ length.
 """
 import calendar
 import datetime
-import hashlib
 import json
 import os
 import re
-import shutil
 import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
-import zlib
 
 from . import platform as P
 
@@ -109,8 +106,9 @@ def sources(pkg):
 
 SITES = [
     {"key": "site", "name": "makemkv.com", "url": HOMEPAGE,
-     "why": "Where MakeMKV itself is downloaded from. While it is down Riparr cannot "
-            "install or update MakeMKV — an installation you already have keeps working."},
+     "why": "Where MakeMKV itself is downloaded from when the image is built. While it "
+            "is down a rebuild falls back to mirrors; the MakeMKV you already have keeps "
+            "working."},
     {"key": "forum", "name": "forum.makemkv.com", "url": "https://forum.makemkv.com/",
      "why": "Where the free beta key is published, and where its author posts when the "
             "site is having trouble. A different host from the main site, so it is "
@@ -259,39 +257,6 @@ EULA_POINTS = [
     "The free beta key expires on a month boundary. A permanent key can be purchased.",
 ]
 
-# Checked before anything is downloaded. makemkv.com has been unreachable, and the
-# tarballs are frequently already on the box -- copied across by hand during validation,
-# or left over from a previous install.
-LOCAL_SOURCES = [
-    "/root/makemkv",
-    "/opt/riparr/makemkv",
-    os.path.expanduser("~/makemkv"),
-]
-
-
-def find_local_source():
-    """A directory already holding every package, with checksums that match."""
-    for d in LOCAL_SOURCES:
-        if not os.path.isdir(d):
-            continue
-        have = []
-        for pkg in MANIFEST["packages"]:
-            f = os.path.join(d, pkg["name"])
-            if os.path.exists(f) and os.path.getsize(f) > 0:
-                have.append((f, pkg["sha256"]))
-        if len(have) == len(MANIFEST["packages"]):
-            return d
-    return None
-
-
-INSTALL_SCRIPT = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-    "tools", "makemkv-install.sh")
-
-_state = {"phase": "idle", "message": "", "detail": "", "progress": 0.0}
-_lock = threading.Lock()
-
-
 def _vtuple(v):
     try:
         return tuple(int(x) for x in str(v).strip().lstrip("v").split("."))
@@ -310,17 +275,11 @@ def upgrade_available(st=None):
     return None
 
 
-def installing():
-    return install_status().get("phase") in ("downloading", "verifying", "building")
-
-
 def info():
     st = P.makemkv_status()
-    local = find_local_source()
     sites, checking = site_status()
     return {
         "status": st,
-        "local_source": local,
         "manifest": {
             "version": MANIFEST.get("version"),
             "verified_against_official": MANIFEST.get("verified_against_official", False),
@@ -333,8 +292,6 @@ def info():
         "eula_points": EULA_POINTS,
         "homepage": HOMEPAGE,
         "key_topic": FORUM_KEY_TOPIC,
-        "install": dict(_state),
-        "installable": False,
         "install_hint": INSTALL_HINT,
         "upgrade": upgrade_available(st),
         "auto_renew": bool(_db_get("auto_renew_beta_key", True)),
@@ -354,16 +311,6 @@ def _db_get(key, default=None):
         return default
 
 
-def _set(**kw):
-    with _lock:
-        _state.update(kw)
-
-
-def install_status():
-    with _lock:
-        return dict(_state)
-
-
 # ── installing ──
 # Upstream builds MakeMKV from the web page, through a root path unit the unprivileged
 # service can poke. Here MakeMKV is part of the deployment: the Docker image builds it,
@@ -374,15 +321,6 @@ INSTALL_HINT = (
     "MakeMKV is built into the Riparr Server image rather than installed from this "
     "page. Set MAKEMKV_ACCEPT_EULA to \"yes\" in docker-compose.yml, then rebuild: "
     "docker compose up -d --build")
-
-
-def can_install():
-    """Whether this process could install MakeMKV itself. It never can, by design."""
-    return False, INSTALL_HINT
-
-
-def start_install(accepted_eula):
-    return {"ok": False, "error": INSTALL_HINT}
 
 
 # ── the current beta key ──
@@ -852,75 +790,3 @@ def _strip_tags(html):
     return re.sub(r"<[^>]+>", " ", html)
 
 
-def _download(url, dest, timeout=300):
-    """One URL to one file, honouring Content-Encoding.
-
-    The encoding check is not pedantry. makemkv.com serves its .tar.gz with
-    `Content-Encoding: gzip` on top of the gzip that is already the file, and the
-    Internet Archive faithfully stores and replays that. urllib does not decode
-    content-encoding, so without this the mirror hands back a *doubly* gzipped tarball
-    -- which is a perfectly valid gzip file, extracts to something that is not what was
-    asked for, and fails the checksum with no hint as to why.
-    """
-    req = urllib.request.Request(url, headers={"User-Agent": "riparr"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        encoding = (r.headers.get("Content-Encoding") or "").lower()
-        with open(dest, "wb") as f:
-            if encoding == "gzip":
-                d = zlib.decompressobj(16 + zlib.MAX_WBITS)
-                while True:
-                    chunk = r.read(1 << 16)
-                    if not chunk:
-                        break
-                    f.write(d.decompress(chunk))
-                f.write(d.flush())
-            else:
-                shutil.copyfileobj(r, f)
-
-
-def fetch_package(pkg, dest, on_try=None):
-    """Download one package from the first source that produces the right bytes.
-
-    Returns (where, None) on success or (None, [(where, why), ...]) on failure. Every
-    source is reported rather than only the last, because "makemkv.com is down and so
-    is the mirror" and "every mirror served something that failed its checksum" are
-    completely different problems and the second one is alarming.
-    """
-    problems = []
-    for src in sources(pkg):
-        where = src.get("where") or src["url"]
-        if on_try:
-            on_try(where)
-        # Two goes each. The Internet Archive in particular will drop a cold request and
-        # serve the same file happily thirty seconds later, and moving on to the next
-        # source over that would quietly retire a mirror that works.
-        err = None
-        for attempt in range(2):
-            try:
-                _download(src["url"], dest)
-                err = None
-                break
-            except Exception as e:
-                err = str(e)[:160]
-                time.sleep(2)
-        if err:
-            problems.append((where, err))
-            continue
-        got = _sha256(dest)
-        if got == pkg["sha256"]:
-            return where, None
-        problems.append((where, "served a file that did not match its checksum "
-                                "(%s…, expected %s…)" % (got[:12], pkg["sha256"][:12])))
-    try:
-        os.unlink(dest)
-    except OSError:
-        pass
-    return None, problems
-
-
-def _sha256(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()

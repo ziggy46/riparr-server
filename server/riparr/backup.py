@@ -93,8 +93,6 @@ def can_backup(family):
         t = dvd_tools()
         if t["ready"]:
             return True, ""
-        if installing():
-            return False, "the DVD backup tools are still installing"
         return False, "the DVD backup tools aren't installed (rebuild the image or run deploy/install-tools.sh)"
     if family in ("bluray", "uhd"):
         if P.MOCK or shutil.which("makemkvcon") or os.path.exists("/usr/local/bin/makemkvcon"):
@@ -110,28 +108,12 @@ INSTALL_HINT = ("The DVD backup tools are built into the Riparr Server image. "
                 "Rebuild the image: docker compose build --no-cache")
 
 
-def installing():
-    return False
-
-
 def status():
     """Everything the settings page shows about DVD backups."""
     t = dvd_tools()
     return {"ready": t["ready"], "dvdbackup": t["dvdbackup"],
-            "libdvdcss": t["libdvdcss"], "installing": False,
-            "phase": None, "message": None if t["ready"] else INSTALL_HINT,
-            "detail": None, "can_install": False}
-
-
-def request_install():
-    if P.MOCK or dvd_tools()["ready"]:
-        return {"ok": True, "message": "Already installed."}
-    return {"ok": False, "error": INSTALL_HINT}
-
-
-def start():
-    """Nothing to start: the tools arrive with the deployment."""
-    return
+            "libdvdcss": t["libdvdcss"],
+            "message": None if t["ready"] else INSTALL_HINT}
 
 
 # ── what a folder holds ──
@@ -358,5 +340,5 @@ def _mock(family, folder, cancel_ev, total_bytes, on_progress, on_first_byte):
 
 
 # Exported for tests that want to watch a mock backup without the pipeline.
-__all__ = ["run", "command", "can_backup", "dvd_tools", "status", "request_install",
+__all__ = ["run", "command", "can_backup", "dvd_tools", "status",
            "tree_files", "tree_size", "BackupFailed", "BackupCancelled", "PROOF"]

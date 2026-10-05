@@ -35,7 +35,7 @@ def check(repo=REPO, timeout=8):
         "Accept": "application/vnd.github+json",
         "User-Agent": "riparr-server/%s" % __version__,
     })
-    base = {"current": __version__, "repo": repo, "can_install": False,
+    base = {"current": __version__, "repo": repo,
             "how": how_to_update()}
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
