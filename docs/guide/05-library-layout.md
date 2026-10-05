@@ -63,23 +63,24 @@ a preview under it shows what the template makes of a sample 4K disc.
 | `{Quality Full}` | `Remux-2160p`, `Remux-1080p`, `DVD`; `BR-DISK` / `DVD-R` for a full-disc backup |
 | `{MediaInfo VideoCodec}` | `HEVC`, `AVC`, `VC1`, `MPEG2` |
 | `{MediaInfo VideoBitDepth}` | `10` |
-| `{MediaInfo VideoDynamicRangeType}` | `DV`, `HDR10` (only when MakeMKV says so) |
 | `{MediaInfo AudioCodec}` | `TrueHD Atmos`, `DTS-HD MA`, `AC3` |
 | `{MediaInfo AudioChannels}` | `7.1` |
 | `{MediaInfo AudioLanguages}` | `[DE+FR]`: audio languages other than English |
-| `{MediaInfo 3D}` | `3D` |
 | `{TmdbId}`, `{ImdbId}` | `603`, `tt0133093`, with a [TMDb key](#film-lookup-tmdb) |
-| `{Edition Tags}`, `{Release Group}`, `{Custom Formats}` | nothing yet |
+
+Some of TRaSH's tokens aren't in the presets. `{Edition Tags}`, `{Custom Formats}` and
+`{Release Group}` have no value for a disc rip, so a template that has them leaves them
+out of the name. `{MediaInfo 3D}` and `{MediaInfo VideoDynamicRangeType}` still work, but
+are blank on most discs: MakeMKV reports 3D and Dolby Vision, and never HDR10.
 
 **Text inside the braces only appears with the value**, Radarr's way: `{[Quality Full]}`
 gives `[Remux-1080p]`, or nothing at all. A group nested inside another keeps its outer
-braces, which is how Plex wants IDs: `{tmdb-{TmdbId}}` gives `{tmdb-603}`. `{{Edition Tags}}`
-gives `{Director's Cut}`.
+braces, which is how Plex wants IDs: `{tmdb-{TmdbId}}` gives `{tmdb-603}`.
 
 The media tokens come from MakeMKV's description of the title being ripped. The IDs come
 from TMDb, when you've given Riparr a key and the match is clear-cut; otherwise they're
 left out of the name rather than guessed. A wrong ID is worse than none, since Plex and
-Jellyfin trust it over the title. Riparr has no source for editions or release groups.
+Jellyfin trust it over the title.
 
 ## Film lookup (TMDb)
 

@@ -78,30 +78,33 @@ check("no edition doesn't leave a dangling dash",
         media={"quality": "Remux-1080p"}), "Alien [Remux-1080p].mkv")
 
 print("TRaSH Guides presets")
-full = N.values_for("The Movie Title", 2010, source="uhd", media=dict(
-    N.SAMPLE_MEDIA, edition="Ultimate Extended Edition", tmdb_id="345691",
-    three_d="3D", custom_formats="CF Name", release_group="RlsGrp"))
+known = N.values_for("Dune", 2021, source="uhd", media=dict(N.SAMPLE_MEDIA, tmdb_id="438631"))
 preset = {p["id"]: p["template"] for p in N.MOVIE_PRESETS}
-tail = "[3D][CF Name][Remux-2160p][TrueHD Atmos 7.1][DV HDR10][HEVC]-RlsGrp.mkv"
-check("Standard, with every field, matches TRaSH's example",
-      N.render(preset["trash"], full),
-      "The Movie Title (2010)/The Movie Title (2010) - {Ultimate Extended Edition} " + tail)
-check("Plex",
-      N.render(preset["trash-plex"], full),
-      "The Movie Title (2010)/The Movie Title (2010) {tmdb-345691} - "
-      "{edition-Ultimate Extended Edition} " + tail)
-check("Emby",
-      N.render(preset["trash-emby"], full),
-      "The Movie Title (2010)/The Movie Title (2010) [tmdb-345691] - "
-      "{edition-Ultimate Extended Edition} " + tail)
-check("Jellyfin",
-      N.render(preset["trash-jellyfin"], full),
-      "The Movie Title (2010)/The Movie Title (2010) [tmdbid-345691] - "
-      "{Ultimate Extended Edition} " + tail)
-plain = "The Movie Title (2010)/The Movie Title (2010) [Remux-2160p][TrueHD Atmos 7.1][DV HDR10][HEVC].mkv"
-for pid in ("trash", "trash-plex", "trash-plex-alt", "trash-emby", "trash-jellyfin"):
-    check("%s, with what a rip actually knows, is clean" % pid,
-          N.preview(preset[pid]), plain)
+media = "[Remux-2160p][TrueHD Atmos 7.1][HEVC].mkv"
+check("Standard", N.render(preset["trash"], known), "Dune (2021)/Dune (2021) " + media)
+check("Plex puts the ID in braces", N.render(preset["trash-plex"], known),
+      "Dune (2021)/Dune (2021) {tmdb-438631} " + media)
+check("Emby in brackets", N.render(preset["trash-emby"], known),
+      "Dune (2021)/Dune (2021) [tmdb-438631] " + media)
+check("Jellyfin as tmdbid", N.render(preset["trash-jellyfin"], known),
+      "Dune (2021)/Dune (2021) [tmdbid-438631] " + media)
+no_id = N.values_for("Dune", 2021, source="uhd",
+                     media={k: v for k, v in N.SAMPLE_MEDIA.items() if k != "tmdb_id"})
+for pid in ("trash-plex", "trash-emby", "trash-jellyfin"):
+    check("%s without an ID is clean" % pid, N.render(preset[pid], no_id),
+          "Dune (2021)/Dune (2021) " + media)
+dropped = ("Edition Tags", "Custom Formats", "Release Group", "MediaInfo 3D",
+           "VideoDynamicRangeType")
+check("the presets leave out what a rip can't fill",
+      [d for d in dropped if any(d in t for t in preset.values())], [])
+check("and so does the documented token list",
+      [d for d in dropped if any(d in t for t in N.TOKENS)], [])
+full_trash = ("{Movie CleanTitle} {(Release Year)} - {{Edition Tags}} {[MediaInfo 3D]}"
+              "{[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}"
+              "{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}"
+              "{[Mediainfo VideoCodec]}{-Release Group}.mkv")
+check("TRaSH's full template, pasted in, still renders cleanly",
+      N.render(full_trash, known), "Dune (2021) [Remux-2160p][TrueHD Atmos 7.1][DV HDR10][HEVC].mkv")
 
 print("media fields from MakeMKV's streams")
 uhd = {"streams": [

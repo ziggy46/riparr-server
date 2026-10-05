@@ -1896,9 +1896,9 @@ settingsPages.library = async (s) => {
         The zeroes in <code>{Season:00}</code> set the padding, and a file holding two
         episodes expands <code>E{Episode:00}</code> to <code>E01-E02</code>, which is what
         Plex and Jellyfin read as a double.
-        <br><br>The media tokens come from what MakeMKV reports about the disc. Riparr
-        doesn't know a film's IMDb or TMDb ID, edition or release group, so those parts
-        are left out of the name for now rather than guessed.</span></div>
+        <br><br>The media tokens come from what MakeMKV reports about the disc, and the IDs
+        from TMDb when there's a key above and a clear-cut match. Anything Riparr doesn't
+        know is left out of the name rather than guessed.</span></div>
       <label class="f"><span>When a disc can't be identified</span>
         <select data-set="on_unknown_disc">
           ${opt("label", "Use the disc label (default)", s.on_unknown_disc)}

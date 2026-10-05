@@ -74,13 +74,15 @@ ALIASES = {
 }
 PADDED = {"season": "season", "episode": "episode"}
 
-# The documented list, for the settings page.
+# The documented list, for the settings page. Radarr tokens a rip can't fill --
+# {Edition Tags}, {Custom Formats}, {Release Group} -- and the unreliable {MediaInfo 3D}
+# and {MediaInfo VideoDynamicRangeType} are still understood, so a pasted TRaSH template
+# renders cleanly, but aren't offered.
 TOKENS = ["{Title}", "{Year}", "{Source}", "{Season:00}", "{Episode:00}",
           "{EpisodeTitle}", "{Movie CleanTitle}", "{Release Year}", "{Quality Full}",
           "{MediaInfo VideoCodec}", "{MediaInfo AudioCodec}",
-          "{MediaInfo AudioChannels}", "{MediaInfo VideoDynamicRangeType}",
-          "{MediaInfo 3D}", "{MediaInfo AudioLanguages}", "{MediaInfo VideoBitDepth}",
-          "{Edition Tags}", "{ImdbId}", "{TmdbId}"]
+          "{MediaInfo AudioChannels}", "{MediaInfo AudioLanguages}",
+          "{MediaInfo VideoBitDepth}", "{ImdbId}", "{TmdbId}"]
 
 
 def _norm(text):
@@ -315,38 +317,35 @@ def media_info(title, family=None, backup=False):
 
 # ─────────────────────────────── presets ───────────────────────────────
 #
-# TRaSH Guides' recommended Radarr naming, as one Riparr template each (folder/file),
-# copied verbatim, TMDb variants:
+# Based on TRaSH Guides' recommended Radarr naming (TMDb variants), as one Riparr
+# template each, folder/file:
 # https://trash-guides.info/Radarr/Radarr-recommended-naming-scheme/
 #
-# Riparr has no source for IMDb/TMDb IDs or edition names yet, so those parts render as
-# nothing for now -- a wrong ID would be worse than none, since Plex and Jellyfin trust
-# it over the title. They're kept in so the presets match TRaSH's text exactly.
+# Trimmed to what a disc rip can actually fill. TRaSH's {Edition Tags}, {Custom
+# Formats}, {Release Group}, {MediaInfo 3D} and {MediaInfo VideoDynamicRangeType} are
+# left out: the first three have no source for a rip at all, and the last two are blank
+# or incomplete on most discs. They still render cleanly if pasted in.
 
-_MEDIA = ("{[MediaInfo 3D]}{[Custom Formats]}{[Quality Full]}{[Mediainfo AudioCodec}"
-          "{ Mediainfo AudioChannels]}{[MediaInfo VideoDynamicRangeType]}"
-          "{[Mediainfo VideoCodec]}{-Release Group}")
+_MEDIA = ("{[Quality Full]}{[Mediainfo AudioCodec}{ Mediainfo AudioChannels]}"
+          "{[Mediainfo VideoCodec]}")
 _FOLDER = "{Movie CleanTitle} ({Release Year})"
 
 
-def _trash(ids, edition):
-    return "%s/{Movie CleanTitle} {(Release Year)}%s - %s %s.mkv" % (
-        _FOLDER, ids, edition, _MEDIA)
+def _trash(ids):
+    return "%s/{Movie CleanTitle} {(Release Year)}%s %s.mkv" % (_FOLDER, ids, _MEDIA)
 
 
 MOVIE_PRESETS = [
     {"id": "riparr", "label": "Riparr default (simple)",
      "template": "{Title} ({Year})/{Title} ({Year}).mkv"},
     {"id": "trash", "label": "TRaSH Guides: Standard",
-     "template": _trash("", "{{Edition Tags}}")},
+     "template": _trash("")},
     {"id": "trash-plex", "label": "TRaSH Guides: Plex",
-     "template": _trash(" {tmdb-{TmdbId}}", "{edition-{Edition Tags}}")},
-    {"id": "trash-plex-alt", "label": "TRaSH Guides: Plex (edition alternative)",
-     "template": _trash(" {tmdb-{TmdbId}}", "{{Edition Tags}}")},
+     "template": _trash(" {tmdb-{TmdbId}}")},
     {"id": "trash-emby", "label": "TRaSH Guides: Emby",
-     "template": _trash(" [tmdb-{TmdbId}]", "{edition-{Edition Tags}}")},
+     "template": _trash(" [tmdb-{TmdbId}]")},
     {"id": "trash-jellyfin", "label": "TRaSH Guides: Jellyfin",
-     "template": _trash(" [tmdbid-{TmdbId}]", "{{Edition Tags}}")},
+     "template": _trash(" [tmdbid-{TmdbId}]")},
 ]
 
 TV_PRESETS = [
@@ -359,7 +358,7 @@ TV_PRESETS = [
 # shows every field filled in.
 SAMPLE_MEDIA = {"video_codec": "HEVC", "bit_depth": "10", "quality": "Remux-2160p",
                 "dynamic_range": "DV HDR10", "three_d": "", "audio_codec": "TrueHD Atmos",
-                "audio_channels": "7.1", "audio_languages": ""}
+                "audio_channels": "7.1", "audio_languages": "", "tmdb_id": "345691"}
 
 
 def preview(template, kind="movie"):
