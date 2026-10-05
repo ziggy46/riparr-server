@@ -40,6 +40,7 @@ import time
 from . import db, tv, notify, platform as P, shares as SH, system as SY
 from . import backup as BK
 from . import naming
+from . import tmdb as TM
 
 log = SY.component("Rip")
 
@@ -403,7 +404,7 @@ def cancel(job_id):
 
 def answer(job_id, title_index=None, name=None, skip=False, season=None,
            first_episode=None, series_id=None, include=None, episode_titles=None,
-           order=None):
+           order=None, tmdb_id=None):
     """Resolve a `needs_input` job -- the other half of `on_unknown_disc: ask`.
 
     The answer is written to the disc record as well as the job, because the whole
@@ -424,9 +425,13 @@ def answer(job_id, title_index=None, name=None, skip=False, season=None,
         P.eject()
         return True, "Skipped, and the disc has been ejected."
 
-    fields = {"state": "queued", "question": None, "phase": "Waiting to start"}
+    fields = {"state": "queued", "question": None, "phase": "Waiting to start",
+              "candidates": None}
     if name:
         fields["title"] = name
+    # A film picked from TMDb's suggestions. A typed name replaces any earlier pick, so
+    # the rip doesn't keep IDs for a film it isn't.
+    fields["tmdb_id"] = int(tmdb_id) if tmdb_id else None
     if title_index is not None:
         fields["chosen_title"] = int(title_index)
 
@@ -452,11 +457,15 @@ def answer(job_id, title_index=None, name=None, skip=False, season=None,
     db.update_job(job_id, **fields)
     if job.get("fingerprint"):
         remember.update({k: v for k, v in (("title", name),
-                                           ("title_index", title_index))
+                                           ("title_index", title_index),
+                                           ("tmdb_id", int(tmdb_id) if tmdb_id else None))
                          if v is not None})
-        if remember:
-            db.record_disc(job["fingerprint"],
-                           **{k: v for k, v in remember.items() if v is not None})
+        fields_to_keep = {k: v for k, v in remember.items() if v is not None}
+        # Typing a name is choosing "not the TMDb film from before" as well.
+        if name and not tmdb_id:
+            fields_to_keep["tmdb_id"] = None
+        if fields_to_keep:
+            db.record_disc(job["fingerprint"], **fields_to_keep)
     _wake.set()
     return True, "Thanks — starting the rip."
 
@@ -1290,7 +1299,12 @@ def _media_for(job, index, backup=False):
         except ValueError:
             titles = []
     t = next((x for x in titles if index is not None and x.get("index") == int(index)), None)
-    return naming.media_info(t, job.get("disc_family"), backup=backup) if t else {}
+    media = naming.media_info(t, job.get("disc_family"), backup=backup) if t else {}
+    if job.get("tmdb_id"):
+        media["tmdb_id"] = str(job["tmdb_id"])
+    if job.get("imdb_id"):
+        media["imdb_id"] = job["imdb_id"]
+    return media
 
 
 # Only a *bracketed* year counts, and the last one wins.
@@ -1588,13 +1602,33 @@ def _identify(job, s):
             name = pretty_label(d.get("label")) or d.get("label")
             ask_name = False
 
+    # TMDb, when there's a key: the film's real title, year and IDs. A film somebody
+    # chose (or chose before, for this disc) is looked up by ID; otherwise by name, and
+    # only a confident match is used. When TMDb has candidates but no confident match,
+    # `tmdb_unsure` decides between asking and carrying on with the name we had.
+    film, candidates, tmdb_question = None, [], None
+    chosen_film = job.get("tmdb_id") or remembered.get("tmdb_id")
+    if chosen_film:
+        film = TM.details(chosen_film)
+    elif name and TM.configured():
+        found = TM.identify(name)
+        film, candidates = found["match"], found["candidates"]
+        if not film and candidates and s.get("tmdb_unsure", "label") == "ask":
+            ask_name = True
+            tmdb_question = ("TMDb isn't sure which film \"%s\" is. Pick it, or type "
+                             "the name." % (found["query"] or name))
+    if film:
+        name = TM.display_name(film)
+        ask_name = False
+
     if ask_name or ask_title:
-        question = _identify_question(ask_name, titles, s["min_title_seconds"])
+        question = (tmdb_question if tmdb_question and not ask_title else
+                    _identify_question(ask_name, titles, s["min_title_seconds"]))
         db.stage_end(job["id"])
         db.update_job(job["id"], state="needs_input", question=question,
                       phase="Waiting for you",
                       titles=titles, title=name or None,
-                      chosen_title=chosen["index"],
+                      chosen_title=chosen["index"], candidates=candidates,
                       disc_label=d.get("label") or job.get("disc_label"))
         log.info("Job %d needs a human: %s", job["id"], question)
         notify.send("needs_you", title=name or d.get("label") or "A disc",
@@ -1611,6 +1645,8 @@ def _identify(job, s):
     db.stage_end(job["id"])
     db.update_job(job["id"], title=title_name, chosen_title=chosen["index"], output=MKV,
                   year=year,
+                  tmdb_id=film["id"] if film else None,
+                  imdb_id=(film or {}).get("imdb_id") or None,
                   titles=titles, bytes_total=chosen.get("bytes") or 0,
                   warning=warning, disc_family=disc_family(d),
                   # The whole disc, not the title. `bytes_total` is the film; this is

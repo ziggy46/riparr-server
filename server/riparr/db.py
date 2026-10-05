@@ -116,6 +116,12 @@ ADDED_COLUMNS = {
         # used to live only in memory on the worker's copy of the job, so every staged
         # film named "Spirited Away (2001)" was filed as plain "Spirited Away".
         ("year", "INTEGER"),
+        # What TMDb says the film is, when it was sure or somebody chose. The IDs go in
+        # file names (the TRaSH presets), and `candidates` is what TMDb offered when it
+        # wasn't sure, for the "which film is this?" question. See tmdb.py.
+        ("tmdb_id", "INTEGER"),
+        ("imdb_id", "TEXT"),
+        ("candidates", "TEXT"),
     ],
     "discs": [
         ("title_index", "INTEGER"),    # the remembered title choice (R5: fix once, ever)
@@ -133,6 +139,7 @@ ADDED_COLUMNS = {
         ("season", "INTEGER"),
         ("first_episode", "INTEGER"),
         ("series_name", "TEXT"),
+        ("tmdb_id", "INTEGER"),        # a film identified once stays identified
     ],
 }
 
@@ -247,6 +254,11 @@ DEFAULTS = {
     # Which networks the share scan sweeps, e.g. "192.168.1.0/24". Empty means this
     # machine's own /24 -- which inside Docker's bridge network is Docker's, not the LAN.
     "scan_subnets": "",
+    # TMDb: your own key (tmdb.py says why there's no shared one), and what to do when
+    # it isn't sure which film a disc is -- "label" keeps the name Riparr already had and
+    # rips without IDs, "ask" puts TMDb's suggestions in front of you first.
+    "tmdb_token": "",
+    "tmdb_unsure": "label",
     "webhook_url": "",
     "watch_folder": "",
     # Notifications. The box's whole promise is "walk away", so these are the only way
@@ -666,7 +678,7 @@ INTERRUPTIBLE = ["identifying", "ripping", "transferring", "verifying"]
 # Columns held as JSON text. Encoding them in one place rather than at each call site
 # is what stopped `episode_plan` from being written as a Python repr the first time a
 # caller forgot -- which SQLite accepts happily and json.loads does not.
-_JSON_COLUMNS = ("titles", "episode_plan")
+_JSON_COLUMNS = ("titles", "episode_plan", "candidates")
 
 
 def _encode_json(fields):

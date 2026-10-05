@@ -6,9 +6,10 @@ and "I know what you just put in" -- the same trick Plex uses, and it costs noth
 
 Three decisions worth keeping:
 
-**Wikipedia, not TMDB.** TMDB has better artwork and wide backdrops, but it needs an API
-key, which means every owner of this box would have to register for one before a
-decorative background worked. Wikipedia's search API needs no key, is a single
+**TMDb when there's a key, Wikipedia when there isn't.** TMDb has better artwork, but it
+needs an API key, which means nobody gets a poster until they've registered for one.
+With a key (see tmdb.py) its poster is used, under the same no-guessing rule; without
+one, or when TMDb isn't sure, Wikipedia is asked as before. Wikipedia's search API needs no key, is a single
 well-known endpoint, and hands back a canonical article title -- which is what makes the
 confidence check below possible at all. `pilicense=any` is required: film posters are
 non-free, so the default free-only filter returns nothing.
@@ -33,13 +34,13 @@ import urllib.parse
 import urllib.request
 
 SEARCH = "https://en.wikipedia.org/w/api.php"
-UA = "riparr/0.1 (+https://github.com/jackharvest/riparr) python-urllib"
+UA = "riparr-server (+https://github.com/ziggy46/riparr-server) python-urllib"
 
 # Below this, show nothing. Deliberately strict -- see the module docstring.
 THRESHOLD = 0.95
 
 # Only these hosts may ever be fetched by the image proxy.
-ALLOWED_HOSTS = {"upload.wikimedia.org"}
+ALLOWED_HOSTS = {"upload.wikimedia.org", "image.tmdb.org"}
 
 # Volume labels that identify nothing. Searching for these returns confident nonsense.
 GENERIC = {
@@ -151,6 +152,20 @@ def look_up(label):
     name = normalize(label)
     if not name or name.replace(" ", "_") in GENERIC or name in GENERIC or len(name) < 3:
         return None
+    from . import tmdb
+    if tmdb.configured():
+        found = tmdb.identify(label)
+        film = found["match"]
+        if film and film.get("poster_path"):
+            return {"title": tmdb.display_name(film), "confidence": 1.0,
+                    "token": _remember(tmdb.poster_url(film["poster_path"])),
+                    "source": "tmdb", "tmdb_id": film["id"]}
+        # TMDb knows several films by exactly this name and wouldn't choose. Wikipedia
+        # can't know better -- it would just pick one of them -- so show nothing.
+        want = tmdb._key(found["query"])
+        if not film and sum(1 for c in found["candidates"]
+                            if tmdb._key(c["title"]) == want) > 1:
+            return None
     if name in _lookup_cache:
         return _lookup_cache[name]
 
