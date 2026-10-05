@@ -173,6 +173,245 @@ $("#login-form").onsubmit = async (e) => {
   } catch (err) { $("#gate-err").textContent = err.message; }
 };
 
+/* ════════════════════ finding a share ════════════════════
+   One flow, used by the setup wizard and by Settings → Library → Add a share: scan the
+   network (or type a server), pick it, list its shares -- with credentials if it wants
+   them -- pick one, and prove it with a test write before saving. Everything is looked
+   up inside `root`, so two copies can't trip over each other's elements.
+
+   opts.onSaved(share)  called once a share has been tested and saved
+   opts.askName         offer the optional "Name" field (Settings, where there may be
+                        several shares to tell apart)
+   opts.onCancel        show a Cancel button that calls this */
+function shareFinder(root, opts = {}) {
+  const q = (sel) => root.querySelector(sel);
+  const qa = (sel) => [...root.querySelectorAll(sel)];
+  const data = { host: "", user: "", pass: "", share: "", path: "", name: "" };
+
+  root.innerHTML = `
+    <div class="section"><h2>Network shares<span class="grow"></span>
+      <button class="btn sf-scan">Scan again</button></h2>
+      <div class="body sf-hosts"><div class="result busy"><span class="spin"></span>Looking for shares…</div></div>
+      <div class="manual-row">
+        <input class="sf-subnet" placeholder="network to scan — e.g. 192.168.1.0/24">
+        <button class="btn sf-subnet-go">Scan this network</button>
+      </div>
+      <p class="help" style="margin-bottom:12px">Riparr scans its own network unless you
+        say otherwise. In Docker that is usually Docker's internal network rather than
+        your LAN, so put your LAN here. It's remembered once it finds something.</p>
+      <div class="manual-row">
+        <input class="sf-manual" placeholder="server name or IP — e.g. 192.168.1.20">
+        <button class="btn sf-manual-go">Use this server</button>
+      </div>
+      <p class="help">Discovery only finds servers that advertise themselves. Type one
+        in if yours doesn't, or if it's on another subnet.</p>
+      ${opts.onCancel ? `<div class="btn-row"><button class="btn sf-cancel">Cancel</button></div>` : ""}
+    </div>
+    <div class="sf-detail"></div>`;
+
+  const enter = (input, button) => input.onkeydown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); button.click(); }
+  };
+  q(".sf-scan").onclick = () => scan();
+  q(".sf-subnet-go").onclick = () => scan(q(".sf-subnet").value.trim());
+  enter(q(".sf-subnet"), q(".sf-subnet-go"));
+  q(".sf-manual-go").onclick = () => pickHost(q(".sf-manual").value.trim());
+  enter(q(".sf-manual"), q(".sf-manual-go"));
+  if (opts.onCancel) q(".sf-cancel").onclick = opts.onCancel;
+
+  async function scan(subnets = "") {
+    const box = q(".sf-hosts");
+    box.innerHTML = `<div class="result busy"><span class="spin"></span>Looking for shares${
+      subnets ? ` on ${esc(subnets)}` : ""}…</div>`;
+    let r;
+    try { r = await api.post("/api/shares/discover", { subnets }); }
+    catch (e) {
+      box.innerHTML = `<div class="result bad">${esc(e.message)}</div>`;
+      return;
+    }
+    const hosts = r.hosts || [];
+    const field = q(".sf-subnet");
+    if (field && !field.value) field.value = r.subnets || "";
+    if (!hosts.length) {
+      box.innerHTML = `<div class="result">Nothing found on ${esc(r.subnets || "this network")}.
+        If that isn't your LAN, put your LAN below and scan again — or type the server
+        name. Finding nothing does not mean there is nothing there.</div>`;
+      return;
+    }
+    box.innerHTML = hosts.map(h => `
+      <div class="rowitem" data-host="${esc(h.host)}">
+        <div class="grow">
+          <div class="t">${esc(h.host)}</div>
+          <div class="s">${esc(h.address)} · found by ${esc(h.via === "mdns" ? "Bonjour" : "network scan")}</div>
+        </div>
+        <span class="badge">SMB</span>
+      </div>`).join("");
+    qa(".sf-hosts .rowitem").forEach(n => n.onclick = () => {
+      qa(".sf-hosts .rowitem").forEach(x => x.classList.remove("on"));
+      n.classList.add("on");
+      pickHost(n.dataset.host);
+    });
+  }
+
+  async function pickHost(host, creds) {
+    if (!host) return;
+    if (host !== data.host) { data.share = ""; data.path = ""; }
+    data.host = host;
+    // Carry credentials across a re-browse. The share list itself is behind
+    // authentication on most servers, so asking anonymously and only then offering a
+    // username means the list is empty exactly when it matters.
+    if (creds) { data.user = creds.user; data.pass = creds.pass; }
+    const user = data.user, pass = data.pass;
+
+    const d = q(".sf-detail");
+    // Same shell as the loaded state below -- header, .card, .body -- so the panel
+    // doesn't change component type mid-flight, exactly where the eye is waiting.
+    d.innerHTML = `<div class="card">
+      <header><h3>${esc(host)}</h3></header>
+      <div class="body">
+        <div class="result busy"><span class="spin"></span>Asking ${esc(host)} what it offers…</div>
+      </div></div>`;
+    d.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    let res;
+    try {
+      res = await api.post("/api/shares/browse", { host, username: user, password: pass });
+    } catch (e) { res = { ok: false, error: e.message, shares: [] }; }
+
+    const needsAuth = !res.ok && /LOGON_FAILURE|ACCESS_DENIED|NT_STATUS_ACCESS/i.test(res.error || "");
+    const as = user ? `as ${esc(user)}` : "as a guest";
+    d.innerHTML = `<div class="card">
+      <header><h3>${esc(host)}</h3></header>
+      <div class="body">
+        ${res.ok ? "" : `<div class="result ${needsAuth ? "" : "bad"}"><b>${
+            needsAuth ? "This server wants a username and password"
+                      : "Couldn't list shares"}</b>
+           <div class="why">${esc(res.error)}</div></div>`}
+        <label class="f"><span>Username</span>
+          <input class="sf-user" value="${esc(user)}" autocomplete="off"
+                 placeholder="DOMAIN\\user or user — empty for a guest share"></label>
+        <label class="f"><span>Password</span>
+          <input class="sf-pass" type="password" value="${esc(pass)}"
+                 autocomplete="new-password"></label>
+        <div class="btn-row">
+          <button class="btn sf-recheck">List shares with these credentials</button>
+        </div>
+        ${res.ok ? `<div class="result sf-listed ${res.shares.length ? "ok" : ""}">${
+            res.shares.length
+              ? `<b>Found ${res.shares.length} share${res.shares.length === 1 ? "" : "s"}
+                   on ${esc(host)} ${as}</b>
+                 Pick the one rips should go to:
+                 <div class="share-picks">${res.shares.map(x =>
+                   `<button class="btn tiny" data-pick-share="${esc(x)}">${esc(x)}</button>`
+                 ).join("")}</div>`
+              : `<b>Connected to ${esc(host)} ${as}</b>
+                 It didn't list any shares, so type the share name below.`}</div>` : ""}
+        <label class="f"><span>Share</span>
+          <input class="sf-share" placeholder="Media">
+          <span class="help">${res.shares.length
+            ? "Pick one above, or type a share that wasn't listed."
+            : "Type the share name — it doesn't have to be one we could list."}
+            Just the top-level name, one word. Anything deeper goes in the next box.</span>
+        </label>
+        <label class="f"><span>Folder inside the share</span>
+          <input class="sf-path" placeholder="e.g. Rips or Movies/4K">
+          <span class="help">Optional, and it may be several levels deep. Riparr creates
+            it if it isn't there. Leave empty to use the top level.</span></label>
+        ${opts.askName ? `<label class="f"><span>Name</span>
+          <input class="sf-name" placeholder="optional — shown in the list">
+          <span class="help">Only for your own benefit when you have more than
+            one.</span></label>` : ""}
+        <div class="dest-path sf-preview"></div>
+        <div class="btn-row">
+          <button class="btn primary sf-test">Test and save</button>
+        </div>
+        <div class="sf-testres"></div>
+      </div></div>`;
+
+    // Re-ask the server, this time as somebody. Keeps whatever share and folder were
+    // already typed, so entering a password does not throw the rest away.
+    const keep = () => {
+      data.share = q(".sf-share").value.trim();
+      data.path = q(".sf-path").value.trim();
+      if (q(".sf-name")) data.name = q(".sf-name").value.trim();
+    };
+    q(".sf-recheck").onclick = () => {
+      q(".sf-recheck").disabled = true;
+      q(".sf-recheck").textContent = "Listing…";
+      keep();
+      pickHost(host, { user: q(".sf-user").value.trim(), pass: q(".sf-pass").value });
+    };
+    q(".sf-share").value = data.share;
+    q(".sf-path").value = data.path;
+    if (q(".sf-name")) q(".sf-name").value = data.name;
+
+    // What the boxes add up to. The commonest mistake is a whole path pasted into
+    // Share, and this is where that becomes obvious.
+    const preview = () => {
+      const parts = (q(".sf-share").value + "/" + q(".sf-path").value)
+        .replace(/\\/g, "/").split("/").map(x => x.trim()).filter(Boolean);
+      q(".sf-preview").textContent = `//${host}/${parts.join("/") || "share"}`;
+    };
+    // The listed shares as buttons, because a <datalist> only shows itself to somebody
+    // who already knows to click into the field.
+    const markPicked = () => qa("[data-pick-share]").forEach(b =>
+      b.classList.toggle("primary", b.dataset.pickShare === q(".sf-share").value.trim()));
+    qa("[data-pick-share]").forEach(b => b.onclick = () => {
+      q(".sf-share").value = b.dataset.pickShare;
+      markPicked(); preview();
+      q(".sf-path").focus();
+    });
+    q(".sf-share").addEventListener("input", () => { markPicked(); preview(); });
+    q(".sf-path").addEventListener("input", preview);
+    markPicked(); preview();
+    qa(".sf-detail input").forEach(i => {
+      i.onkeydown = (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        (i.classList.contains("sf-user") || i.classList.contains("sf-pass")
+          ? q(".sf-recheck") : q(".sf-test")).click();
+      };
+    });
+
+    q(".sf-test").onclick = async () => {
+      keep();
+      const body = { host, share: data.share, path: data.path,
+                     username: q(".sf-user").value.trim(), password: q(".sf-pass").value };
+      const out = q(".sf-testres");
+      if (!body.share) {
+        out.innerHTML = `<div class="result bad"><b>Which share?</b>
+           Enter the share name — for \\\\server\\Media\\Rips that is
+           <code>Media</code>, with <code>Rips</code> as the folder.</div>`;
+        return;
+      }
+      const btn = q(".sf-test");
+      btn.disabled = true;
+      out.innerHTML = `<div class="result busy"><span class="spin"></span>Writing a test
+        file and reading it back…</div>`;
+      try {
+        const r = await api.post("/api/shares/test", body);
+        if (!r.ok) {
+          out.innerHTML = `<div class="result bad"><b>That didn't work</b>
+            Failed at the ${esc(r.stage)} step.<div class="why">${esc(r.error)}</div></div>`;
+          btn.disabled = false;
+          return;
+        }
+        const saved = await api.post("/api/shares",
+          { ...body, name: data.name || `${host}/${body.share}` });
+        out.innerHTML = `<div class="result ok"><b>The share works, and it's saved</b>
+          Wrote a file to ${esc(r.target)}, read it back and deleted it.</div>`;
+        toast("Share saved", "ok");
+        if (opts.onSaved) opts.onSaved(saved);
+      } catch (e) {
+        out.innerHTML = `<div class="result bad"><b>That didn't work</b>
+          <div class="why">${esc(e.message)}</div></div>`;
+        btn.disabled = false;
+      }
+    };
+  }
+
+  scan();
+}
+
 /* ════════════════════ first run ════════════════════ */
 const wizard = {
   step: 0,
@@ -332,23 +571,7 @@ const wizard = {
       <p class="muted">Riparr looks for network shares on your LAN, then writes a real
         test file and reads it back. A wrong path found now is a wrong path you never
         discover at 3am on your first rip.</p>
-      <div class="section"><h2>Network shares<span class="grow"></span><button class="btn" id="w-scan">Scan again</button></h2>
-        <div class="body" id="w-hosts"><div class="result busy"><span class="spin"></span>Looking for shares…</div></div>
-        <div class="manual-row">
-          <input id="w-subnet" placeholder="network to scan — e.g. 192.168.1.0/24">
-          <button class="btn" id="w-subnet-go">Scan this network</button>
-        </div>
-        <p class="help" style="margin-bottom:12px">Riparr scans its own network unless you
-          say otherwise. In Docker that is usually Docker's internal network rather than
-          your LAN, so put your LAN here. It's remembered once it finds something.</p>
-        <div class="manual-row">
-          <input id="w-manual" placeholder="server name or IP — e.g. mothership.example.lan">
-          <button class="btn" id="w-manual-go">Use this server</button>
-        </div>
-        <p class="help">Discovery only finds servers that advertise themselves. Type one
-          in if yours doesn't, or if it's on another subnet.</p>
-      </div>
-      <div id="w-detail"></div>
+      <div id="w-finder"></div>
       <div class="wz-actions">
         <div class="grow"></div>
         <button class="btn" id="w-skip">Set this up later</button>
@@ -356,187 +579,7 @@ const wizard = {
       </div>`;
     $("#w-skip").onclick = () => this.next();
     $("#w-go").onclick = () => this.next();
-    $("#w-scan").onclick = () => this.scanHosts();
-    $("#w-subnet-go").onclick = () => this.scanHosts($("#w-subnet").value.trim());
-    $("#w-subnet").onkeydown = (e) => {
-      if (e.key === "Enter") { e.preventDefault(); $("#w-subnet-go").click(); }
-    };
-    $("#w-manual-go").onclick = () => this.pickHost($("#w-manual").value.trim());
-    $("#w-manual").onkeydown = (e) => {
-      if (e.key === "Enter") { e.preventDefault(); $("#w-manual-go").click(); }
-    };
-    this.scanHosts();
-  },
-
-  async scanHosts(subnets = "") {
-    const box = $("#w-hosts");
-    box.innerHTML = `<div class="result busy"><span class="spin"></span>Looking for shares${
-      subnets ? ` on ${esc(subnets)}` : ""}…</div>`;
-    let r;
-    try { r = await api.post("/api/shares/discover", { subnets }); }
-    catch (e) {
-      box.innerHTML = `<div class="result bad">${esc(e.message)}</div>`;
-      return;
-    }
-    const hosts = r.hosts || [];
-    const field = $("#w-subnet");
-    if (field && !field.value) field.value = r.subnets || "";
-    if (!hosts.length) {
-      box.innerHTML = `<div class="result">Nothing found on ${esc(r.subnets || "this network")}.
-        If that isn't your LAN, put your LAN below and scan again — or type the server
-        name. Finding nothing does not mean there is nothing there.</div>`;
-      return;
-    }
-    box.innerHTML = hosts.map(h => `
-      <div class="rowitem" data-host="${esc(h.host)}">
-        <div class="grow">
-          <div class="t">${esc(h.host)}</div>
-          <div class="s">${esc(h.address)} · found by ${esc(h.via === "mdns" ? "Bonjour" : "network scan")}</div>
-        </div>
-        <span class="badge">SMB</span>
-      </div>`).join("");
-    $$("#w-hosts .rowitem").forEach(n => n.onclick = () => {
-      $$("#w-hosts .rowitem").forEach(x => x.classList.remove("on"));
-      n.classList.add("on");
-      this.pickHost(n.dataset.host);
-    });
-  },
-
-  async pickHost(host, creds) {
-    if (!host) return;
-    this.data.host = host;
-    // Carry credentials across a re-browse. The share list itself is behind
-    // authentication on most servers, so asking anonymously and only then offering a
-    // username means the list is empty exactly when it matters.
-    const user = creds ? creds.user : (this.data.suser || "");
-    const pass = creds ? creds.pass : (this.data.spass || "");
-    this.data.suser = user;
-    this.data.spass = pass;
-
-    const d = $("#w-detail");
-    // Same shell as the loaded state below -- header, .card, .body. Rendering a
-    // .section here and a .card a moment later made the panel change component
-    // type mid-flight, which reads as a jump exactly where the eye is waiting.
-    d.innerHTML = `<div class="card">
-      <header><h3>${esc(host)}</h3></header>
-      <div class="body">
-        <div class="result busy"><span class="spin"></span>Asking ${esc(host)} what it offers…</div>
-      </div></div>`;
-    let res;
-    try {
-      res = await api.post("/api/shares/browse",
-                           { host, username: user, password: pass });
-    } catch (e) { res = { ok: false, error: e.message, shares: [] }; }
-
-    const needsAuth = !res.ok && /LOGON_FAILURE|ACCESS_DENIED|NT_STATUS_ACCESS/i.test(res.error || "");
-    d.innerHTML = `<div class="card">
-      <header><h3>${esc(host)}</h3></header>
-      <div class="body">
-        ${res.ok ? "" : `<div class="result ${needsAuth ? "" : "bad"}"><b>${
-            needsAuth ? "This server wants a username and password"
-                      : "Couldn't list shares"}</b>
-           <div class="why">${esc(res.error)}</div></div>`}
-        <label class="f"><span>Username</span>
-          <input id="w-suser" value="${esc(user)}" autocomplete="off"
-                 placeholder="DOMAIN\\user or user"></label>
-        <label class="f"><span>Password</span>
-          <input id="w-spass" type="password" value="${esc(pass)}"
-                 autocomplete="new-password"></label>
-        <div class="btn-row">
-          <button class="btn" id="w-recheck">List shares with these credentials</button>
-        </div>
-        ${res.ok ? `<div class="result ${res.shares.length ? "ok" : ""}" id="w-listed">${
-            res.shares.length
-              ? `<b>Found ${res.shares.length} share${res.shares.length === 1 ? "" : "s"}
-                   on ${esc(host)} ${user ? `as ${esc(user)}` : "as a guest"}</b>
-                 Pick the one rips should go to:
-                 <div class="share-picks">${res.shares.map(s =>
-                   `<button class="btn tiny" data-pick-share="${esc(s)}">${esc(s)}</button>`
-                 ).join("")}</div>`
-              : `<b>Connected to ${esc(host)} ${user ? `as ${esc(user)}` : "as a guest"}</b>
-                 It didn't list any shares, so type the share name below.`}</div>` : ""}
-        <label class="f"><span>Share</span>
-          <input id="w-share" list="w-sharelist" placeholder="OTHER">
-          <datalist id="w-sharelist">${
-            res.shares.map(s => `<option value="${esc(s)}"></option>`).join("")}</datalist>
-          <span class="help">${res.shares.length
-            ? "Pick one above, or type a share that wasn't listed."
-            : "Type the share name — it doesn't have to be one we could list."}</span>
-        </label>
-        <label class="f"><span>Folder inside the share</span>
-          <input id="w-path" placeholder="RiparrDumps">
-          <span class="help">Leave empty to use the top level.</span></label>
-        <div class="btn-row">
-          <button class="btn primary" id="w-test">Test write</button>
-        </div>
-        <div id="w-testres"></div>
-      </div></div>`;
-
-    // Re-ask the server, this time as somebody. Keeps whatever share and folder were
-    // already typed, so entering a password does not throw the rest away.
-    $("#w-recheck").onclick = () => {
-      $("#w-recheck").disabled = true;
-      $("#w-recheck").textContent = "Listing…";
-      this.data.share = $("#w-share").value.trim();
-      this.data.path = $("#w-path").value.trim();
-      this.pickHost(host, { user: $("#w-suser").value.trim(),
-                            pass: $("#w-spass").value });
-    };
-    if (this.data.share) $("#w-share").value = this.data.share;
-    if (this.data.path) $("#w-path").value = this.data.path;
-
-    // The listed shares as buttons, because a <datalist> only shows itself to somebody
-    // who already knows to click into the field -- the list arrived and nothing on
-    // screen changed, so the button looked like it did nothing.
-    const markPicked = () => $$("[data-pick-share]").forEach(b =>
-      b.classList.toggle("primary", b.dataset.pickShare === $("#w-share").value.trim()));
-    $$("[data-pick-share]").forEach(b => b.onclick = () => {
-      $("#w-share").value = b.dataset.pickShare;
-      markPicked();
-      $("#w-path").focus();
-    });
-    $("#w-share").addEventListener("input", markPicked);
-    markPicked();
-    $$("#w-detail input").forEach(i => {
-      i.onkeydown = (e) => {
-        if (e.key !== "Enter") return;
-        e.preventDefault();
-        (i.id === "w-suser" || i.id === "w-spass" ? $("#w-recheck") : $("#w-test")).click();
-      };
-    });
-
-    $("#w-test").onclick = async () => {
-      const body = {
-        host, share: $("#w-share").value.trim(), path: $("#w-path").value.trim(),
-        username: $("#w-suser").value.trim(), password: $("#w-spass").value,
-      };
-      if (!body.share) {
-        $("#w-testres").innerHTML =
-          `<div class="result bad"><b>Which share?</b>
-           Enter the share name — for \\\\server\\OTHER\\RiparrDumps that is
-           <code>OTHER</code>, with <code>RiparrDumps</code> as the folder.</div>`;
-        return;
-      }
-      const out = $("#w-testres");
-      out.innerHTML = `<div class="result busy"><span class="spin"></span>Writing a test
-        file and reading it back…</div>`;
-      try {
-        const r = await api.post("/api/shares/test", body);
-        if (r.ok) {
-          out.innerHTML = `<div class="result ok"><b>The share works</b>
-            Wrote a file to ${esc(r.target)}, read it back and deleted it.</div>`;
-          await api.post("/api/shares", { ...body, name: `${host}/${body.share}` });
-          $("#w-go").disabled = false;
-          toast("Share saved", "ok");
-        } else {
-          out.innerHTML = `<div class="result bad"><b>That didn't work</b>
-            Failed at the ${esc(r.stage)} step.<div class="why">${esc(r.error)}</div></div>`;
-        }
-      } catch (e) {
-        out.innerHTML = `<div class="result bad"><b>That didn't work</b>
-          <div class="why">${esc(e.message)}</div></div>`;
-      }
-    };
+    shareFinder($("#w-finder"), { onSaved: () => { $("#w-go").disabled = false; } });
   },
 
   async layout() {
@@ -3696,81 +3739,19 @@ function wireContent(section, sub) {
 
   const addShare = $("#add-share");
   if (addShare) addShare.onclick = () => {
-    $("#share-add").innerHTML = `<div class="share-add"><h3>Add a share</h3>
-      <p class="muted">Riparr writes a test file into the folder and reads it back
-        before saving. A share it cannot write to is a share that fails at 3am on the
-        first rip instead of now.</p>
-      <div class="grid2">
-        <label class="f"><span>Server</span>
-          <input id="a-host" placeholder="tower.local">
-          <span class="help">A name or an address. <code>.local</code> names work if
-            your NAS advertises one.</span></label>
-        <label class="f"><span>Share</span>
-          <input id="a-share" placeholder="Media">
-          <span class="help">Just the top-level name your server publishes — one word,
-            no slashes. Anything deeper goes in the next box.</span></label>
-        <label class="f"><span>Folder</span>
-          <input id="a-path" placeholder="Movies/4K">
-          <span class="help">Optional, and it may be several levels deep —
-            <code>Movies/4K/Marvel</code>. Riparr creates it if it isn't there.
-            Backslashes are fine; they get converted.</span></label>
-        <label class="f"><span>Name</span>
-          <input id="a-name" placeholder="optional — shown in the list">
-          <span class="help">Only for your own benefit when you have more than
-            one.</span></label>
-        <label class="f"><span>Username</span>
-          <input id="a-user" placeholder="leave empty for a guest share">
-          <span class="help">A domain account goes in as <code>DOMAIN&#92;name</code>,
-            <code>DOMAIN/name</code> or <code>name@domain</code>.</span></label>
-        <label class="f"><span>Password</span>
-          <input id="a-pass" type="password"></label>
-      </div>
-      <div class="dest-path" id="a-preview">//server/share</div>
-      <div class="btn-row">
-        <button class="btn primary" id="a-go">Test and save</button>
-        <button class="btn" id="a-cancel">Cancel</button></div>
-      <div id="a-res"></div></div>`;
-
-    // Show what the three boxes add up to. The single most common way this goes wrong
-    // is a whole path pasted into "Share", and the preview is where that becomes
-    // obvious before the server answers with something about a logon failure.
-    const preview = () => {
-      const host = $("#a-host").value.trim() || "server";
-      const parts = ($("#a-share").value + "/" + $("#a-path").value)
-        .replace(/\\/g, "/").split("/").map(x => x.trim()).filter(Boolean);
-      $("#a-preview").textContent = `//${host}/${parts.join("/") || "share"}`;
-    };
-    ["#a-host", "#a-share", "#a-path"].forEach(sel => { $(sel).oninput = preview; });
-    preview();
-
-    $("#a-cancel").onclick = () => { $("#share-add").innerHTML = ""; };
-    $("#a-go").onclick = async () => {
-      const body = {
-        host: $("#a-host").value.trim(), share: $("#a-share").value.trim(),
-        path: $("#a-path").value.trim(), username: $("#a-user").value.trim(),
-        password: $("#a-pass").value, name: $("#a-name").value.trim(),
-      };
-      const res = $("#a-res");
-      if (!body.host) {
-        res.innerHTML = `<div class="result bad">Which server?</div>`;
-        return;
-      }
-      $("#a-go").disabled = true;
-      res.innerHTML = `<div class="result busy"><span class="spin"></span>
-        Writing a test file and reading it back…</div>`;
-      try {
-        const r = await api.post("/api/shares", body);
-        toast("Share added", "ok"); route();
-      } catch (e) {
-        // The server's message is several sentences and often has the SMB code on its
-        // own line, so it is rendered as text rather than squeezed onto one line.
-        const [first, ...rest] = e.message.split("\n\n");
-        res.innerHTML = `<div class="result bad"><b>That didn't work</b>${esc(first)}
-          ${rest.length ? `<div class="why">${esc(rest.join("\n\n"))}</div>` : ""}</div>`;
-      }
-      $("#a-go").disabled = false;
-    };
-    $("#a-host").focus();
+    const box = $("#share-add");
+    box.innerHTML = `<div class="share-add"><h3>Add a share</h3>
+      <p class="muted">Pick your server, then the share. Riparr writes a test file into
+        the folder and reads it back before saving, so a share it can't write to fails
+        now instead of at 3am on the first rip.</p>
+      <div class="sf-root"></div></div>`;
+    addShare.disabled = true;
+    shareFinder(box.querySelector(".sf-root"), {
+      askName: true,
+      onSaved: () => route(),
+      onCancel: () => { box.innerHTML = ""; addShare.disabled = false; },
+    });
+    box.scrollIntoView({ block: "start", behavior: "smooth" });
   };
 
   $$("[data-test-share]").forEach(b => b.onclick = async () => {

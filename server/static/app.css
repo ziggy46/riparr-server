@@ -1209,7 +1209,7 @@ tr.hist.cancelled > td.stat { color: var(--fg-muted); }
 .share-add .result .why { white-space: pre-wrap; }
 /* The shares a server listed, as buttons that fill in the Share field. */
 .share-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-#w-listed { margin: 4px 0 14px; }
+.sf-listed { margin: 4px 0 14px; }
 
 /* ── notification channels ──
    Four rows, each wearing the mark of the service it configures, each opening onto
@@ -1529,13 +1529,13 @@ td.path {
  * margin, which is what the stray inline `margin:-4px 0 14px` was cancelling out.
  * An empty result slot must not leave a gap at the foot of the card.
  */
-#w-detail .card > .body > * { margin-top: 0; margin-bottom: 0; }
-#w-detail .card > .body > * + * { margin-top: 18px; }
-#w-detail .card > .body > #w-testres:empty { margin-top: 0; }
+.sf-detail .card > .body > * { margin-top: 0; margin-bottom: 0; }
+.sf-detail .card > .body > * + * { margin-top: 18px; }
+.sf-detail .card > .body > .sf-testres:empty { margin-top: 0; }
 /* Buttons belong to the input column, not the label column -- the same offset
    `.f .help` already uses, and dropped at the same breakpoint where labels stack. */
-#w-detail .btn-row { margin-left: calc(var(--form-label-w) + var(--form-label-gap)); }
-@media (max-width: 1200px) { #w-detail .btn-row { margin-left: 0; } }
+.sf-detail .btn-row { margin-left: calc(var(--form-label-w) + var(--form-label-gap)); }
+@media (max-width: 1200px) { .sf-detail .btn-row { margin-left: 0; } }
 
 /* ── disc artwork ───────────────────────────────────────
  * The poster for the disc in the tray, composed into the right-hand end of the disc
