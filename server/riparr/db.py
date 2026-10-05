@@ -244,38 +244,8 @@ DEFAULTS = {
     # lever (see platform.drive_flash). "tray" opens and closes the tray instead, which
     # is unmissable and is machinery. "both", or "off".
     "duplicate_signal": "flash",
-    # ── keeping itself reachable ──
-    #
-    # This board's Wi-Fi can stop passing traffic while still looking connected: the
-    # driver leaves the carrier up when its firmware wedges, so nothing is logged and
-    # there is no event to react to. Measured once at 17.5 hours unreachable on a box
-    # that never stopped running. The only detector is sending a packet.
-    #
-    # Exposed as settings rather than baked in because the right numbers depend on the
-    # network, not on the box. Somewhere the access point changes channel often -- a
-    # 5 GHz DFS channel vacating on a radar event is the usual reason -- wants a short
-    # patience. Somewhere the router reboots nightly wants a long one, or a rip loses
-    # the box to a recovery it did not need.
-    "netwatch_enabled": True,
-    # Minutes of no answer before the first recovery attempt. The rest of the ladder is
-    # derived from it: re-associate at N, reload the Wi-Fi driver at 2N, restart the
-    # box at 4N. One number to reason about instead of three to keep consistent.
-    "netwatch_minutes": 3,
-    # The last rung, separately, because it is the one with a cost. Off means Riparr
-    # will re-associate and reload the driver but never restart the box on its own --
-    # which is the right answer if losing the network matters less than staying up.
-    "netwatch_reboot": True,
     "webhook_url": "",
     "watch_folder": "",
-    # Every Wi-Fi network this box will join, best first. A list rather than one entry
-    # because the box is meant to be carried: taking it to somebody else's house means
-    # their network has to be in it before it gets there, since there is no screen to
-    # type a password into once you have arrived. Each entry is
-    # {ssid, psk (64-hex, derived), open, added_at} -- never a passphrase.
-    #
-    # Excluded from /api/settings: it holds credentials, and the Network page has its
-    # own endpoints that return names and order without the keys.
-    "wifi_networks": [],
     # Notifications. The box's whole promise is "walk away", so these are the only way
     # it can reach someone who did.
     "notify_events": ["done", "ripped", "needs_you", "failed", "share_lost",
@@ -897,7 +867,7 @@ STAGE_ORDER = ["identify", "decrypt", "save", "upload", "verify"]
 STAGE_LABEL = {
     "identify": "Reading the disc",
     "decrypt":  "Decrypting",
-    "save":     "Saving to the card",
+    "save":     "Saving to staging",
     "upload":   "Uploading",
     "verify":   "Verifying",
 }

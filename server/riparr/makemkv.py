@@ -17,7 +17,6 @@ import json
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
@@ -264,11 +263,8 @@ EULA_POINTS = [
 # tarballs are frequently already on the box -- copied across by hand during validation,
 # or left over from a previous install.
 LOCAL_SOURCES = [
-    "/root/makemkv",            # where the Preparer puts them on an Armbian card
-    "/boot/makemkv",
-    "/home/riparr/makemkv",
+    "/root/makemkv",
     "/opt/riparr/makemkv",
-    "/boot/firmware/makemkv",
     os.path.expanduser("~/makemkv"),
 ]
 
@@ -338,7 +334,8 @@ def info():
         "homepage": HOMEPAGE,
         "key_topic": FORUM_KEY_TOPIC,
         "install": dict(_state),
-        "installable": can_install()[0],
+        "installable": False,
+        "install_hint": INSTALL_HINT,
         "upgrade": upgrade_available(st),
         "auto_renew": bool(_db_get("auto_renew_beta_key", True)),
         "buy_url": BUY_URL,
@@ -363,230 +360,29 @@ def _set(**kw):
 
 
 def install_status():
-    """Progress, preferring what the root installer reports over our own guess.
-
-    Once the bridge takes over, this process is not doing the work and has nothing to
-    say about it. The root side publishes to a file; read that. It also survives a
-    restart of this service, which a thread-local dict would not.
-    """
-    bridged = _read_bridge_state()
-    if bridged:
-        return bridged
     with _lock:
         return dict(_state)
 
 
-def _read_bridge_state():
-    try:
-        with open(BRIDGE_STATE) as f:
-            st = json.load(f)
-    except (OSError, ValueError):
-        return None
-    if not isinstance(st, dict) or "phase" not in st:
-        return None
-    st.setdefault("progress", 0.0)
-    st.setdefault("message", "")
-    st.setdefault("detail", "")
-    # A build takes half an hour; showing the last few lines is the difference between
-    # "it is working" and "it is hung".
-    try:
-        with open(BRIDGE_LOG) as f:
-            tail = f.read()[-4000:]
-        st["log"] = tail.strip().splitlines()[-12:]
-    except OSError:
-        st["log"] = []
-    return st
-
-
-# ── the privilege bridge ──
-# Building MakeMKV installs apt packages and writes to /usr/local, so it needs root.
-# This service runs as `riparr` with NoNewPrivileges=yes and cannot get there — sudo
-# included. Sending the user to a terminal is the wrong answer for an appliance, so
-# install.sh sets up a one-way door: creating REQUEST is watched by riparr-makemkv.path,
-# which starts a root oneshot whose command line is fixed in the unit file. This side
-# can ask. It cannot say what runs.
-RUNDIR = "/run/riparr"
-REQUEST = os.path.join(RUNDIR, "makemkv.request")
-BRIDGE_STATE = os.path.join(RUNDIR, "makemkv.state")
-BRIDGE_LOG = os.path.join(RUNDIR, "makemkv.log")
-BRIDGE_UNIT = "/etc/systemd/system/riparr-makemkv.path"
-
-
-def bridge_available():
-    """The bridge is present and this process can actually ring the bell."""
-    return os.path.exists(BRIDGE_UNIT) and os.path.isdir(RUNDIR) and os.access(
-        RUNDIR, os.W_OK)
+# ── installing ──
+# Upstream builds MakeMKV from the web page, through a root path unit the unprivileged
+# service can poke. Here MakeMKV is part of the deployment: the Docker image builds it,
+# from deploy/install-tools.sh. A web service that can compile and
+# install software as root is not something a server should carry, so this only says
+# where to go.
+INSTALL_HINT = (
+    "MakeMKV is built into the Riparr Server image rather than installed from this "
+    "page. Set MAKEMKV_ACCEPT_EULA to \"yes\" in docker-compose.yml, then rebuild: "
+    "docker compose up -d --build")
 
 
 def can_install():
-    """Whether this process could actually complete an install."""
-    if not P.IS_APPLIANCE:
-        return False, "MakeMKV installs on the appliance only."
-    if os.geteuid() == 0:
-        return True, ""
-    if bridge_available():
-        return True, ""
-    return False, (
-        "This copy of Riparr was installed before in-place MakeMKV setup existed, so "
-        "it cannot install MakeMKV for you. Re-run the installer to add it:\n\n"
-        "    sudo bash /opt/riparr/tools/install.sh\n\n"
-        "Then come back to this page.")
-
-
-# What the root side runs to install MakeMKV. These live outside /opt/riparr, so an
-# update of Riparr does not bring them along by itself -- and an old installer builds
-# the old version, or, before the manifest was installed beside it, nothing at all.
-_ROOT_PARTS = ("makemkv-run.sh", "makemkv-install.sh", "makemkv-manifest.json")
-
-
-def _root_installer_current():
-    comps = P.system_components().get("components", [])
-    return all(c.get("state") == "ok" for c in comps if c.get("name") in _ROOT_PARTS)
-
-
-def _refresh_root_installer(timeout=30):
-    """Ask the root side to reinstall the system parts, and wait until it has.
-
-    Twice, if once is not enough. A box whose apply-system.sh predates it refreshing
-    itself takes two passes: the first installs the provision unit that refreshes the
-    script, the second runs the refreshed script.
-    """
-    for _ in range(2):
-        if not P.request_provision():
-            return False
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            time.sleep(1)
-            if _root_installer_current():
-                return True
-    return False
+    """Whether this process could install MakeMKV itself. It never can, by design."""
+    return False, INSTALL_HINT
 
 
 def start_install(accepted_eula):
-    """Begin an install. Refuses without explicit consent — this is the whole point.
-
-    Consent is enforced here and recorded in the database. The root side takes
-    `--accept-eula` as given, because the only way to reach it is through this
-    function, and the only process that can reach this function is the web service
-    behind authentication.
-    """
-    if not accepted_eula:
-        return {"ok": False,
-                "error": "MakeMKV's licence agreement has to be accepted first."}
-    ok, why = can_install()
-    if not ok:
-        return {"ok": False, "error": why}
-    from . import db
-    if db.drive_busy():
-        # The build replaces the libraries a running makemkvcon has loaded. Waiting for
-        # the disc to finish costs minutes; interrupting it costs the disc.
-        return {"ok": False,
-                "error": "A disc is being read. Start the MakeMKV install once it has "
-                         "finished."}
-    if installing():
-        return {"ok": False, "error": "An install is already running."}
-
-    if os.geteuid() != 0 and bridge_available():
-        if not _root_installer_current() and not _refresh_root_installer():
-            return {"ok": False,
-                    "error": "The part of Riparr that installs MakeMKV is out of date "
-                             "and could not be refreshed. System \u2192 Tasks lists "
-                             "the system parts and can install them."}
-        try:
-            # Touching the file is the whole request. systemd does the rest.
-            with open(REQUEST, "w") as f:
-                f.write("%d\n" % int(time.time()))
-        except OSError as e:
-            return {"ok": False,
-                    "error": "Could not ask the system to install MakeMKV: %s" % e}
-        _set(phase="downloading", progress=0.05,
-             message="Starting the installer", detail="")
-        return {"ok": True}
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {"ok": True}
-
-
-def _run():
-    try:
-        if not P.IS_APPLIANCE:
-            # Walk the same phases so the flow is exercisable off-hardware, but never
-            # pretend a binary was installed.
-            for phase, msg, pr in [
-                ("downloading", "Downloading MakeMKV %s" % MANIFEST["version"], 0.35),
-                ("verifying", "Checking the download against its checksum", 0.6),
-                ("building", "Building for this device — this takes a few minutes", 0.9),
-            ]:
-                _set(phase=phase, message=msg, progress=pr, detail="")
-                time.sleep(1.4)
-            _set(phase="error", progress=0,
-                 message="MakeMKV installs on the appliance only.",
-                 detail="This process is running in development mode, so nothing was "
-                        "downloaded or installed.")
-            return
-
-        local = find_local_source()
-        tmp = tempfile.mkdtemp(prefix="riparr-makemkv-")
-        try:
-            for i, pkg in enumerate(MANIFEST["packages"]):
-                dest = os.path.join(tmp, pkg["name"])
-                if local:
-                    _set(phase="downloading", progress=0.1 + 0.25 * i,
-                         message="Using the copy already on this device",
-                         detail=os.path.join(local, pkg["name"]))
-                    shutil.copyfile(os.path.join(local, pkg["name"]), dest)
-                    _set(phase="verifying", progress=0.2 + 0.25 * i,
-                         message="Checking %s" % pkg["name"])
-                    actual = _sha256(dest)
-                    if actual != pkg["sha256"]:
-                        _set(phase="error", progress=0,
-                             message="%s didn't match its expected checksum. Nothing "
-                                     "was installed." % pkg["name"],
-                             detail="expected %s\ngot      %s"
-                                    % (pkg["sha256"][:24], actual[:24]))
-                        return
-                    continue
-
-                # Sources in order until one produces the right bytes. The checksum is
-                # what makes trying several safe, so it is checked inside the loop
-                # rather than after it.
-                def note(where, _p=pkg, _i=i):
-                    _set(phase="downloading", progress=0.1 + 0.25 * _i,
-                         message="Downloading %s" % _p["name"],
-                         detail="from %s" % where)
-
-                where, problems = fetch_package(pkg, dest, on_try=note)
-                if not where:
-                    _set(phase="error", progress=0,
-                         message="Could not download MakeMKV from any source.",
-                         detail="\n".join("%s — %s" % (w, why) for w, why in problems)
-                                + "\n\nCopy the tarballs to %s on this device and "
-                                  "try again." % LOCAL_SOURCES[0])
-                    return
-                _set(phase="verifying", progress=0.2 + 0.25 * i,
-                     message="Checked %s" % pkg["name"], detail="from %s" % where)
-
-            _set(phase="building", progress=0.7,
-                 message="Building MakeMKV for this device — this takes a few minutes",
-                 detail="")
-            # --jobs 1: the C++ build is the OOM risk on a 512MB board (R1). Slower
-            # than -j2 and much likelier to finish.
-            p = subprocess.run(
-                ["bash", INSTALL_SCRIPT, "--accept-eula", "--srcdir", tmp, "--jobs", "1"],
-                capture_output=True, text=True, timeout=60 * 60)
-            if p.returncode != 0:
-                _set(phase="error", progress=0,
-                     message="MakeMKV did not finish installing.",
-                     detail=(p.stderr or p.stdout or "")[-1200:])
-                return
-
-            _set(phase="done", progress=1.0,
-                 message="MakeMKV %s is installed." % MANIFEST["version"], detail="")
-        finally:
-            shutil.rmtree(tmp, ignore_errors=True)
-    except Exception as e:
-        _set(phase="error", progress=0,
-             message="The install stopped unexpectedly.", detail=str(e))
+    return {"ok": False, "error": INSTALL_HINT}
 
 
 # ── the current beta key ──

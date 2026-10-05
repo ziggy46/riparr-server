@@ -354,7 +354,7 @@ def _task_update_check():
 
     **It does not install anything.** Replacing the software while somebody is halfway
     through ripping a disc, because a machine decided the moment was right, is not a
-    courtesy. The notification is a nudge; System -> Updates is where a person says yes.
+    courtesy. The notification is a nudge; updating is pulling a new image.
 
     **It does not nag.** The check runs every six hours, and a box left alone for a
     fortnight would otherwise send the same notification fifty-six times. The version
@@ -383,8 +383,7 @@ def _task_update_check():
         notify.send(
             "update_available",
             title="Riparr %s is available" % latest,
-            body=("You're on %s. System → Updates installs it and restarts, and "
-                  "nothing is changed until you say so." % r.get("current", "?")))
+            body="You're on %s. To update: %s" % (r.get("current", "?"), r.get("how", "")))
         db.set("last_update_announced", latest)
     return "Update check: %s available" % latest
 

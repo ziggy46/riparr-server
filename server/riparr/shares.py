@@ -29,10 +29,8 @@ class SmbToolMissing(Exception):
     """smbclient is not on this box. Actionable, so say so rather than crashing."""
 
     message = (
-        "The tools for talking to network shares aren't installed on this box. "
-        "Re-run the installer to add them:\n\n"
-        "    sudo bash /opt/riparr/tools/install.sh\n\n"
-        "Then try again.")
+        "smbclient isn't installed, so Riparr can't talk to network shares. "
+        "Rebuild the Docker image: docker compose build --no-cache")
 
 
 def _auth_file(username, password):

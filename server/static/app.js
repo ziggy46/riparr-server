@@ -250,8 +250,8 @@ const wizard = {
     $("#wz-body").innerHTML = `
       <div class="wz-step">Step 1 of 5</div>
       <h1>Create your login</h1>
-      <p class="muted">This protects the web interface. It is separate from the system
-        account you set when preparing the card.</p>
+      <p class="muted">This protects the web interface. It is separate from any account
+        on the server or container.</p>
       <div class="section"><div>
         <label class="f"><span>Username</span><input id="w-user" value="admin"></label>
         <label class="f"><span>Password</span><input id="w-pass" type="password">
@@ -291,8 +291,8 @@ const wizard = {
       <div class="wz-step">Step 2 of 5</div>
       <h1>Disc reading</h1>
       <p class="muted">Riparr doesn't read discs itself — <b>MakeMKV</b> does, and it's
-        made by GuinpinSoft, not by us. Its licence is an agreement between you and them,
-        so Riparr won't download it until you've accepted it.</p>
+        made by GuinpinSoft, not by us. It is installed along with Riparr Server, when
+        you accepted its licence while building the image or running the installer.</p>
 
       <div class="section"><h2>MakeMKV
         <span class="grow"></span>
@@ -304,25 +304,8 @@ const wizard = {
                 ? `${esc(st.key_type || "beta")} — expires ${esc(st.key_expires)} (${st.days_left} days)`
                 : "none yet"}</div>
             </div>`
-          : `<p class="muted" style="margin-bottom:12px">Version ${esc(i.manifest.version)}
-               will be downloaded from
-               <a href="${esc(i.homepage)}" target="_blank" rel="noopener">makemkv.com</a>
-               and checked against a known checksum.</p>
-             <ul class="terms">${i.eula_points.map(t => `<li>${esc(t)}</li>`).join("")}</ul>
-             <p class="muted" style="font-size:12px">This is a summary.
-               <a href="${esc(i.eula_url)}" target="_blank" rel="noopener">Read the full
-               licence agreement</a> before accepting.</p>
-             <label class="switch" style="margin-top:16px">
-               <input type="checkbox" id="mk-accept"><span class="track"></span>
-               <span class="lbl">I have read and accept MakeMKV's licence agreement</span>
-             </label>
-             <div class="btn-row">
-               <button class="btn primary" id="mk-install" disabled>Download and install</button>
-             </div>
-             ${i.installable ? "" : `<p class="help muted" style="margin-top:8px">
-               This process isn't running on the appliance, so the install will stop
-               after the checks.</p>`}
-             <div id="mk-progress"></div>`}
+          : `<div class="result bad"><b>MakeMKV isn't installed.</b>
+               <div class="why">${esc((i.install_hint) || "Rebuild the image or re-run the installer.")}</div></div>`}
         </div>
       </div>
 
@@ -342,11 +325,7 @@ const wizard = {
                setting up and come back to this — but nothing can be ripped until a
                drive appears.</p>
              ${opt.hint ? `<p class="why">${mdBold(opt.hint)}</p>` : ""}
-             ${opt.fixable === "usb-host" ? `<div class="btn-row">
-               <button class="btn" id="wz-usb-fix">Make both USB-C sockets work</button>
-             </div>
-             <p class="help">Reconfigures the second socket and restarts the box, so it
-                stops mattering which one you used.</p>` : ""}`}
+`}
         </div>
       </div>` : ""}
 
@@ -369,35 +348,6 @@ const wizard = {
       </div>`;
 
     offerBetaKey("#wz-key-offer", "#w-key");
-
-    const wzUsbFix = $("#wz-usb-fix");
-    if (wzUsbFix) wzUsbFix.onclick = async () => {
-      if (!confirm("Make both USB-C sockets work?\n\nThe box will restart and setup "
-                   + "will pick up where it left off.")) return;
-      wzUsbFix.disabled = true;
-      showWaiting("Reconfiguring the USB-C sockets\u2026");
-      try { await api.post("/api/system/usb-host", {}); }
-      catch (e) { showWaiting(e.message, { retry: true, spin: false }); return; }
-      showWaiting("Restarting. This page will come back on its own in a minute or two.",
-                  { spin: true });
-      waitForBoxBack();
-    };
-
-    const accept = $("#mk-accept");
-    if (accept) {
-      accept.onchange = () => { $("#mk-install").disabled = !accept.checked; };
-      $("#mk-install").onclick = async () => {
-        $("#mk-install").disabled = true;
-        try {
-          await api.post("/api/makemkv/install", { accept_eula: accept.checked });
-        } catch (e) {
-          $("#mk-progress").innerHTML = `<div class="result bad">${esc(e.message)}</div>`;
-          return;
-        }
-        pollMakeMKV();
-        watchMakeMKV();
-      };
-    }
 
     const save = async () => {
       const k = $("#w-key").value.trim();
@@ -637,7 +587,6 @@ const wizard = {
       <div class="section"><div>
         <div class="kv">
           <div class="k">${first[0]}</div><div class="v">${first[1]}</div>
-          <div class="k">Watch the LED</div><div class="v">Green when it worked, orange when it didn't</div>
           <div class="k">Everything else</div><div class="v">Lives in Settings, and most people never open it</div>
         </div>
       </div></div>
@@ -653,7 +602,7 @@ const wizard = {
     };
 
     paint(`Everything is configured. One moment — checking what the box can already do.`,
-          ["Watch the LED", "Green when it worked, orange when it didn't"]);
+          ["Insert a disc", "Riparr identifies it and gets to work"]);
 
     let st = null;
     try { st = await api.get("/api/status"); } catch (e) { /* offline: keep the neutral copy */ }
@@ -666,16 +615,15 @@ const wizard = {
                     The disc ejects when it's done.`
     : ar.ready   ? `Turn on <b>Auto Rip</b> on the next screen and the loop becomes:
                     insert a disc, close the tray, walk away.`
-    : building   ? `MakeMKV is still compiling in the background — several minutes, and you
-                    can leave this page. <b>Auto Rip</b> becomes available the moment it
-                    finishes, and the sidebar tracks it until then.`
+    : building   ? `MakeMKV isn't installed, so no disc can be read yet. Rebuild the
+                    image (or re-run the installer) with the MakeMKV licence accepted.`
     :              `<b>Auto Rip</b> needs one or two more things first. The queue page lists
                     exactly what, and each one links to where to fix it.`;
 
     paint(lede, ar.enabled
       ? ["Insert a disc", "Riparr identifies it and starts on its own"]
       : building
-      ? ["While it builds", "Nothing to watch — carry on, or leave the page entirely"]
+      ? ["First", "Install MakeMKV — Settings → General says how"]
       : ["Insert a disc", "Then press Rip. Auto Rip can start it for you once it is on"]);
   },
 };
@@ -688,15 +636,11 @@ function mkUpgradeBlock(mk) {
   if (!mk.upgrade) return "";
   return `
     <div class="alert warn" style="margin-bottom:14px">
-      <b>MakeMKV ${esc(mk.upgrade)} is available</b> — this box has
-      ${esc(mk.status.version || "an older version")}. The new version is built on this
-      device, which takes around half an hour. The one you have keeps working until the
-      new one has finished building, and discs wait while it does.
+      <b>MakeMKV ${esc(mk.upgrade)} is available</b> — this install has
+      ${esc(mk.status.version || "an older version")}. ${esc(mk.install_hint || "")}
       <div class="btn-row" style="margin-top:10px">
-        <button class="btn primary" id="mk-upgrade">Accept licence and upgrade</button>
         <a class="btn" href="${esc(mk.eula_url)}" target="_blank" rel="noopener">Read the licence</a>
       </div>
-      <div id="mk-upgrade-progress" style="margin-top:10px"></div>
     </div>`;
 }
 
@@ -1324,21 +1268,12 @@ function tray(drives, optical, canRip) {
     // An empty card used to render as nothing at all, so "no drive" was communicated
     // by absence -- the one case where the user most needs to be told something.
     const hint = optical && optical.hint;
-    // When the box can put it right itself, offer the button instead of asking the
-    // user to understand device trees. The wrong-socket case is the common one and it
-    // is invisible: that port logs nothing at all when you plug something into it.
-    const fixable = optical && optical.fixable === "usb-host";
     return `<div class="empty-state tray-none">
       <div class="big">${icon("triangle-exclamation")}</div>
       <h2>No optical drive detected</h2>
       <p>Riparr has nothing to read a disc with, so nothing else on this page can
          happen yet.</p>
       ${hint ? `<p class="why">${mdBold(hint)}</p>` : ""}
-      ${fixable ? `<div class="btn-row" style="justify-content:center">
-        <button class="btn primary" id="usb-host-fix">Make both USB-C sockets work</button>
-      </div>
-      <p class="micro">This reconfigures the second socket and restarts the box, so it
-         stops mattering which one you used. About a minute.</p>` : ""}
     </div>`;
   }
   const d = drives.find(x => x.present) || drives[0];
@@ -1444,23 +1379,22 @@ function ripOptions() {
       <div class="ropt-head">
         <span class="ropt-k">${icon("hard-drive")} Each rip goes</span>
         <button class="btn sm" id="ar-speedtest"
-                title="Measures your card and says which of these suits it">Test my card</button>
+                title="Measures your staging disk and says which of these suits it">Test staging speed</button>
         <select id="ar-route" title="Applies to every rip, automatic or started by hand">
           ${opt("direct", "straight to your library", s.transfer_mode)}
-          ${opt("auto", "onto the card first, then sent", s.transfer_mode)}
+          ${opt("auto", "staged first, then sent", s.transfer_mode)}
         </select>
       </div>
       <p class="ropt-why">${
         direct
-          ? `No size limit, so a Blu-ray fits whatever card you have, and the card stops
-             wearing out.${card.write_mbs
-               ? ` Yours writes at about <b>${esc(String(card.write_mbs))} MB/s</b>.` : ""}`
-          : `The rip is safe on the card before anything is sent, so a network that drops
+          ? `No staging space needed, and the file is in your library as soon as the
+             disc is done.${card.write_mbs
+               ? ` Your staging disk writes at about <b>${esc(String(card.write_mbs))} MB/s</b>.` : ""}`
+          : `The rip is safe in staging before anything is sent, so a network that drops
              mid-disc costs a re-send rather than a re-rip.`}</p>
       ${!lib.mounted && direct ? `<p class="ropt-warn">${icon("triangle-exclamation")}
-        <span>Your library isn't connected, so rips will stage on the card until it is.
-        <button class="btn tiny" data-remount>Reconnect</button>
-        <span class="test-out" data-remount-out></span></span></p>` : ""}
+        <span>Your library isn't mounted at ${esc(lib.mount || "/srv/library")}, so rips
+        are staged and copied over SMB instead.</span></p>` : ""}
       <span class="test-out ropt-out" id="ar-speed-out"></span>
     </div>
 
@@ -1797,10 +1731,8 @@ const SETTINGS_TABS = [
    "What Riparr takes off a disc, how it gets to your library, and how thoroughly it "
    + "is checked afterwards."],
   ["connect", "Connect",
-   "How the box reaches you when you are not looking at this page, and where finished "
+   "How Riparr reaches you when you are not looking at this page, and where finished "
    + "files are handed on."],
-  ["network", "Network",
-   "Which Wi-Fi networks this box will join, and in what order it tries them."],
   ["general", "General",
    "MakeMKV, the look of this interface, your password, and updates."],
 ];
@@ -1852,11 +1784,10 @@ settingsPages.library = async (s) => {
           : lib.mounted
             ? `${icon("circle-check", "ok")} Mounted at <code>${esc(lib.mount)}</code>,
                so <b>Straight to your library</b> works for this one.`
-            : `${icon("circle-info")} <b>Not connected.</b> Rips will finish on the
-               SD card and be copied across afterwards — nothing is lost, it is just
-               slower and uses card space. Nothing here needs changing.
-               <button class="btn tiny" data-remount>Reconnect</button>
-               <span class="test-out" data-remount-out></span>`}
+            : `${icon("circle-info")} Nothing is mounted at <code>${esc(lib.mount)}</code>,
+               so rips are staged and then copied over SMB. That works as it is. To write
+               straight into your library instead, mount this share on the host and
+               bind-mount it into Riparr at that path.`}
         </div>
       </div>`;
   };
@@ -2036,23 +1967,18 @@ settingsPages.ripping = async (s) => {
     <label class="f"><span>Mode</span>
       <select data-set="transfer_mode">
         ${opt("direct", "Straight to your library (recommended)", s.transfer_mode)}
-        ${opt("auto", "Onto the card first, then sent", s.transfer_mode)}
+        ${opt("auto", "Staged first, then sent", s.transfer_mode)}
         ${opt("burst", "Always burst", s.transfer_mode)}
         ${opt("stream", "Always stream", s.transfer_mode)}
       </select>
-      <span class="help"><b>Straight to your library</b> writes the film to your share
-        as it comes off the disc, so nothing is staged on the card. On the reference
-        board that is about <b>18 MB/s against the card's 9.4</b> — so it is roughly
-        twice as fast — and it removes the card as a size limit, which is the only
-        reason a 22 GB Blu-ray will not fit on a 32 GB card. It also stops writing tens
-        of gigabytes per disc through flash that wears out. That is why it is the
-        default, and why an 8 GB card is enough to run the whole box.
-        <br><br>It is also safe to leave on: if your library isn't mounted when a disc
-        goes in, that rip stages on the card by itself rather than failing.
-        <br><br>The trade: the rip needs the network for its whole length rather than
+      <span class="help"><b>Straight to your library</b> writes the film into your
+        library as it comes off the disc, so nothing is staged. It needs the library
+        bind-mounted into Riparr at <code>/srv/library</code>; without that, each rip
+        stages by itself and is copied over SMB afterwards, rather than failing.
+        <br><br>The trade: the rip needs the share for its whole length rather than
         only at the end, and there is one copy rather than two, so verification checks
-        the size rather than hashing. <b>Onto the card first</b> is the answer if your
-        NAS sleeps, your Wi-Fi is patchy, or you want deep verification.</span></label>
+        the size rather than hashing. <b>Staged first</b> is the answer if your NAS
+        sleeps, or you want deep verification.</span></label>
     <label class="f"><span>Verify after transfer</span>
       <select data-set="verify_mode">
         ${opt("quick", "Quick — check the size", s.verify_mode)}
@@ -2068,14 +1994,13 @@ settingsPages.ripping = async (s) => {
              library</b>, because it works by reading the file back and comparing it
              with the original — and going direct leaves one copy, not two. Hashing it
              against itself would pass every time and prove nothing. Switch the mode
-             above to <b>onto the card first</b> if you want it, and give the card room
-             for two copies of the largest title you rip.`
+             above to <b>staged first</b> if you want it, and give the staging volume
+             room for two copies of the largest title you rip.`
           : `<b>Deep</b> reads the entire file back and hashes it, so it also catches
              silent corruption of bytes that did arrive. That means downloading the
              whole rip again: it roughly doubles the time after a rip and needs
-             <b>as much free space on the card as the film itself</b>, on top of the
-             rip. It is the one reason to want a big card. Worth it for an archive you
-             will never re-rip; overkill for most.`}</span></label>
+             <b>as much free staging space as the film itself</b>, on top of the
+             rip. Worth it for an archive you will never re-rip; overkill for most.`}</span></label>
     ${sw("keep_local_copy", "Keep the local copy", s.keep_local_copy,
         "Retains the rip until the space is needed, so a downstream problem is a re-copy rather than a re-rip.")}
   </div></div>
@@ -2442,277 +2367,6 @@ function testRow(channel) {
     Save and send a test</button><span class="test-out" id="test-${channel}"></span></div>`;
 }
 
-/* Network — every network the box will join, in the order it should try them.
-   One network is the wrong shape for a thing you carry. Taking it to a friend's house
-   to show it off means their SSID and password have to be in it *before* you get
-   there: there is no screen, no keyboard, and no way to type a password into a box
-   that cannot reach the network your browser is on. So this is a list, the way a
-   phone's has been since about 2007, and wpa_supplicant joins the best one it can
-   see. */
-settingsPages.network = async (s) => {
-  const w = await api.get("/api/wifi");
-  // Clamped for display only -- the value is validated server-side too. Without this a
-  // half-typed "" in the box makes the derived ladder read "reconnects at NaN".
-  const n = Math.max(1, Math.min(120, Number(s.netwatch_minutes) || 3));
-  state.wifiSaved = w.saved || [];
-  state.wifiHere = w.ssid || "";
-  state.wifiOrder = null;
-  const here = state.wifiHere;
-  return `
-    <div class="section"><h2>Right now
-      <span class="grow"></span>
-      <span class="badge ${w.connected ? "ok" : "bad"}">${w.connected ? "Connected" : "Offline"}</span></h2>
-      <div><div class="kv">
-        <div class="k">Network</div><div class="v">${esc(here || "—")}</div>
-        <div class="k">Signal</div><div class="v">${
-          w.signal == null ? "—"
-            : `${signalBars(w.signal)} ${w.signal}%${
-                w.signal_dbm != null ? ` <span class="muted">(${w.signal_dbm} dBm)</span>` : ""}`}</div>
-        <div class="k">Band</div><div class="v">${
-          w.band ? `${esc(w.band)} GHz${w.freq_mhz ? ` <span class="muted">· ${w.freq_mhz} MHz</span>` : ""}` : "—"}</div>
-        <div class="k">Link rate</div><div class="v">${
-          w.bitrate_mbps ? `${w.bitrate_mbps} Mbit/s` : "—"}</div>
-        <div class="k">Address</div><div class="v">${esc(w.ip || "—")}${
-          w.iface ? ` <span class="muted">· ${esc(w.iface)}</span>` : ""}</div>
-      </div></div>
-    </div>
-
-    <div class="section"><h2>If the connection drops</h2><div>
-      <p class="muted">This board's Wi-Fi can stop passing traffic while still reporting
-        itself as connected — the radio wedges, nothing is logged, and the box sits there
-        unreachable while otherwise running perfectly. Riparr guards against that by
-        pinging your router once a minute and, if nothing answers, working through
-        reconnecting, reloading the Wi-Fi driver, and finally restarting the box.</p>
-      ${sw("netwatch_enabled", "Recover the connection automatically", s.netwatch_enabled,
-           "Off means Riparr will notice nothing and do nothing. Only worth turning off if something else on your network already watches this box.")}
-      <label class="f"><span>Wait this long first</span>
-        <input type="number" min="1" max="120" data-set="netwatch_minutes"
-               value="${esc(String(s.netwatch_minutes ?? 3))}">
-        <span class="help">Minutes of no answer before Riparr does anything about it.
-          The rest follows from this number: it reconnects at <b>${n}</b>, reloads the
-          Wi-Fi driver at <b>${n * 2}</b>, and restarts the box at <b>${n * 4}</b>
-          minutes.
-          <br><br><b>Shorter if your access point changes channel often.</b> On 5&nbsp;GHz
-          the higher channels are shared with radar, and an access point using one has to
-          move when it detects any — this board's Wi-Fi driver does not always follow, and
-          a shorter wait gets you back sooner. <b>Longer if your router reboots on a
-          schedule</b>, or you will have the box recovering from an outage that was going
-          to end on its own.</span></label>
-      ${sw("netwatch_reboot", "Restart the box as a last resort", s.netwatch_reboot,
-           "Only after reconnecting and reloading the driver have both failed. Never during a rip — Riparr waits for the disc to finish, because the box is already unreachable and restarting would cost you the rip as well.")}
-    </div></div>
-
-    <div class="section"><h2>Known networks
-      <span class="grow"></span>
-      <button class="btn" id="wifi-add">Add a network</button></h2><div>
-      <p class="muted">The box tries these from the top down and joins the first one it
-        can see, so put the network it lives on first. A network can be added before
-        you are anywhere near it — that is the point: type a friend's name and password
-        in here at home, and the box joins their Wi-Fi on its own when you arrive.</p>
-      ${w.can_edit ? "" : `<div class="alert warn" style="margin-bottom:14px"><b>This
-        copy of Riparr can't change Wi-Fi yet.</b> The part that writes the network
-        list runs as root and is installed separately. Re-run the installer to add it:
-        <code>sudo bash /opt/riparr/tools/install.sh</code></div>`}
-      <div id="wifi-add-form"></div>
-      <div id="wifi-list">${wifiListHTML(w.saved, here)}</div>
-      <div class="btn-row" id="wifi-order-bar" hidden>
-        <button class="btn primary" id="wifi-save-order">Save this order</button>
-        <button class="btn" id="wifi-cancel-order">Cancel</button>
-        <span class="test-out" id="wifi-order-out"></span></div>
-      <div id="wifi-apply-out"></div>
-    </div></div>
-
-    <div class="section"><h2>In range now
-      <span class="grow"></span>
-      <button class="btn" id="wifi-scan">Scan</button></h2>
-      <div id="wifi-results">
-        <p class="muted">A scan takes a few seconds. Anything found here can be added
-          with one click — you will still need the password.</p>
-      </div>
-    </div>
-    ${saveBar()}`;
-};
-
-/* The saved list. Reordering is arrows rather than drag: this page is read on a phone
-   as often as a laptop, the list is three or four entries, and a drag target that
-   small is a coin toss. */
-/* The network the card was written with is *live* but not *listed*.
-   First boot writes it straight into wpa_supplicant's config, and the database only
-   learns about a network when the root-side apply script merges the two and hands the
-   result back — which happens the first time somebody saves a network from here. So on
-   a box that has never been edited, the list is empty while the box is plainly connected,
-   and the page said "No networks saved" to somebody looking at a working Wi-Fi link.
-
-   The connection is shown for what it is, with the one action that fixes it. Importing
-   runs the ordinary apply, which merges the live config in and preserves the key — the
-   list cannot be edited or reordered until it does, because Riparr would otherwise be
-   reordering a list with the box's only network missing from it. */
-function wifiListHTML(saved, here) {
-  if (!saved || !saved.length)
-    return `<div class="wifi-saved">
-      ${here ? `<div class="wifi-row on">
-        <span class="wifi-rank">1</span>
-        <span class="wifi-lock">${icon("wifi")}</span>
-        <div class="grow">
-          <div class="t">${esc(here)}</div>
-          <div class="s">Connected now — from the card, not yet in Riparr's list</div>
-        </div>
-        <button class="btn" id="wifi-import">Add it to the list</button>
-      </div>` : ""}
-      <p class="muted" style="margin-top:12px">${here
-        ? `Riparr can see this connection but does not manage it yet. Adding it takes a
-           few seconds and briefly reconnects the Wi-Fi — after that it can be reordered,
-           and other networks can be added around it.`
-        : `Nothing saved, and the box is not on Wi-Fi. Add a network above, or connect it
-           by Ethernet.`}</p>
-    </div>`;
-  return `<div class="wifi-saved">
-    ${saved.map((n, i) => `
-      <div class="wifi-row${n.ssid === here ? " on" : ""}" data-ssid="${esc(n.ssid)}">
-        <span class="wifi-rank">${i + 1}</span>
-        <span class="wifi-lock" title="${n.secure ? "Password protected" : "Open network"}">${
-          icon(n.secure ? "lock" : "wifi")}</span>
-        <div class="grow">
-          <div class="t">${esc(n.ssid)}</div>
-          <div class="s">${n.ssid === here
-            ? "Connected now"
-            : (i === 0 ? "Tried first" : `Tried ${ordinal(i + 1)}`)}</div>
-        </div>
-        <button class="icon-btn" data-wifi-up="${esc(n.ssid)}" title="Move up"
-                ${i === 0 ? "disabled" : ""}>${icon("arrow-up")}</button>
-        <button class="icon-btn" data-wifi-down="${esc(n.ssid)}" title="Move down"
-                ${i === saved.length - 1 ? "disabled" : ""}>${icon("arrow-down")}</button>
-        <button class="icon-btn danger" data-wifi-del="${esc(n.ssid)}" title="Forget"
-                ${saved.length === 1 ? "disabled" : ""}>${icon("trash-can")}</button>
-      </div>`).join("")}
-  </div>`;
-}
-
-const ordinal = (n) => n + (["th", "st", "nd", "rd"][(n % 100 - 20) % 10] || ["th", "st", "nd", "rd"][n % 100] || "th");
-
-/* Rebound after every repaint: the rows are replaced wholesale, so the handlers go
-   with them. */
-function wireWifiRows(repaint) {
-  $$("[data-wifi-up]").forEach(b => b.onclick = () => window.__wifiMove(b.dataset.wifiUp, -1));
-  $$("[data-wifi-down]").forEach(b => b.onclick = () => window.__wifiMove(b.dataset.wifiDown, 1));
-  $$("[data-wifi-del]").forEach(b => b.onclick = () => window.__wifiDrop(b.dataset.wifiDel));
-
-  // Importing the card's network. The apply reconnects the Wi-Fi, which on a box being
-  // administered over that same Wi-Fi means this page goes quiet for a few seconds — so
-  // say that before it happens rather than looking broken while it does.
-  const imp = $("#wifi-import");
-  if (imp) imp.onclick = async () => {
-    imp.disabled = true;
-    imp.textContent = "Adding…";
-    try {
-      await api.post("/api/wifi/import");
-    } catch (e) {
-      imp.disabled = false;
-      imp.textContent = "Add it to the list";
-      toast(e.message || "Could not add it", "bad");
-      return;
-    }
-    toast("Adding the network — the Wi-Fi reconnects, this takes a few seconds", "ok");
-    // The root side merges, publishes, and the next read adopts it. Give it time to
-    // finish associating before asking, or the page repaints on the old empty list.
-    setTimeout(() => { if (typeof repaint === "function") repaint(); }, 9000);
-  };
-}
-
-/* Adding a network. The name is typed, not only picked from a scan, because the whole
-   reason this list exists is networks that are not in range yet. */
-function showWifiForm(ssid = "", isOpen = false) {
-  const into = $("#wifi-add-form");
-  if (!into) return;
-  into.innerHTML = `
-    <div class="wifi-form">
-      <div class="grid2">
-        <label class="f"><span>Network name</span>
-          <input id="wf-ssid" value="${esc(ssid)}" placeholder="exactly as it appears, capitals and all">
-          <span class="help">SSIDs are case sensitive and a trailing space counts.</span></label>
-        <label class="f"><span>Password</span>
-          <input id="wf-pass" type="password" placeholder="${isOpen ? "none — this one is open" : "8 to 63 characters"}">
-          <span class="help">Turned into a key here and stored as one. The password
-            itself is never written to the card.</span></label>
-      </div>
-      <div class="btn-row">
-        <button class="btn primary" id="wf-go">Save it</button>
-        <button class="btn" id="wf-cancel">Cancel</button>
-        <span class="test-out" id="wf-out"></span></div>
-      <p class="help">New networks go to the top of the list. If this one is not in
-        range the box stays where it is and joins when it can see it.</p>
-    </div>`;
-  $("#wf-cancel").onclick = () => { into.innerHTML = ""; };
-  const go = $("#wf-go");
-  go.onclick = async () => {
-    const out = $("#wf-out");
-    const name = $("#wf-ssid").value.trim();
-    if (!name) { out.className = "test-out bad"; out.textContent = "A name is required."; return; }
-    go.disabled = true;
-    out.className = "test-out";
-    out.textContent = "Saving…";
-    try {
-      const r = await api.post("/api/wifi/networks",
-                               { ssid: name, password: $("#wf-pass").value });
-      state.wifiSaved = r.saved || [];
-      state.wifiOrder = null;
-      into.innerHTML = "";
-      $("#wifi-list").innerHTML = wifiListHTML(state.wifiSaved, state.wifiHere);
-      wireWifiRows();
-      followWifiApply();
-    } catch (e) {
-      out.className = "test-out bad";
-      out.textContent = e.message;
-    }
-    go.disabled = false;
-  };
-  $("#wf-ssid").focus();
-}
-
-/* Applying is the one change that can move the box somewhere the browser cannot
-   follow, so it reports rather than assuming. The root side publishes what it is
-   doing; this reads that until it settles. */
-async function followWifiApply(quiet = false) {
-  const out = $("#wifi-apply-out");
-  if (!out) return;
-  if (!quiet) {
-    out.innerHTML = `<div class="result busy"><span class="spin"></span>
-      Writing the list and reloading Wi-Fi. If the box moves to a different network,
-      this page will stop responding — reopen it at
-      <b>${esc(state.status ? state.status.hostname + ".local" : "the box's name")}</b>.</div>`;
-  }
-  for (let i = 0; i < 25; i++) {
-    await new Promise(r => setTimeout(r, 1500));
-    if (!$("#wifi-apply-out")) return;
-    let r;
-    try { r = await api.get("/api/wifi/apply"); } catch (e) { continue; }
-    const a = r.apply;
-    if (!a) continue;
-    if (a.phase === "done") {
-      out.innerHTML = `<div class="result ok"><b>${esc(a.message)}</b></div>`;
-      state.wifiHere = r.connected || state.wifiHere;
-      const list = $("#wifi-list");
-      if (list) {
-        try {
-          const w = await api.get("/api/wifi");
-          state.wifiSaved = w.saved || [];
-          list.innerHTML = wifiListHTML(state.wifiSaved, state.wifiHere);
-          wireWifiRows();
-        } catch (e) { /* the list on screen is still correct */ }
-      }
-      return;
-    }
-    if (a.phase === "error") {
-      out.innerHTML = `<div class="result bad"><b>${esc(a.message)}</b>
-        ${a.detail ? `<div class="why">${esc(a.detail)}</div>` : ""}</div>`;
-      return;
-    }
-    if (!quiet) {
-      out.innerHTML = `<div class="result busy"><span class="spin"></span>${esc(a.message)}</div>`;
-    }
-  }
-}
-
 settingsPages.general = async (s) => {
   const mk = await api.get("/api/makemkv");
   const st = mk.status;
@@ -2729,27 +2383,9 @@ settingsPages.general = async (s) => {
       <div>
       ${mkUpgradeBlock(mk)}
       ${st.installed ? "" : `
-        <p class="muted" style="margin-bottom:10px">MakeMKV is made by GuinpinSoft. Its
-          licence is between you and them.
-          <a href="${esc(mk.eula_url)}" target="_blank" rel="noopener">Read it</a>.
-          Riparr installs version <b>${esc(mk.manifest.version)}</b>, built on this
-          device — the build is the slow part, around half an hour.</p>
-        ${mk.local_source ? `
-        <p class="muted" style="margin-bottom:10px">${icon("circle-check", "ok")}
-          A copy is already on this device, at <code>${esc(mk.local_source)}</code>.
-          Nothing will be downloaded.</p>`
-        : `
-        <p class="muted" style="margin-bottom:10px">Downloaded from
-          <b>${(mk.manifest.sources || []).map(esc).join("</b>, <b>")}</b> — in that
-          order, until one works. makemkv.com goes down for weeks at a time, which is
-          why there is more than one. Every download is checked against a checksum
-          pinned in Riparr's own source, so a mirror can only give Riparr the right
-          file or none at all.</p>`}
-        <label class="switch"><input type="checkbox" id="mk-accept"><span class="track"></span>
-          <span class="lbl">I have read and accept MakeMKV's licence agreement</span></label>
-        <div class="btn-row"><button class="btn primary" id="mk-install" disabled>
-          Download and install</button></div>
-        <div id="mk-progress"></div>`}
+        <div class="alert bad" style="margin-bottom:14px"><b>MakeMKV isn't installed.</b>
+          ${esc(mk.install_hint || "")}
+          <a href="${esc(mk.eula_url)}" target="_blank" rel="noopener">Read its licence</a>.</div>`}
       <label class="f" style="margin-top:${st.installed ? 0 : 16}px"><span>Key</span>
         <input data-set="makemkv_key" id="mk-key-input" value="${esc(s.makemkv_key)}" placeholder="Beta or purchased key">
         <span class="help">MakeMKV is free while it is in beta, behind a key GuinpinSoft
@@ -2786,7 +2422,7 @@ settingsPages.general = async (s) => {
 
     <div class="section"><h2>Updates</h2><div>
       ${sw("auto_check_updates", "Check for updates automatically", s.auto_check_updates,
-          "Checks the official repository once a day. Nothing installs without you asking.")}
+          "Checks this fork's GitHub releases every few hours and tells you when there is a new one. Updating is pulling a new image.")}
       <div class="btn-row"><a class="btn" href="#/system/updates">Open updates</a></div>
     </div></div>${saveBar()}`;
 };
@@ -2796,23 +2432,6 @@ settingsPages.general = async (s) => {
    sections stacked down the page, a 21px heading with a rule under it, a toolbar of
    icon-over-label buttons where a page has actions, and tables at 14px with bold
    sentence-case headers. The *arrs put nothing side by side here and neither do we. */
-/* Mirrors `led.STATES` and docs/guide/led-reference.md. A printed card cannot import
-   a constant, so the next best thing is that all three use the same names. */
-const LED_WORDS = {
-  booting: "White, pulsing slowly — booting or waiting for setup",
-  joining: "Blue, blinking — joining Wi-Fi",
-  ready: "Solid green — ready for a disc",
-  ripping: "Blue, breathing — ripping",
-  uploading: "Amber, pulsing — uploading to your library",
-  verifying: "Amber, pulsing — verifying",
-  done: "Green flash — done and verified",
-  failed: "Solid red — the disc failed",
-  duplicate: "Purple — already ripped this one",
-  needs_you: "Amber, blinking — waiting for you",
-  no_share: "Amber, blinking — can't reach your library",
-  no_wifi: "Amber, blinking — no Wi-Fi",
-};
-
 const SYSTEM_TABS = [
   ["status",  "Status"],
   ["tasks",   "Tasks"],
@@ -2850,8 +2469,8 @@ systemPages.status = async () => {
 
   return `
     ${sys.mock ? `<div class="alert warn"><b>Development mode.</b>
-      This process isn't running on Pi hardware, so system, drive and share readings
-      are simulated.</div>` : ""}
+      This process isn't running on Linux (or RIPARR_MOCK is set), so system, drive
+      and share readings are simulated.</div>` : ""}
 
     <div class="section"><h2>Health</h2>
       <table><tbody>${healthRows}</tbody></table>
@@ -2865,13 +2484,11 @@ systemPages.status = async () => {
       <div class="kv">
         <div class="k">Version</div><div class="v">${esc(st.version)}</div>
         <div class="k">Model</div><div class="v">${esc(sys.model)}</div>
-        ${sys.board ? `<div class="k">Prepared as</div><div class="v">${esc(sys.board)}</div>` : ""}
         <div class="k">Operating system</div><div class="v">${esc(sys.os)}</div>
         <div class="k">Kernel</div><div class="v">${esc(sys.kernel || "—")}</div>
-        <div class="k">Mode</div><div class="v">${sys.mock ? "Development (simulated)" : "Appliance"}</div>
+        <div class="k">Mode</div><div class="v">${sys.mock ? "Development (simulated)" : "Live hardware"}</div>
         <div class="k">Memory</div><div class="v">${sys.memory_used_mb} of ${sys.memory_total_mb} MB</div>
-        <div class="k">Temperature</div><div class="v">${sys.cpu_temp_c ?? "—"} °C
-          ${sys.throttled ? '<span class="badge warn">throttled</span>' : ""}</div>
+        ${sys.cpu_temp_c != null ? `<div class="k">Temperature</div><div class="v">${sys.cpu_temp_c} °C</div>` : ""}
         <div class="k">Uptime</div><div class="v">${uptime(sys.uptime_seconds)}</div>
       </div>
     </div>
@@ -2887,9 +2504,9 @@ systemPages.status = async () => {
       <div class="bar" style="margin:4px 0 8px"><i style="width:${pct(s.used_bytes, s.total_bytes)}%"></i></div>
       <p class="muted" style="font-size:13px">Buffer, not permanent storage — files
         leave as they're written.</p>
-      ${s.dedicated === false ? `<div class="alert bad"><b>No staging partition.</b>
-        Rips are sharing the system filesystem, so a stalled upload queue could fill the
-        root filesystem and take the box down.</div>` : ""}
+      ${s.dedicated === false ? `<div class="alert bad"><b>No staging volume.</b>
+        The staging folder doesn't exist, so rips share the container's own filesystem.
+        Mount a volume at the staging path.</div>` : ""}
     </div>
 
     <div class="section"><h2>Disc reading<span class="grow"></span>
@@ -2915,30 +2532,9 @@ systemPages.status = async () => {
       </div>
     </div>
 
-    <div class="section"><h2>Status LED<span class="grow"></span>
-      <button class="btn sm" id="led-test">Test the LED</button></h2>
-      <div class="kv">
-        <div class="k">Wiring</div><div class="v">${st.led && st.led.detected
-          ? `Detected on <span class="muted">${esc(st.led.device)}</span>`
-          : `<span class="muted">Not detected. Riparr works without one — the web
-             interface is then the only place status appears. SPI has to be enabled in
-             the device tree before ${esc((st.led && st.led.device) || "the device node")}
-             exists.</span>`}</div>
-        <div class="k">Showing</div><div class="v">${st.led
-          ? `${esc(LED_WORDS[st.led.state] || st.led.state)}` : "—"}</div>
-      </div>
-      <div class="test-out" id="led-out"></div>
-    </div>
-
     <div class="section"><h2>Network</h2>
       <div class="kv">
-        <div class="k">Wi-Fi</div><div class="v">${st.wifi.ssid
-          ? `${esc(st.wifi.ssid)}${st.wifi.band ? ` <span class="muted">· ${esc(st.wifi.band)} GHz</span>` : ""}`
-          : "offline"}</div>
-        <div class="k">Signal</div><div class="v">${st.wifi.signal == null ? "—"
-          : `${signalBars(st.wifi.signal)} ${st.wifi.signal}%`}</div>
-        <div class="k">Address</div><div class="v">${esc(st.wifi.ip || "—")}</div>
-        <div class="k">Hostname</div><div class="v">${esc(st.hostname)}.local</div>
+        <div class="k">Hostname</div><div class="v">${esc(st.hostname)}</div>
         <div class="k">Share</div><div class="v">${st.share
           ? `//${esc(st.share.host)}/${esc(st.share.path)}` : "not configured"}</div>
       </div>
@@ -2947,9 +2543,11 @@ systemPages.status = async () => {
     <div class="section"><h2>More Info</h2>
       <div class="kv">
         <div class="k">Source</div><div class="v">
+          <a href="https://github.com/ziggy46/riparr-server" target="_blank" rel="noopener">github.com/ziggy46/riparr-server</a></div>
+        <div class="k">Issues</div><div class="v">
+          <a href="https://github.com/ziggy46/riparr-server/issues" target="_blank" rel="noopener">github.com/ziggy46/riparr-server/issues</a></div>
+        <div class="k">Based on</div><div class="v">
           <a href="https://github.com/jackharvest/riparr" target="_blank" rel="noopener">github.com/jackharvest/riparr</a></div>
-        <div class="k">Feature requests</div><div class="v">
-          <a href="https://github.com/jackharvest/riparr/issues" target="_blank" rel="noopener">github.com/jackharvest/riparr/issues</a></div>
         <div class="k">MakeMKV</div><div class="v">
           <a href="https://www.makemkv.com/forum/" target="_blank" rel="noopener">makemkv.com/forum</a></div>
       </div>
@@ -2961,16 +2559,15 @@ systemPages.status = async () => {
 function healthMessages(st) {
   const out = [];
 
-  /* The clock goes first, because it invalidates several of the messages below it.
-     This board has no RTC and D4 says the power gets pulled, so an unsynchronised
-     boot is routine rather than exotic -- and every "N days left" and "3 hours ago"
-     in the interface is a subtraction against it. */
+  /* The clock goes first, because it invalidates several of the messages below it:
+     every "N days left" and "3 hours ago" in the interface is a subtraction against it.
+     A container uses the host's clock, so this is the host's time being wrong. */
   const clk = st.clock;
   if (clk && !clk.plausible)
     out.push({ level: "bad", message: `The system clock reads ${
       new Date(clk.now * 1000).toLocaleString()}, which can't be right. Dates and key
-      expiry are meaningless until it syncs — check this box can reach the internet.`,
-      href: "#/settings/network", action: "Network settings" });
+      expiry are meaningless until it syncs — check the host's time settings.`,
+      href: "#/system/status", action: "Details" });
   else if (clk && clk.synced === false)
     out.push({ level: "warn", message: "The clock hasn't synchronised with a time "
       + "server yet, so dates may be slightly out.",
@@ -2997,19 +2594,15 @@ function healthMessages(st) {
 
   if (!st.drives || !st.drives.length)
     out.push({ level: "bad", message: `No optical drive detected — ${
-      esc((st.optical && st.optical.summary) || "nothing is on the USB bus")}.`,
+      esc((st.optical && st.optical.summary) || "check the device passthrough")}.`,
       href: "#/system/status", action: "Details" });
 
   if (!st.share)
     out.push({ level: "warn", message: "No network share configured, so finished rips have nowhere to go.",
                href: "#/settings/share", action: "Add a share" });
 
-  if (!st.wifi.connected)
-    out.push({ level: "bad", message: "Wi-Fi is not connected.",
-               href: "#/settings/network", action: "Network settings" });
-
   if (st.storage.dedicated === false)
-    out.push({ level: "warn", message: "Rips are staged on the system filesystem, not a dedicated partition.",
+    out.push({ level: "warn", message: "The staging folder doesn't exist, so rips are staged on the container's own filesystem. Mount a volume at the staging path.",
                href: "#/system/status", action: "Details" });
 
   if (st.storage.mode === "degraded")
@@ -3019,68 +2612,9 @@ function healthMessages(st) {
   return out;
 }
 
-/* Riparr is two halves, and only one of them can update itself. The half in
-   /opt/riparr the service replaces on its own; the half in /etc/systemd/system it
-   cannot touch, because it runs unprivileged with NoNewPrivileges=yes.
-
-   So they drift, and until this existed nothing said so. riparr-library.service was
-   never installed by any installer -- no box mounted its share at boot, and the only
-   visible symptom was a good share reported as permanently lost. That is a whole class
-   of fault that can only be found by a user, weeks later, from a misleading symptom.
-   This is the panel that names it instead. */
-function componentsPanel(c) {
-  if (!c || c.mock) return "";
-  const bad = (c.components || []).filter(x => x.state !== "ok");
-
-  if (!bad.length) {
-    return `<div class="section"><h2>System components</h2><div>
-      <p class="ok-line">${icon("circle-check", "ok")} All
-        ${(c.components || []).length} parts installed and current.</p>
-      <p class="muted">These live outside Riparr's own folder — the systemd units and
-        root-side scripts that mount your share, recover the Wi-Fi and let the web page
-        ask for privileged things. Riparr cannot update them by itself, so it checks.</p>
-    </div></div>`;
-  }
-
-  // Grouped by reason, because "6 parts missing" is a number and "the Reconnect button
-  // and the Wi-Fi watchdog are not installed" is a sentence somebody can act on.
-  const rows = bad.map(x => `<tr>
-      <td class="stat">${icon(x.state === "missing" ? "circle-exclamation" : "clock",
-                              x.state === "missing" ? "bad" : "warn")}</td>
-      <td><code>${esc(x.name)}</code></td>
-      <td>${esc(x.why)}</td>
-      <td><span class="badge ${x.state === "missing" ? "bad" : "warn"}">${
-        x.state === "missing" ? "not installed" : "out of date"}</span></td>
-    </tr>`).join("");
-
-  return `<div class="section"><h2>System components</h2><div>
-    <p class="ropt-warn">${icon("triangle-exclamation")}
-      <span><b>${bad.length} part${bad.length === 1 ? " is" : "s are"} missing or out of
-      date.</b> ${c.missing ? "Anything not installed simply does not happen — no error, "
-      + "no log line. " : ""}This is why the check exists.</span></p>
-    <table>
-      <thead><tr><th class="stat"></th><th>Part</th><th>What it does</th>
-        <th>State</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-    <p class="row-actions">
-      <button class="btn" id="fix-components">Install the missing parts</button>
-      <span class="test-out" id="fix-components-out"></span>
-    </p>
-    ${c.repairable ? "" : `<p class="muted">${icon("circle-info")} This box predates the
-      part that installs the others, and that one cannot install itself — Riparr runs
-      unprivileged and cannot write a system file. The button will explain the one-time
-      fix, which is a click in the Riparr Preparer on your computer, not a terminal.</p>`}
-  </div></div>`;
-}
-
 /* ── Tasks ── */
 systemPages.tasks = async () => {
   const t = await api.get("/api/system/tasks");
-  // Best effort: an older box has no such endpoint, and the Tasks page should still
-  // draw rather than failing whole because the health check is new.
-  let comp = null;
-  try { comp = await api.get("/api/system/components"); } catch (e) { comp = null; }
   const rows = t.scheduled.map(s => `<tr>
       <td>${esc(s.label)}</td>
       <td>${interval(s.interval)}</td>
@@ -3103,10 +2637,7 @@ systemPages.tasks = async () => {
     </tr>`).join("")
     : `<tr><td colspan="7" class="muted">Nothing has run yet.</td></tr>`;
 
-  // Above Scheduled, deliberately: a missing part is a fault, and Scheduled is
-  // routine. The fault goes where somebody looking at this page will see it first.
   return `
-    ${componentsPanel(comp)}
     <div class="section"><h2>Scheduled</h2>
       <table>
         <thead><tr><th>Name</th><th>Interval</th><th>Last Execution</th>
@@ -3164,8 +2695,6 @@ systemPages.updates = async () => {
   return `
     <div class="toolbar">
       <button class="tool" id="upd-check"><span class="ti">${icon("arrows-rotate")}</span>Check<br>Again</button>
-      <button class="tool" id="upd-install" ${u.can_install ? "" : "disabled"}>
-        <span class="ti">${icon("download")}</span>Install<br>Latest</button>
     </div>
     <div class="section"><h2>Riparr updates<span class="grow"></span>
       <span class="badge ${kind}">${esc(u.status)}</span></h2>
@@ -3177,11 +2706,7 @@ systemPages.updates = async () => {
           <a href="https://github.com/${esc(u.repo)}" target="_blank" rel="noopener">github.com/${esc(u.repo)}</a></div>
       </div>
       <div class="alert ${u.status === "update" ? "warn" : ""}">${esc(u.message || "")}</div>
-      <!-- Where the result of pressing Install lands, and stays. -->
-      <div id="upd-result" hidden></div>
-      ${!u.can_install && u.status === "update"
-        ? `<p class="muted" style="font-size:13px">Updates install on the appliance
-           itself. This process is running in development mode.</p>` : ""}
+      ${u.how ? `<p class="muted" style="font-size:13px">To update: <code>${esc(u.how)}</code></p>` : ""}
     </div>
     ${mk && mk.status.installed ? `<div class="section"><h2>MakeMKV<span class="grow"></span>
       <span class="badge ${mk.upgrade ? "warn" : "ok"}">${mk.upgrade ? "update" : "current"}</span></h2>
@@ -3249,7 +2774,7 @@ systemPages.logs = async () => {
     <div class="alert">Log files are in <code>${esc(l.path)}</code>.
       <br><code>riparr.txt</code> is the ordinary record; <code>riparr.debug.txt</code>
       keeps everything and is the one to send if you are asking for help. Each is capped
-      at 1 MB and rotated five times, because every write is a write to the SD card.</div>
+      at 1 MB and rotated five times.</div>
     <div class="section"><h2>Files</h2>
       <table>
         <thead><tr><th>Filename</th><th>Size</th><th>Last Write Time</th>
@@ -3302,7 +2827,6 @@ function navBadges() {
   else if (m.days_left != null && m.days_left < 8) sys++;
   else if (m.key_stale) sys++;
   if (!st.share) sys++;
-  if (!st.wifi.connected) sys++;
   if (sys) b.system = sys;
   return b;
 }
@@ -3323,7 +2847,7 @@ function renderSidebar(section, sub) {
   }).join("") + `<div class="side-foot">
     <div id="side-makemkv"></div>
     <div class="cap">${
-      st ? `${capacityPhrase(st.storage)}<br><span class="muted">${esc(st.hostname)}.local</span>` : ""
+      st ? `${capacityPhrase(st.storage)}<br><span class="muted">${esc(st.hostname)}</span>` : ""
     }</div>
     <div class="side-ver">${st && st.version ? `Riparr ${esc(st.version)}` : ""}</div>
   </div>`;
@@ -3635,27 +3159,6 @@ function wireContent(section, sub) {
     b.disabled = false;
   });
 
-  /* Repair is slow (systemd oneshot, then a poll until the files appear), so the
-     button says what it is doing rather than just disabling. A 45-second silence on a
-     button labelled "install" is indistinguishable from a hang. */
-  const fix = $("#fix-components");
-  if (fix) fix.onclick = async () => {
-    const out = $("#fix-components-out");
-    const say = (m, cls) => { out.className = "test-out " + (cls || ""); out.textContent = m; };
-    fix.disabled = true;
-    say("Installing\u2026 this takes a few seconds.");
-    try {
-      const r = await api.post("/api/system/components/repair", {});
-      say(r.message, r.ok ? "ok" : "warn");
-      if (r.ok) { toast("System components installed", "ok"); route(); return; }
-    } catch (e) {
-      // 503 is the honest case: no door, so no route from here. Show the whole
-      // explanation rather than a toast that scrolls away — it names what to do next.
-      say(e.message, "bad");
-    }
-    fix.disabled = false;
-  };
-
   /* ── System: Tasks, Backup, Events, Log Files ── */
   $$("[data-task]").forEach(b => b.onclick = async () => {
     b.disabled = true;
@@ -3666,26 +3169,6 @@ function wireContent(section, sub) {
     } catch (e) { toast(e.message, "bad"); }
     route();
   });
-
-  const ledTest = $("#led-test");
-  if (ledTest) ledTest.onclick = async () => {
-    const out = $("#led-out");
-    ledTest.disabled = true;
-    out.className = "test-out";
-    out.textContent = "Walking red, green, blue, white…";
-    try {
-      const r = await api.post("/api/system/led/test");
-      // `detected: false` is not an error and must not be dressed as a success. A
-      // box that says "OK" at an LED that never lit is the least debuggable result
-      // this button could produce.
-      out.className = `test-out ${r.detected ? "ok" : "warn"}`;
-      out.textContent = r.message;
-    } catch (e) {
-      out.className = "test-out bad";
-      out.textContent = e.message;
-    }
-    ledTest.disabled = false;
-  };
 
   const bkNow = $("#bk-now");
   if (bkNow) bkNow.onclick = async () => {
@@ -3801,7 +3284,7 @@ function wireContent(section, sub) {
               ? (changed.verify_mode === "quick"
                    ? "Rips go straight to your library. Deep checking needs two copies, so it's a size check now."
                    : "Rips go straight to your library")
-              : "Rips are cached on the card first", "ok");
+              : "Rips are staged first", "ok");
       route();
     } catch (e) { toast(e.message, "bad"); }
   };
@@ -3822,7 +3305,7 @@ function wireContent(section, sub) {
       if (state.settings) state.settings.card_speed = c;
       if (r.recommend && r.recommend !== (state.settings || {}).transfer_mode) {
         if (confirm(`${r.why}\n\nSwitch to ${
-            r.recommend === "direct" ? "writing straight to your library" : "caching on the card"}?`)) {
+            r.recommend === "direct" ? "writing straight to your library" : "staging first"}?`)) {
           const saved = await api.put("/api/settings", { transfer_mode: r.recommend });
           if (state.settings) state.settings.transfer_mode = r.recommend;
           applyAdjusted(saved);
@@ -3847,22 +3330,6 @@ function wireContent(section, sub) {
     } catch (e) { toast(e.message, "bad"); }
   };
 
-  const usbFix = $("#usb-host-fix");
-  if (usbFix) usbFix.onclick = async () => {
-    if (!confirm("Make both USB-C sockets work?\n\nThe box will restart. "
-                 + "Your drive can then be in either one.")) return;
-    usbFix.disabled = true;
-    showWaiting("Reconfiguring the USB-C sockets\u2026");
-    try {
-      await api.post("/api/system/usb-host", {});
-    } catch (e) {
-      showWaiting(e.message, { retry: true, spin: false });
-      return;
-    }
-    showWaiting("Restarting. This page will come back on its own in a minute or two.",
-                { spin: true });
-    waitForBoxBack();
-  };
 
   const ripNow = $("#rip-now");
   if (ripNow) ripNow.onclick = async () => {
@@ -4079,35 +3546,6 @@ function wireContent(section, sub) {
     recheck.disabled = false;
   };
 
-  const mkUp = $("#mk-upgrade");
-  if (mkUp) mkUp.onclick = async () => {
-    mkUp.disabled = true;
-    const out = $("#mk-upgrade-progress");
-    out.innerHTML = `<div class="result busy"><span class="spin"></span>Starting</div>`;
-    try { await api.post("/api/makemkv/install", { accept_eula: true }); }
-    catch (e) {
-      out.innerHTML = `<div class="result bad">${esc(e.message)}</div>`;
-      mkUp.disabled = false;
-      return;
-    }
-    pollMakeMKV("#mk-upgrade-progress");
-    watchMakeMKV();
-  };
-
-  const mkAccept = $("#mk-accept");
-  if (mkAccept) {
-    mkAccept.onchange = () => { $("#mk-install").disabled = !mkAccept.checked; };
-    $("#mk-install").onclick = async () => {
-      $("#mk-install").disabled = true;
-      try { await api.post("/api/makemkv/install", { accept_eula: mkAccept.checked }); }
-      catch (e) {
-        $("#mk-progress").innerHTML = `<div class="result bad">${esc(e.message)}</div>`;
-        return;
-      }
-      pollMakeMKV();
-      watchMakeMKV();
-    };
-  }
 
   const save = $("#save-settings");
   if (save) save.onclick = async () => {
@@ -4144,109 +3582,6 @@ function wireContent(section, sub) {
     toast("Share removed"); route();
   });
 
-  /* ── the saved network list ──
-     Order is the whole feature: wpa_supplicant joins the best network it can see, and
-     "best" is the number this list assigns. Reordering is local until Save, so moving
-     three entries costs one rewrite of /etc/wpa_supplicant rather than three -- and
-     each rewrite reloads the supplicant, which on a box you are talking to over Wi-Fi
-     is not free. */
-  const wifiList = $("#wifi-list");
-  if (wifiList) {
-    // Nothing saved at all is the state a freshly written card is in: one network on
-    // it that Riparr has never been told about. Ask the root side to read it back.
-    if (!(state.wifiSaved || []).length && $("#wifi-add")) {
-      api.post("/api/wifi/import").then(() => followWifiApply(true)).catch(() => {});
-    }
-
-    const order = () => (state.wifiOrder || (state.wifiSaved || []).map(n => n.ssid));
-    const bar = $("#wifi-order-bar");
-    const repaint = (dirty) => {
-      const saved = order().map(ssid =>
-        (state.wifiSaved || []).find(n => n.ssid === ssid)).filter(Boolean);
-      wifiList.innerHTML = wifiListHTML(saved, state.wifiHere);
-      if (bar) bar.hidden = !dirty;
-      wireWifiRows(repaint);
-    };
-    const move = (ssid, by) => {
-      const o = order().slice();
-      const i = o.indexOf(ssid);
-      const j = i + by;
-      if (i < 0 || j < 0 || j >= o.length) return;
-      [o[i], o[j]] = [o[j], o[i]];
-      state.wifiOrder = o;
-      repaint(true);
-    };
-    const drop = (ssid) => {
-      const o = order().filter(x => x !== ssid);
-      if (!o.length) { toast("Riparr will not forget the last network.", "bad"); return; }
-      state.wifiOrder = o;
-      repaint(true);
-    };
-    window.__wifiMove = move;
-    window.__wifiDrop = drop;
-    wireWifiRows(repaint);
-
-    const cancel = $("#wifi-cancel-order");
-    if (cancel) cancel.onclick = () => { state.wifiOrder = null; repaint(false); };
-
-    const save = $("#wifi-save-order");
-    if (save) save.onclick = async () => {
-      const out = $("#wifi-order-out");
-      save.disabled = true;
-      out.className = "test-out";
-      out.textContent = "Applying…";
-      try {
-        const r = await api.put("/api/wifi/networks", { ssids: order() });
-        state.wifiSaved = r.saved || [];
-        state.wifiOrder = null;
-        out.textContent = "";
-        if (bar) bar.hidden = true;
-        followWifiApply();
-      } catch (e) {
-        out.className = "test-out bad";
-        out.textContent = e.message;
-      }
-      save.disabled = false;
-    };
-  }
-
-  const wifiAdd = $("#wifi-add");
-  if (wifiAdd) wifiAdd.onclick = () => showWifiForm();
-
-  const scan = $("#wifi-scan");
-  if (scan) scan.onclick = async () => {
-    const box = $("#wifi-results");
-    box.innerHTML = `<div class="result busy"><span class="spin"></span>Scanning…</div>`;
-    let r;
-    try { r = await api.post("/api/wifi/scan"); }
-    catch (e) { box.innerHTML = `<div class="result bad">${esc(e.message)}</div>`; return; }
-    const saved = new Set((state.wifiSaved || []).map(n => n.ssid));
-    if (!r.networks.length) {
-      box.innerHTML = `<div class="result bad"><b>Nothing came back.</b>
-        <div class="why">Either nothing is in range, or the radio could not be asked.
-        Riparr scans with <code>wpa_cli</code>, which needs the service account to be in
-        the <code>netdev</code> group — re-running the installer adds it.</div></div>`;
-      return;
-    }
-    box.innerHTML = `<p class="muted" style="margin-bottom:10px">${esc(r.note)}</p>
-      <div class="shares">` +
-      r.networks.map((n, i) => `
-      <div class="rowitem" ${saved.has(n.ssid) ? "" : `data-join="${i}"`}>
-        <span class="wifi-lock">${icon(n.secure ? "lock" : "wifi")}</span>
-        <div class="grow">
-          <div class="t">${esc(n.ssid)}</div>
-          <div class="s">${signalBars(n.signal)} ${n.signal}%${
-            n.band ? ` · ${n.band} GHz` : ""}${n.secure ? "" : " · open"}</div>
-        </div>
-        <span class="badge ${saved.has(n.ssid) ? "ok" : ""}">${
-          saved.has(n.ssid) ? "saved" : "add"}</span></div>`).join("") + `</div>`;
-
-    $$("#wifi-results [data-join]").forEach(node => node.onclick = () => {
-      const n = r.networks[+node.dataset.join];
-      showWifiForm(n.ssid, !n.secure);
-    });
-  };
-
   const pwGo = $("#pw-go");
   if (pwGo) pwGo.onclick = async () => {
     const res = $("#pw-res");
@@ -4263,68 +3598,6 @@ function wireContent(section, sub) {
 
   const check = $("#upd-check");
   if (check) check.onclick = () => route();
-  const inst = $("#upd-install");
-  if (inst) inst.onclick = async () => {
-    inst.disabled = true;
-    let r;
-    try { r = await api.post("/api/update/install"); }
-    catch (e) { r = { ok: false, message: e.message || "The update failed." }; }
-    // Three outcomes, not two. A swap the box could not restart is not a failure --
-    // the new version is on disk and one restart away -- but reporting it as a plain
-    // success is the bug that had somebody watching "Riparr is restarting" forever.
-    toast(r.message, r.ok && !r.needs_restart ? "ok" : r.ok ? "warn" : "bad");
-
-    if (r.ok && r.needs_restart) {
-      const out0 = $("#upd-result");
-      if (out0) {
-        out0.hidden = false;
-        out0.className = "alert warn";
-        out0.innerHTML = `<b>${esc(r.message)}</b>
-          <div class="why" style="margin-top:8px">
-            <button class="btn" id="upd-restart">Restart Riparr now</button>
-          </div>`;
-        const rb = $("#upd-restart");
-        if (rb) rb.onclick = () => powerAction("reboot", "Restarting to finish the update",
-          "Riparr is restarting. It comes back on the new version in about a minute. "
-          + "This page reconnects on its own.");
-      }
-      inst.disabled = false;
-      return;
-    }
-
-    // The box is about to go away on its own. Cover the page and wait for it, rather
-    // than leaving somebody looking at the old version number wondering whether it
-    // worked -- which is what a silent success looks like from the outside, and is
-    // indistinguishable from the failure it replaced.
-    //
-    // A service restart is ~2s and a reboot ~60s, so the poll starts at very different
-    // times; `restarted` says which happened.
-    if (r.ok && r.restarted) {
-      showWaiting(r.restarted === "reboot"
-        ? "Updated. The box is restarting \u2014 about a minute."
-        : "Updated. Riparr is restarting\u2026");
-      waitForBoxBack({ startAfter: r.restarted === "reboot" ? 12000 : 2500 });
-      return;
-    }
-
-    // A toast is the wrong place for the only copy of a diagnosis. It vanishes, it
-    // cannot be selected, and `detail` — the one field that says *why* — was being
-    // dropped on the floor entirely: an update that failed on a permission error read
-    // as "The update failed. Nothing was changed." and nothing else, anywhere.
-    const out = $("#upd-result");
-    if (out) {
-      out.hidden = false;
-      out.className = `alert ${r.ok ? "ok" : "warn"}`;
-      out.innerHTML = `<b>${esc(r.message || "")}</b>${
-        r.detail ? `<div class="why" style="margin-top:6px;user-select:text">${esc(r.detail)}</div>` : ""}${
-        r.ok ? "" : `<div class="why" style="margin-top:8px">There is a second way in, and
-          it does not depend on anything here working: open <b>Riparr Preparer</b> on your
-          computer and choose <b>Set up a box that's already running</b>. It installs over
-          SSH and keeps your login, settings, rip history and the MakeMKV build.</div>`}`;
-    }
-    inst.disabled = false;
-  };
-
   const imp = $("#import-btn");
   if (imp) {
     imp.onclick = () => $("#import-file").click();
@@ -4454,7 +3727,6 @@ function renderChrome() {
   else if (m.key_stale)
     pills.push(`<span class="pill warn">Newer key published</span>`);
   if (!st.share) pills.push(`<span class="pill warn">No share</span>`);
-  if (!st.wifi.connected) pills.push(`<span class="pill bad">Offline</span>`);
   $("#health-pills").innerHTML = pills.join("");
 }
 
@@ -4467,77 +3739,6 @@ $("#logout").onclick = async (e) => {
   location.reload();
 };
 
-/* ── power ──
-   Restarting and shutting down live in the account menu, not on a page: they are
-   things you do to the appliance, not to the queue. Progress goes on the same
-   full-screen overlay that covers a cold start, because the service is about to stop
-   answering and any in-page element saying so is about to be unreachable anyway. */
-/* Reconnecting a share used to mean rebooting the box, because mounting happens in
-   riparr-library.service as root and the web service had no way to ask for it. It now
-   has the same request-file bridge as Wi-Fi, so this is a one-second remount instead of
-   a one-minute restart -- and, crucially, instead of what people were actually doing,
-   which was deleting a perfectly good share and retyping its password to get the box to
-   try again.
-
-   The reboot is kept as the fallback for a box whose bridge predates this, rather than
-   dropping a button that used to work. Delegated from the document because the
-   destinations block is repainted on every settings change. */
-document.addEventListener("click", async (e) => {
-  const b = e.target.closest("[data-remount]");
-  if (!b) return;
-  e.preventDefault();
-  const out = b.parentElement.querySelector("[data-remount-out]");
-  const say = (msg, cls) => { if (out) { out.className = "test-out " + (cls || ""); out.textContent = msg; } };
-  b.disabled = true;
-  say("Reconnecting\u2026");
-  try {
-    const r = await api.post("/api/shares/remount", {});
-    say(r.message, r.ok ? "ok" : "warn");
-    if (r.ok) { toast("Reconnected", "ok"); route(); return; }
-  } catch (err) {
-    // 503 means this box has no remount bridge yet -- offer the old lever rather than
-    // leaving somebody with a button that only ever fails.
-    if (/installer/i.test(err.message || "")) {
-      say("");
-      if (confirm(err.message + "\n\nRestart the box instead? That also mounts it.")) {
-        powerAction("reboot", "Restarting to mount the share",
-                    "Riparr is restarting. The share is mounted as it comes back — "
-                    + "about a minute. This page reconnects on its own.");
-        return;
-      }
-    } else {
-      say(err.message, "bad");
-    }
-  }
-  b.disabled = false;
-});
-
-async function powerAction(action, label, after) {
-  showWaiting(`${label}\u2026`);
-  try {
-    await api.post("/api/system/power", { action });
-  } catch (e) {
-    showWaiting(e.message, { retry: true, spin: false });
-    return;
-  }
-  showWaiting(after, { spin: action === "reboot" });
-  if (action === "reboot") waitForBoxBack();
-}
-
-$("#sys-reboot").onclick = (e) => {
-  e.preventDefault();
-  if (!confirm("Restart Riparr?\n\nAny rip in progress will be lost.")) return;
-  powerAction("reboot", "Restarting",
-              "Restarting. This page will come back on its own in a minute or two.");
-};
-$("#sys-poweroff").onclick = (e) => {
-  e.preventDefault();
-  if (!confirm("Shut down Riparr?\n\nThere is no power button \u2014 you will have to "
-               + "unplug the cable and plug it back in to start it again.")) return;
-  powerAction("poweroff", "Shutting down",
-              "Shutting down. Wait for the light to settle, then it is safe to unplug. "
-              + "To start it again, plug the cable back in.");
-};
 window.addEventListener("hashchange", route);
 $("#gate-retry").onclick = () => location.reload();
 

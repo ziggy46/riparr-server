@@ -6,8 +6,6 @@ whole app runs on a laptop with realistic fake data and runs unchanged on the Pi
 `IS_APPLIANCE` is the only switch.
 """
 import datetime
-import hashlib
-import json
 import os
 import platform as _p
 import re
@@ -20,23 +18,25 @@ import time
 from . import drives as DRV, optical as OPT
 
 def _is_appliance():
-    """Are we running on the box, or on a development machine?
+    """Are we running against real hardware, or on a development machine?
 
-    This used to require the string "Raspberry Pi" in the device-tree model, which was
-    wrong the moment the hardware turned out to be an Orange Pi Zero 2W (Allwinner
-    H618). The failure was silent and nasty: the service would have come up in MOCK
-    mode on real hardware and served fabricated discs and fake Wi-Fi to a UI that
-    looked entirely correct.
+    Upstream keyed this off /proc/device-tree/model, which every ARM board has and no
+    x86 server, VM, container or LXC does. On the hardware this fork targets, that
+    check fails silently: the service comes up in MOCK mode, finds a fabricated disc in
+    a fabricated drive, and the interface looks entirely correct while the real drive
+    is never touched.
 
-    A device-tree model node is the actual thing being tested for -- every ARM SBC has
-    one and no ordinary desktop or VM does. RIPARR_APPLIANCE overrides either way.
+    So the rule here is the other way round. Linux is real hardware unless told
+    otherwise; anything else (a Mac, Windows) can only be a development machine.
+    RIPARR_MOCK=1 asks for mock mode on Linux, and RIPARR_APPLIANCE still overrides
+    either way.
     """
     env = os.environ.get("RIPARR_APPLIANCE")
     if env is not None:
         return env not in ("", "0", "no", "false")
-    return (_p.system() == "Linux"
-            and os.path.exists("/proc/device-tree/model")
-            and bool(open("/proc/device-tree/model", errors="ignore").read().strip("\x00").strip()))
+    if os.environ.get("RIPARR_MOCK", "") not in ("", "0", "no", "false"):
+        return False
+    return _p.system() == "Linux"
 
 
 IS_APPLIANCE = _is_appliance()
@@ -49,49 +49,72 @@ def hostname():
 
 # ─────────────────────────────── system ───────────────────────────────
 
-def system_status():
-    if MOCK:
-        return {
-            "model": "OrangePi Zero2W (simulated)",
-            "os": "Armbian 25.x (Debian trixie), minimal",
-            "kernel": "6.12.0-current-sunxi64",
-            "uptime_seconds": 48213,
-            "memory_total_mb": 2048,
-            "memory_used_mb": 214,
-            "cpu_temp_c": 46.8,
-            "throttled": False,
-            "board": "orangepizero2w",
-            "mock": True,
-        }
-    model = _read("/proc/device-tree/model").strip("\x00").strip()
+def runtime():
+    """Where this process is running: "docker", "lxc", or "host".
+
+    Shown in the interface, and used to word advice about passing a drive through.
+    RIPARR_RUNTIME overrides the guess.
+    """
+    env = os.environ.get("RIPARR_RUNTIME")
+    if env:
+        return env
+    if os.path.exists("/.dockerenv"):
+        return "docker"
+    marker = _read("/run/systemd/container").strip() or os.environ.get("container", "")
+    if marker:
+        return "lxc" if "lxc" in marker else marker
+    if "lxc" in _read("/proc/1/environ"):
+        return "lxc"
+    return "host"
+
+
+def _memory_mb():
+    """(total, used) in MB -- the container's limit when it has one, else the machine's.
+
+    /proc/meminfo inside a container reports the whole host unless something like lxcfs
+    is in front of it, so a cgroup v2 limit, when set, is the more honest number.
+    """
+    limit = _read("/sys/fs/cgroup/memory.max").strip()
+    current = _read("/sys/fs/cgroup/memory.current").strip()
+    if limit.isdigit() and current.isdigit():
+        return int(limit) // 2**20, int(current) // 2**20
     mem = {}
     for line in _read("/proc/meminfo").splitlines():
         k, _, v = line.partition(":")
         mem[k] = int(v.strip().split()[0]) if v.strip().split() else 0
     total = mem.get("MemTotal", 0) // 1024
     avail = mem.get("MemAvailable", 0) // 1024
-    # vcgencmd is Broadcom firmware; Allwinner boards expose the same things through
-    # the kernel thermal zones instead. Try the generic path when vcgencmd is absent.
-    temp = _run(["vcgencmd", "measure_temp"]) if shutil.which("vcgencmd") else None
-    if not temp:
-        raw = _read("/sys/class/thermal/thermal_zone0/temp").strip()
-        temp = str(int(raw) / 1000.0) if raw.isdigit() else ""
-    m = re.search(r"([\d.]+)", temp or "")
-    thr = (_run(["vcgencmd", "get_throttled"]) or "") if shutil.which("vcgencmd") else ""
+    return total, total - avail
+
+
+def system_status():
+    if MOCK:
+        return {
+            "model": "Development machine (simulated)",
+            "runtime": "docker",
+            "os": "Debian GNU/Linux 13 (trixie)",
+            "kernel": "6.8.12-pve",
+            "uptime_seconds": 48213,
+            "memory_total_mb": 2048,
+            "memory_used_mb": 214,
+            "cpu_temp_c": None,
+            "throttled": False,
+            "mock": True,
+        }
+    total, used = _memory_mb()
+    raw = _read("/sys/class/thermal/thermal_zone0/temp").strip()
+    rt = runtime()
     return {
-        "model": model,
+        "model": {"docker": "Docker container", "lxc": "LXC container"}.get(
+            rt, _p.node() or "Linux host"),
+        "runtime": rt,
         "os": _osname(),
         "kernel": _p.release(),
         "uptime_seconds": int(float(_read("/proc/uptime").split()[0] or 0)),
         "memory_total_mb": total,
-        "memory_used_mb": total - avail,
-        "cpu_temp_c": float(m.group(1)) if m else None,
-        # No vcgencmd means no throttle telemetry, which is not the same as throttled.
-        "throttled": ("0x0" not in thr) if thr else False,
-        # The board the Preparer prepared this card for, recorded in riparr.conf and
-        # loaded into the service environment. `model` is what the hardware reports it
-        # actually is; a mismatch between the two is a support signal worth seeing.
-        "board": os.environ.get("RIPARR_BOARD") or None,
+        "memory_used_mb": used,
+        "cpu_temp_c": int(raw) / 1000.0 if raw.isdigit() else None,
+        "throttled": False,
         "mock": False,
     }
 
@@ -123,7 +146,8 @@ def storage_status():
             "used_bytes": int(total - free), "path": path, "dedicated": dedicated}
 
 
-STAGING = "/srv/staging" if IS_APPLIANCE else "/tmp/riparr-staging"
+STAGING = os.environ.get("RIPARR_STAGING") or (
+    "/srv/staging" if IS_APPLIANCE else "/tmp/riparr-staging")
 
 
 # ─────────────────────────────── optical ───────────────────────────────
@@ -345,139 +369,32 @@ def _libredrive_probe(key, drive, ev):
             _libredrive_inflight.pop(key, None)
 
 
-def _usb_devices():
-    """Everything on the USB bus that is not a root hub.
-
-    Read from sysfs rather than by shelling out to lsusb, which is a separate package
-    and not installed by default.
-    """
-    devs = []
-    for path in _glob("/sys/bus/usb/devices/*"):
-        base = os.path.basename(path)
-        if ":" in base or base.startswith("usb"):
-            continue                      # interfaces and root hubs
-        vid = _read(os.path.join(path, "idVendor")).strip()
-        pid = _read(os.path.join(path, "idProduct")).strip()
-        if not vid:
-            continue
-        name = " ".join(x for x in (
-            _read(os.path.join(path, "manufacturer")).strip(),
-            _read(os.path.join(path, "product")).strip()) if x)
-        devs.append({"id": "%s:%s" % (vid, pid), "name": name or "unnamed device"})
-    return devs
-
-
-def usb_host_ports():
-    """What the USB controllers on this board are actually configured to do.
-
-    A controller with dr_mode=peripheral is a USB *device*: it never enumerates
-    anything plugged into it, supplies no VBUS, and -- the part that costs people a
-    day -- logs absolutely nothing when you plug something in. No error, no
-    over-current, silence. Reading it here is what turns "no drive detected" from a
-    dead end into an instruction.
-    """
-    host, peripheral = [], []
-    for node in sorted(_glob("/proc/device-tree/soc/usb@*")):
-        mode = _read(os.path.join(node, "dr_mode")).replace("\0", "").strip()
-        status = _read(os.path.join(node, "status")).replace("\0", "").strip()
-        if status and status != "okay":
-            continue
-        name = os.path.basename(node)
-        (peripheral if mode == "peripheral" else host).append(name)
-    return {"host": host, "peripheral": peripheral,
-            "overlay_applied": "usb-otg-host" in _read_boot_env().get("user_overlays", "")}
-
-
-def _read_boot_env():
-    """armbianEnv.txt as a dict, or empty when this is not an Armbian board."""
-    d = boot_dir()
-    env = {}
-    if not d:
-        return env
-    for line in _read(os.path.join(d, "armbianEnv.txt")).splitlines():
-        if "=" in line and not line.strip().startswith("#"):
-            k, _, v = line.partition("=")
-            env[k.strip()] = v.strip()
-    return env
-
-
 def optical_diagnosis():
-    """Why there is no drive — not merely that there isn't one.
+    """Why there is no drive -- not merely that there isn't one.
 
-    "No optical drive detected" is true and unhelpful: it cannot distinguish a drive
-    that is unplugged from a drive plugged into a port that physically cannot host it.
-    On this board that distinction is the whole answer, because one of the two USB-C
-    sockets is wired dr_mode=peripheral and will never enumerate anything.
-
-    `fixable` says the box can do something about it itself, and the interface offers a
-    button rather than a paragraph.
+    On a server the drive reaches this process through a passthrough, and the usual
+    reason for "no drive" is that the passthrough is missing or incomplete rather than
+    anything about the drive itself. The hint says where to look.
     """
     drives = optical_drives()
-    ports = usb_host_ports()
     if drives:
-        return {"drives": drives, "usb": [], "hint": None, "ports": ports,
-                "fixable": None}
-
-    usb = _usb_devices()
-    fixable = None
-    if usb:
-        hint = ("Something is attached to USB, but nothing is presenting itself as an "
-                "optical drive: %s. If that is the drive's adapter, it may need its own "
-                "power, or it may be in a mode that hides the disc."
-                % ", ".join("%s (%s)" % (d["name"], d["id"]) for d in usb))
+        return {"drives": drives, "hint": None, "fixable": None}
+    if MOCK:
+        hint = "Development mode is simulating no drive (RIPARR_MOCK_DRIVE=none)."
     else:
-        hint = ("Nothing at all is attached to the USB bus — not the drive, not "
-                "anything else. The drive having power and a working tray does not mean "
-                "the data connection is up: a USB-to-SATA adapter announces itself even "
-                "with no drive attached, so silence here is about the cable or the "
-                "socket, never about the drive.")
-        if ports["peripheral"] and not ports["overlay_applied"]:
-            # The single most likely cause on this board, and the one with a real fix.
-            hint += (
-                " **Most likely: the data cable is in the wrong USB-C socket.** This "
-                "board has two that look identical, and only one of them can host a "
-                "device — the other is wired as a USB peripheral and stays silent no "
-                "matter what you plug in. There are only two, so swap them: put power "
-                "where the data cable is and the data cable where power was. Riparr can "
-                "also reconfigure the second socket so that either one works.")
-            fixable = "usb-host"
-        elif ports["peripheral"]:
-            hint += (
-                " The second USB-C socket has already been reconfigured to host, so "
-                "either socket should work. That points at the cable or the adapter: a "
-                "charge-only USB-C cable carries no data and looks exactly like a dead "
-                "drive, and a USB-C-to-USB-C cable can read as a device — a USB-A "
-                "adapter in the middle is what makes that work.")
-        else:
-            hint += (
-                " Check the cable first: a charge-only USB-C cable carries no data and "
-                "looks exactly like a dead drive.")
-    return {"drives": drives, "usb": usb, "hint": hint, "ports": ports,
-            "fixable": fixable}
+        hint = (
+            "No /dev/sr* device is visible to Riparr. Check that the drive shows up on "
+            "the host (lsscsi -g), then pass **both** of its device nodes through: the "
+            "block device (/dev/sr0) and its SCSI generic node (/dev/sg*), which is "
+            "what MakeMKV reads from, with --device (or devices: in docker-compose.yml), "
+            "then recreate the container. docs/guide/02-docker.md has the details.")
+    return {"drives": drives, "hint": hint, "fixable": None}
 
-
-# Restart and shut down go through the same request-file bridge the MakeMKV install
-# uses: this process is unprivileged with NoNewPrivileges=yes and cannot call
-# systemctl, but it can create a file that a root path unit is watching. The action is
-# decided by which file is created, so there is nothing here the root side has to trust.
 # ─────────────────────────────── the clock ───────────────────────────────
 
-# The Preparer writes riparr.conf to whichever of these exists; the same directory is
-# where a person with the card in a laptop can leave a file for the box to find.
-BOOT_DIRS = ("/boot/firmware", "/boot")
-
-# Nothing this box does can legitimately believe it is earlier than the day the code
-# was written. An unsynchronised Pi comes up in 1970, or at whatever the last written
-# timestamp on the filesystem was.
+# Nothing this service does can legitimately believe it is earlier than the day the
+# code was written. A machine with a dead RTC battery comes up in 1970.
 CLOCK_FLOOR = 1755000000        # 2025-08-12
-
-
-def boot_dir():
-    for d in BOOT_DIRS:
-        if os.path.isdir(d):
-            return d
-    return None
-
 
 def clock_status():
     """Whether the time can be trusted, on a board with no RTC.
@@ -508,92 +425,6 @@ def trust_dates():
     """Whether anything derived from the clock is worth showing."""
     c = clock_status()
     return bool(c["plausible"] and c["synced"] is not False)
-
-
-POWER_ACTIONS = {"reboot", "poweroff"}
-POWER_REQUEST = "/run/riparr/%s.request"
-
-
-def power_available():
-    return all(os.path.exists("/etc/systemd/system/riparr-%s.path" % a)
-               for a in POWER_ACTIONS) and os.access("/run/riparr", os.W_OK)
-
-
-def power_action(action):
-    """Ask the system to restart or shut down. Returns (ok, message)."""
-    if action not in POWER_ACTIONS:
-        return False, "Unknown action."
-    if MOCK:
-        return True, "%s (simulated)" % action
-    if not power_available():
-        return False, ("This copy of Riparr was installed before restart and shutdown "
-                       "existed. Re-run sudo bash /opt/riparr/tools/install.sh to add "
-                       "them.")
-    try:
-        with open(POWER_REQUEST % action, "w") as f:
-            f.write("%d\n" % int(time.time()))
-    except OSError as e:
-        return False, "Could not ask the system to %s: %s" % (action, e)
-    return True, ("Restarting" if action == "reboot" else "Shutting down")
-
-
-RESTART_REQUEST = "/run/riparr/restart.request"
-RESTART_UNIT = "/etc/systemd/system/riparr-restart.path"
-
-
-def restart_available():
-    return os.path.exists(RESTART_UNIT) and os.access(RUN_DIR, os.W_OK)
-
-
-def request_service_restart():
-    """Ask the root side to restart riparr.service. True if the request was placed.
-
-    This process cannot restart itself. It runs as an unprivileged account with
-    NoNewPrivileges=yes, so both `systemctl restart` and `systemd-run` answer "Access
-    denied" -- verified on the reference box, not assumed. The updater used to try
-    those two and treat the second as success because it backgrounded the command,
-    which makes the shell exit 0 no matter what happens next. Every in-place update
-    therefore reported "Riparr is restarting" and restarted nothing.
-    """
-    if MOCK:
-        return True
-    if not restart_available():
-        return False
-    try:
-        with open(RESTART_REQUEST, "w") as f:
-            f.write("%d\n" % int(time.time()))
-        return True
-    except OSError:
-        return False
-
-
-USBHOST_REQUEST = "/run/riparr/usbhost.request"
-
-
-def usb_host_available():
-    return (os.path.exists("/etc/systemd/system/riparr-usbhost.path")
-            and os.access("/run/riparr", os.W_OK))
-
-
-def usb_host_fix():
-    """Ask the root side to make both USB-C sockets host a drive. (ok, message).
-
-    Same one-way door as `power_action`: this process cannot edit the boot
-    configuration, but it can create one file that a root path unit is watching.
-    """
-    if MOCK:
-        return True, "Reconfiguring both USB-C sockets (simulated)"
-    if not usb_host_available():
-        return False, ("This copy of Riparr was installed before the USB-C fix existed. "
-                       "Re-run sudo bash /opt/riparr/tools/install.sh to add it.")
-    if not usb_host_ports()["peripheral"]:
-        return False, "Both sockets can already host a drive — nothing to change."
-    try:
-        with open(USBHOST_REQUEST, "w") as f:
-            f.write("%d\n" % int(time.time()))
-    except OSError as e:
-        return False, "Could not ask the system to change the socket: %s" % e
-    return True, "Reconfiguring the second USB-C socket, then restarting"
 
 
 # ─────────────────────── the library, mounted ───────────────────────
@@ -945,465 +776,6 @@ def eject(device="/dev/sr0"):
         return {"ok": False, "message": "Riparr could not open the tray (%s)." % e}
     return {"ok": p.returncode == 0,
             "message": (p.stderr or p.stdout).strip() or "Tray ejected"}
-
-
-# ─────────────────────────────── wi-fi ───────────────────────────────
-
-def _wifi_iface():
-    for path in _glob("/sys/class/net/*/wireless"):
-        return path.split("/")[4]
-    return None
-
-
-def _dbm_to_quality(dbm):
-    """dBm to a 0-100 bar, the way most wireless UIs do it.
-
-    -50 and better is full, -100 is nothing, linear between. This is a presentation
-    number and a lossy one, which is exactly why the dBm is reported alongside it
-    rather than instead of it.
-    """
-    if dbm is None:
-        return None
-    return max(0, min(100, int(round(2 * (dbm + 100)))))
-
-
-def wifi_status():
-    """What the box is actually associated with.
-
-    This used to ask `nmcli`, which does not exist here: the image runs
-    systemd-networkd with wpa_supplicant and ships no NetworkManager at all. Every
-    lookup therefore returned nothing, and the interface reported a perfectly healthy
-    5 GHz link as "not connected" with no SSID. `iw` is present, and says more than
-    nmcli would have — the real signal in dBm, the frequency, and the negotiated rate.
-    """
-    if MOCK:
-        return {"connected": True, "ssid": "HomeNetwork", "signal": 78,
-                "signal_dbm": -52, "band": "2.4", "freq_mhz": 2437,
-                "bitrate_mbps": 72.2, "ip": "192.168.1.84",
-                "iface": "wlan0", "mode": "client"}
-
-    iface = _wifi_iface() or "wlan0"
-    base = {"connected": False, "ssid": None, "signal": None, "signal_dbm": None,
-            "band": None, "freq_mhz": None, "bitrate_mbps": None,
-            "ip": _ip(), "iface": iface, "mode": "client"}
-
-    out = _run(["iw", "dev", iface, "link"], timeout=5) or ""
-    if "Connected to" not in out:
-        return base
-
-    def grab(pattern, cast=str):
-        m = re.search(pattern, out)
-        if not m:
-            return None
-        try:
-            return cast(m.group(1))
-        except (TypeError, ValueError):
-            return None
-
-    dbm = grab(r"signal:\s*(-?\d+)\s*dBm", int)
-    freq = grab(r"freq:\s*(\d+)", int)
-    base.update({
-        "connected": True,
-        "ssid": grab(r"SSID:\s*(.+)", lambda v: v.strip()),
-        "signal_dbm": dbm,
-        "signal": _dbm_to_quality(dbm),
-        "freq_mhz": freq,
-        # The band is worth surfacing: 5 GHz is several times the throughput the
-        # design was originally sized against, and it is the single number that most
-        # changes how long a rip takes to land on the share.
-        "band": None if not freq else ("6" if freq >= 5925 else
-                                       "5" if freq >= 4900 else "2.4"),
-        "bitrate_mbps": grab(r"tx bitrate:\s*([\d.]+)", float),
-    })
-    return base
-
-
-def _band_of(freq):
-    """The band a frequency belongs to, or None. Matches wifi_status()'s derivation."""
-    if not freq:
-        return None
-    return "6" if freq >= 5925 else "5" if freq >= 4900 else "2.4"
-
-
-def wifi_scan():
-    """Every network the radio can see, whatever band it is on.
-
-    This used to shell out to `nmcli`, which is not installed: the image runs
-    systemd-networkd with wpa_supplicant and ships no NetworkManager at all. So the
-    real path silently returned an empty list on every board Riparr has ever run on,
-    and only the mock ever produced a network. `wifi_status` had already been moved off
-    nmcli for exactly this reason; scanning and joining were left behind.
-
-    `wpa_cli` is the right tool for this stack, and it does not need root: the control
-    socket is `GROUP=netdev` (see the Preparer's wpa_conf), so the service account
-    being in `netdev` is the whole permission story.
-
-    No band filtering. It used to drop 5 GHz on the belief the board was a Pi Zero 2 W,
-    whose radio is 2.4-only -- but the reference board is dual-band and others go to
-    Wi-Fi 6, so the filter hid networks the hardware can actually join. The radio is
-    its own filter: a 2.4-only board never returns a 5 GHz result.
-    """
-    if MOCK:
-        return [
-            {"ssid": "HomeNetwork", "signal": 82, "secure": True, "band": "2.4"},
-            {"ssid": "HomeNetwork 5G", "signal": 74, "secure": True, "band": "5"},
-            {"ssid": "Masons", "signal": 54, "secure": True, "band": "2.4"},
-            {"ssid": "ROG 2G", "signal": 38, "secure": True, "band": "2.4"},
-            {"ssid": "xr500", "signal": 21, "secure": True, "band": "5"},
-        ]
-    iface = _wifi_iface() or "wlan0"
-    # Ask for a fresh sweep, then read the table. `scan` returns before the sweep is
-    # done -- it is a request, not a result -- so the results read below may be from
-    # the previous one. That is the correct trade: a stale list now beats a blank page
-    # for four seconds, and the caller can scan again.
-    _run(["wpa_cli", "-i", iface, "scan"], timeout=5)
-    time.sleep(2.5)
-    out = _run(["wpa_cli", "-i", iface, "scan_results"], timeout=8) or ""
-    nets = {}
-    for line in out.splitlines():
-        f = line.split("\t")
-        # bssid / frequency / signal level / flags / ssid -- and a header line, and
-        # `Selected interface` chatter, neither of which has five fields.
-        if len(f) < 5 or f[0] == "bssid":
-            continue
-        ssid = f[4].strip()
-        if not ssid:
-            continue                       # a hidden network has nothing to show
-        try:
-            freq, dbm = int(f[1]), int(f[2])
-        except ValueError:
-            continue
-        sig = _dbm_to_quality(dbm) or 0
-        flags = f[3]
-        if ssid not in nets or sig > nets[ssid]["signal"]:
-            nets[ssid] = {"ssid": ssid, "signal": sig, "signal_dbm": dbm,
-                          "secure": ("WPA" in flags or "WEP" in flags),
-                          "band": _band_of(freq)}
-    return sorted(nets.values(), key=lambda n: -n["signal"])
-
-
-# ─────────────────────── more than one network ───────────────────────
-#
-# The box is meant to be carried. Taking it to a friend's house to show it off means
-# their SSID and password have to be in it *before* it gets there -- there is no
-# screen, no keyboard, and no way to type a password into a box that cannot reach the
-# network the browser is on. So Riparr keeps an ordered list of networks rather than
-# one, exactly as a phone does, and wpa_supplicant picks whichever it can see.
-#
-# The passphrase is never stored or written as a passphrase. It is turned into the
-# 256-bit PSK on the way in (PBKDF2-HMAC-SHA1, 4096 iterations, the SSID as salt --
-# IEEE 802.11i Annex H.4), which is what wpa_supplicant wants anyway and means a
-# stolen card yields a key for one network rather than a password somebody reuses.
-
-def wifi_psk(ssid, passphrase):
-    """The 64-hex PSK for this SSID and passphrase, or "" for an open network."""
-    if not passphrase:
-        return ""
-    return hashlib.pbkdf2_hmac("sha1", passphrase.encode("utf-8"),
-                               ssid.encode("utf-8"), 4096, 32).hex()
-
-
-RUN_DIR = "/run/riparr"
-WIFI_REQUEST = "/run/riparr/wifi.request"
-WIFI_STATE = "/run/riparr/wifi.state"
-WIFI_UNIT = "/etc/systemd/system/riparr-wifi.path"
-
-
-# ── what should be installed outside /opt/riparr, and whether it is ──
-#
-# Riparr is two halves. The half in /opt/riparr the service can replace itself; the half
-# in /etc/systemd/system and /usr/local/lib/riparr it cannot, because it runs as an
-# unprivileged account with NoNewPrivileges=yes and every root door executes a fixed
-# script from a directory it cannot write. That is deliberate -- the alternative is a
-# web service that can run anything as root.
-#
-# The consequence is that the two halves can drift, and until 0.3.3 nothing noticed:
-# riparr-library.service was never installed by anything, so no box mounted its share at
-# boot, and the interface reported a perfectly good share as permanently lost. Something
-# has to be able to say "this box is missing a part", or the next one is found the same
-# way -- by a user, weeks later, from the symptom.
-#
-# (unit-or-script name, where it belongs, what it does, is it required)
-SYSTEM_COMPONENTS = [
-    ("riparr.service",          "unit",   "Runs Riparr itself",                 True),
-    ("riparr-library.service",  "unit",   "Mounts your library share at boot",  True),
-    ("riparr-restart.path",     "unit",   "Restarting Riparr after an update",  True),
-    ("riparr-restart.service",  "unit",   "Restarting Riparr after an update",  True),
-    ("riparr-remount.path",     "unit",   "The Reconnect button",               True),
-    ("riparr-remount.service",  "unit",   "The Reconnect button",               True),
-    ("riparr-provision.path",   "unit",   "Applies system changes after an update", True),
-    ("riparr-provision.service","unit",   "Applies system changes after an update", True),
-    ("riparr-netwatch.service", "unit",   "Recovers Wi-Fi that dies silently",  True),
-    ("riparr-wifi.path",        "unit",   "Changing Wi-Fi networks",            True),
-    ("riparr-wifi.service",     "unit",   "Changing Wi-Fi networks",            True),
-    ("riparr-makemkv.path",     "unit",   "Installing MakeMKV",                 True),
-    ("riparr-makemkv.service",  "unit",   "Installing MakeMKV",                 True),
-    ("riparr-dvdtools.path",    "unit",   "Installing the DVD backup tools",    True),
-    ("riparr-dvdtools.service", "unit",   "Installing the DVD backup tools",    True),
-    ("riparr-reboot.path",      "unit",   "Restart from the web page",          True),
-    ("riparr-reboot.service",   "unit",   "Restart from the web page",          True),
-    ("riparr-poweroff.path",    "unit",   "Shut down from the web page",        True),
-    ("riparr-poweroff.service", "unit",   "Shut down from the web page",        True),
-    ("riparr-usbhost.path",     "unit",   "The USB-C socket fix",               True),
-    ("riparr-usbhost.service",  "unit",   "The USB-C socket fix",               True),
-    ("wifi-apply.sh",           "script", "Changing Wi-Fi networks",            True),
-    ("usbhost-fix.sh",          "script", "The USB-C socket fix",               True),
-    ("makemkv-run.sh",          "script", "Installing MakeMKV",                 True),
-    ("makemkv-install.sh",      "script", "Installing MakeMKV",                 True),
-    ("makemkv-manifest.json",   "script", "Which MakeMKV to install, and its checksums", True),
-    ("dvdtools-install.sh",     "script", "Installing the DVD backup tools",    True),
-    ("netwatch.sh",             "script", "Recovers Wi-Fi that dies silently",  True),
-    ("netwatch-settings.py",    "script", "Your Wi-Fi recovery settings",       True),
-    ("mount-library.sh",        "script", "Mounts your library share",          True),
-    ("apply-system.sh",         "script", "Installs the parts on this list",    True),
-]
-
-UNIT_DIR = "/etc/systemd/system"
-HELPER_DIR = "/usr/local/lib/riparr"
-PKG_DIR = os.path.join(os.path.dirname(os.path.dirname(
-    os.path.dirname(os.path.abspath(__file__)))), "packaging")
-TOOLS_DIR = os.path.join(os.path.dirname(PKG_DIR), "tools")
-
-
-def _packaged(name):
-    """Where the shipped copy of a component lives inside /opt/riparr."""
-    for d in (PKG_DIR, TOOLS_DIR):
-        c = os.path.join(d, name)
-        if os.path.exists(c):
-            return c
-    return None
-
-
-def _same(a, b):
-    try:
-        with open(a, "rb") as f1, open(b, "rb") as f2:
-            return hashlib.sha256(f1.read()).digest() == \
-                   hashlib.sha256(f2.read()).digest()
-    except OSError:
-        return False
-
-
-def system_components():
-    """What is installed outside /opt/riparr, and whether it matches what shipped.
-
-    Three states, and the middle one is the interesting one:
-
-      ok      installed and identical to the copy in this release
-      stale   installed, but an older version than the one now in /opt/riparr --
-              which is what an update that could not apply its system half leaves
-      missing not installed at all
-
-    `stale` matters because it is invisible from every other angle. The box reports the
-    new version, the files are on disk, and the running units are last release's.
-    """
-    if MOCK:
-        return {"components": [], "ok": True, "missing": 0, "stale": 0,
-                "repairable": False, "mock": True}
-    out, missing, stale = [], 0, 0
-    for name, kind, why, required in SYSTEM_COMPONENTS:
-        target = os.path.join(UNIT_DIR if kind == "unit" else HELPER_DIR, name)
-        shipped = _packaged(name)
-        if not os.path.exists(target):
-            state = "missing"
-            missing += 1
-        elif shipped and not _same(target, shipped):
-            state = "stale"
-            stale += 1
-        else:
-            state = "ok"
-        out.append({"name": name, "kind": kind, "why": why, "state": state,
-                    "path": target, "required": required})
-    return {"components": out, "ok": not (missing or stale),
-            "missing": missing, "stale": stale,
-            "repairable": provision_bridge_available()}
-
-
-REMOUNT_REQUEST = "/run/riparr/remount.request"
-REMOUNT_UNIT = "/etc/systemd/system/riparr-remount.path"
-
-
-def remount_bridge_available():
-    """Can this process ask the root side to remount the library shares?
-
-    Same one-way door as the rest. Mounting needs privileges this service does not have
-    and must never be given, so the whole interface is one empty file.
-    """
-    return os.path.exists(REMOUNT_UNIT) and os.path.isdir(RUN_DIR) and os.access(
-        RUN_DIR, os.W_OK)
-
-
-def request_remount():
-    """Ask the root side to remount. True if the request was placed.
-
-    Exists because there was no way back. A share that dropped -- a NAS asleep, a
-    reboot, a cable -- left a configured share that read as permanently lost, and the
-    only route the interface offered was deleting it and adding it again, retyping the
-    credentials to fix something that was never wrong with them. The mount script is
-    idempotent and never fails, so asking again is always safe.
-    """
-    if not remount_bridge_available():
-        return False
-    try:
-        with open(REMOUNT_REQUEST, "w"):
-            pass
-        return True
-    except OSError:
-        return False
-
-
-PROVISION_REQUEST = "/run/riparr/provision.request"
-PROVISION_UNIT = "/etc/systemd/system/riparr-provision.path"
-
-
-def provision_bridge_available():
-    """Can this process ask the root side to install the units it just downloaded?
-
-    The in-app updater replaces /opt/riparr and restarts the service, but it runs as
-    the riparr account and cannot write /etc/systemd/system -- so for a long time a
-    release that added a systemd unit shipped the file and installed nothing on every
-    box that updated from the web page, while a freshly written card got it. The unit
-    sat in packaging/ looking installed.
-
-    Same one-way door as the rest: one empty file, nothing in it to parse. The request
-    means "install what is in /opt/riparr/packaging now", and that arrived through a
-    checksum-verified release archive.
-    """
-    return os.path.exists(PROVISION_UNIT) and os.path.isdir(RUN_DIR) and os.access(
-        RUN_DIR, os.W_OK)
-
-
-def request_provision():
-    """Ask the root side to apply system changes. True if the request was placed.
-
-    False means this box predates the door -- the units cannot be installed from here
-    and somebody has to re-run the installer once. The caller says so rather than
-    reporting a clean update that silently left half of itself on disk.
-    """
-    if not provision_bridge_available():
-        return False
-    try:
-        with open(PROVISION_REQUEST, "w"):
-            pass
-        return True
-    except OSError:
-        return False
-
-
-def wifi_bridge_available():
-    """Can this process ask the root side to rewrite wpa_supplicant's config?
-
-    Same one-way door as MakeMKV, restart and shut down: the service creates one file
-    in its own runtime directory and a path unit turns that into a root oneshot whose
-    command line is fixed in the unit. Nothing in the file is parsed, so there is
-    nothing in it to trust -- the root side reads the network list from the database,
-    which only this service can write, and only behind authentication.
-    """
-    return os.path.exists(WIFI_UNIT) and os.path.isdir(RUN_DIR) and os.access(
-        RUN_DIR, os.W_OK)
-
-
-# Off the appliance there is no wpa_supplicant to reload, so the mock walks the same
-# states the root script publishes -- including seeding the list from the "current"
-# connection, which is what the import step does on real hardware. The plumbing below
-# it (the path unit, the script, the merge) is real and is NOT exercised here; it is
-# unvalidated until it runs on a board.
-_MOCK_WIFI = {"state": None}
-
-
-def wifi_apply():
-    """Ask for the saved list to be written out and wpa_supplicant reloaded."""
-    if MOCK:
-        from . import db
-        nets = db.get("wifi_networks") or []
-        if not nets:
-            nets = [{"ssid": wifi_status()["ssid"], "psk": "0" * 64, "open": False,
-                     "added_at": int(time.time())}]
-            db.set("wifi_networks", nets)
-        _MOCK_WIFI["state"] = {"phase": "done", "at": int(time.time()), "detail": "",
-                               "message": "Connected to %s" % nets[0]["ssid"]}
-        return {"ok": True, "message": "Applied (simulated)"}
-    if not wifi_bridge_available():
-        return {"ok": False,
-                "error": "This copy of Riparr was installed before it could change "
-                         "Wi-Fi from the web interface. Re-run the installer:\n\n"
-                         "    sudo bash /opt/riparr/tools/install.sh"}
-    try:
-        with open(WIFI_REQUEST, "w") as f:
-            f.write("%d\n" % int(time.time()))
-    except OSError as e:
-        return {"ok": False, "error": "Could not ask the system to apply it: %s" % e}
-    return {"ok": True, "message": "Applying"}
-
-
-WIFI_MERGED = "/run/riparr/wifi.merged.json"
-
-
-def wifi_adopt():
-    """Take up any network the root side found in the live config and we did not know.
-
-    The card is written with one network already on it. Nothing in the database knows
-    about that network, so the first time somebody saved a second one the config would
-    have been rewritten with only the second in it -- and the box would come home,
-    see nothing it recognised, and have no screen with which to say so.
-
-    So the apply script merges, and publishes what it merged. This picks that up, which
-    is what makes the network the Preparer wrote appear in the list like any other:
-    orderable, removable, and visibly there.
-
-    Returns True when the stored list changed.
-    """
-    from . import db
-    if MOCK:
-        return False
-    try:
-        with open(WIFI_MERGED) as f:
-            merged = json.load(f)
-    except (OSError, ValueError):
-        return False
-    if not isinstance(merged, list):
-        return False
-    have = db.get("wifi_networks") or []
-    known = {n.get("ssid") for n in have if isinstance(n, dict)}
-    added = [{"ssid": n["ssid"], "psk": n.get("psk") or "",
-              "open": not n.get("psk"), "added_at": int(time.time())}
-             for n in merged
-             if isinstance(n, dict) and n.get("ssid") and n["ssid"] not in known]
-    if not added:
-        return False
-    db.set("wifi_networks", list(have) + added)
-    return True
-
-
-def wifi_apply_state():
-    """What the root side said about the last apply, or None if it has not run."""
-    if MOCK:
-        return _MOCK_WIFI["state"]
-    try:
-        with open(WIFI_STATE) as f:
-            st = json.load(f)
-    except (OSError, ValueError):
-        return None
-    return st if isinstance(st, dict) else None
-
-
-def wifi_connect(ssid, password):
-    """Kept for the one-network case: save it at the top, then apply.
-
-    The old implementation called `nmcli dev wifi connect`, which on this image is a
-    command that does not exist -- so it reported failure with an empty message and
-    nothing changed. Joining is now the same operation as saving, because on a headless
-    box those really are the same thing: the list is what survives a reboot, and a
-    connection that does not is a connection that strands the box.
-    """
-    from . import db
-    nets = [n for n in (db.get("wifi_networks") or []) if n.get("ssid") != ssid]
-    nets.insert(0, {"ssid": ssid, "psk": wifi_psk(ssid, password),
-                    "open": not password, "added_at": int(time.time())})
-    db.set("wifi_networks", nets)
-    r = wifi_apply()
-    if not r.get("ok"):
-        return {"ok": False, "message": r.get("error", "Could not apply the change.")}
-    return {"ok": True, "message": "Saved. The box is joining %s." % ssid}
 
 
 # ─────────────────────────────── makemkv ───────────────────────────────

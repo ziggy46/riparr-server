@@ -37,7 +37,7 @@ import subprocess
 import threading
 import time
 
-from . import db, tv, led as LED, notify, platform as P, shares as SH, system as SY
+from . import db, tv, notify, platform as P, shares as SH, system as SY
 from . import backup as BK
 
 log = SY.component("Rip")
@@ -212,7 +212,6 @@ def enqueue(force=False, expect=None):
     if refusal:
         log.info("Refused a disc this drive cannot read: %s", refusal)
         notify.send("failed", title=d.get("label") or "A disc", body=refusal)
-        LED.announce("failed")
         P.eject()
         return None, refusal
 
@@ -380,7 +379,6 @@ def _refuse_duplicate(known, drive, label, abandon=None):
     note_duplicate(known.get("fingerprint") or "", title, label, known.get("ripped_at"))
     notify.send("duplicate", title=title,
                 body="Already ripped on %s. Ejected without re-reading it." % when)
-    LED.announce("duplicate")
     # Say it with the drive too, for whoever is not looking at a browser. The light is
     # blinked *before* the eject, because it works by reading the disc and there is
     # nothing to read once the tray is open.
@@ -1108,7 +1106,7 @@ def purge_staging(need_bytes=0, keep_newest=0):
             except OSError:
                 continue
         if remote != size:
-            log.info("Keeping job %d on the card: the library copy is %s, not %d bytes.",
+            log.info("Keeping job %d in staging: the library copy is %s, not %d bytes.",
                      job["id"], remote, size)
             continue
         _cleanup_staging(job)
@@ -1156,7 +1154,7 @@ def _plan_transfer(needed_bytes, kind="movie"):
                      freed // 2 ** 20, ", ".join(notes))
             free = _staging_free()
     if free < WINDOW_BYTES:
-        return None, ("There's not enough room on the card to rip anything safely. "
+        return None, ("There's not enough room in staging to rip anything safely. "
                       "Free some space, then try again.")
     if needed_bytes and free < needed_bytes + WINDOW_BYTES:
         if SH.Transport.supports_follow_copy:
@@ -1166,14 +1164,14 @@ def _plan_transfer(needed_bytes, kind="movie"):
         # non-question -- so if we are counting card space at all, either the user
         # chose to stage or the share is away. Telling somebody to buy a bigger card
         # when their NAS is simply asleep sends them to the wrong shop.
-        short = "This disc needs about %d GB and there's %d GB free on the card." % (
+        short = "This disc needs about %d GB and there's %d GB free in staging." % (
             needed_bytes // 2 ** 30, free // 2 ** 30)
         if (_settings() or {}).get("transfer_mode") == "direct":
             return None, (short + " Rips normally go straight to your library, which "
                           "has no such limit — reconnect the share and this disc will "
                           "fit.")
         return None, (short + " Let the queue drain, switch rips to go straight to "
-                      "your library, or use a larger card.")
+                      "your library, or give the staging volume more space.")
     return "burst", None
 
 
@@ -1976,7 +1974,7 @@ def _transfer(job, s, local_path, cancel_ev):
     share, folder = db.destination(kind)
     if not share:
         raise RipFailed("There's no library share configured, so the rip has nowhere "
-                        "to go. It's still on the card.")
+                        "to go. It's still in staging.")
 
     title = job.get("title") or job.get("disc_label") or "Unknown"
     year = job.get("_year")
@@ -2029,12 +2027,12 @@ def _transfer(job, s, local_path, cancel_ev):
         if waited == 0:
             log.info("Job %d: the share is unreachable; waiting.", job["id"])
             notify.send("share_lost", title=title,
-                        body="Your library share isn't answering. The rip is safe on "
-                             "the card and will finish on its own when the share is back.")
+                        body="Your library share isn't answering. The rip is safe in "
+                             "staging and will finish on its own when the share is back.")
             db.update_job(job["id"], phase="Waiting for your library to come back")
         if waited > 6 * 3600:
             raise RipFailed("Your library share hasn't answered in six hours. The rip "
-                            "is safe on the card — fix the share and retry this job.")
+                            "is safe in staging — fix the share and retry this job.")
         time.sleep(min(60, 5 + waited // 10))
         waited += 30
 
@@ -2175,7 +2173,7 @@ def _transfer_season(job, s, base, cancel_ev):
     share, _folder = db.destination("tv")
     if not share:
         raise RipFailed("There's no library share configured, so the rip has nowhere "
-                        "to go. It's still on the card.")
+                        "to go. It's still in staging.")
     transport = SH.Transport(share)
     direct = use_direct(s, "tv")
     root = _library_root("tv")
@@ -2186,7 +2184,7 @@ def _transfer_season(job, s, base, cancel_ev):
             raise Cancelled()
         local = row.get("path")
         if not local or not os.path.exists(local):
-            raise RipFailed("%s went missing from the card before it could be sent."
+            raise RipFailed("%s went missing from staging before it could be sent."
                             % episode_label(row))
         name = _episode_name(job, s, plan, row)
         where = "Sending %s — %d of %d" % (episode_label(row), n, len(pending))
@@ -2236,7 +2234,7 @@ def _transfer_season(job, s, base, cancel_ev):
                                   phase="Waiting for your library to come back")
                 if waited > 6 * 3600:
                     raise RipFailed("Your library share hasn't answered in six hours. "
-                                    "The episodes are safe on the card — fix the share "
+                                    "The episodes are safe in staging — fix the share "
                                     "and retry this job.")
                 time.sleep(min(60, 5 + waited // 10))
                 waited += 30
@@ -2336,7 +2334,6 @@ def _finish(job, s, transport, name, local_path, sent_from_card=False):
     db.update_job(job["id"], state="done", phase=None, finished_at=now,
                   eta_seconds=None, error=None,
                   dest_path=transport.describe(name))
-    LED.announce("done")
     # In cache mode the tray was opened the moment the disc was read, and the disc is
     # very likely already back on a shelf -- or replaced by the next one, which would
     # be spat out by an eject that thinks it is being helpful.
@@ -2369,7 +2366,6 @@ def _finish_season(job, s, transport, folder, base, sent_from_card=False):
     db.update_job(job["id"], state="done", phase=None, finished_at=now,
                   eta_seconds=None, error=None, episode_plan=plan,
                   dest_path=transport.describe(folder))
-    LED.announce("done")
     # A resumed season was sent from the card long after the disc came out, and very
     # likely with the next disc of the box set already loaded -- which an eject that
     # thinks it is being helpful would spit onto the tray mid-rip.
@@ -2526,11 +2522,11 @@ def _backup_destination(name, job, exists):
                 and (prior.get("fingerprint") or "") == mine):
             return cand, None, True
     raise RipFailed("Every folder name Riparr would use for this backup is already taken "
-                    "in your library. The backup is still on the card.")
+                    "in your library. The backup is still in staging.")
 
 
 def _wait_for_share(job, transport, title, cancel_ev):
-    """D11's backpressure for a backup: the copy is safe on the card, so a sleeping NAS
+    """D11's backpressure for a backup: the copy is safe in staging, so a sleeping NAS
     is a wait, never a failure. The same patience `_transfer` has."""
     waited = 0
     while not transport.reachable():
@@ -2539,12 +2535,12 @@ def _wait_for_share(job, transport, title, cancel_ev):
         if waited == 0:
             log.info("Job %d: the share is unreachable; waiting.", job["id"])
             notify.send("share_lost", title=title,
-                        body="Your library share isn't answering. The backup is safe on "
-                             "the card and will finish on its own when the share is back.")
+                        body="Your library share isn't answering. The backup is safe in "
+                             "staging and will finish on its own when the share is back.")
             db.update_job(job["id"], phase="Waiting for your library to come back")
         if waited > 6 * 3600:
             raise RipFailed("Your library share hasn't answered in six hours. The backup "
-                            "is safe on the card — fix the share and retry this job.")
+                            "is safe in staging — fix the share and retry this job.")
         time.sleep(min(60, 5 + waited // 10))
         waited += 30
 
@@ -2558,7 +2554,7 @@ def _transfer_backup(job, s, local_dir, cancel_ev):
     share, _ = db.destination("movie")
     if not share:
         raise RipFailed("There's no library share configured, so the backup has nowhere "
-                        "to go. It's still on the card.")
+                        "to go. It's still in staging.")
     transport = SH.Transport(share)
     title = job.get("title") or job.get("disc_label") or "Unknown"
     base = _backup_name(job, s)
@@ -2708,7 +2704,6 @@ def _run_job(job):
         # moment mid-job where the tray is free.
         if job.get("kind") == "tv" and job.get("_plan"):
             base = _rip_season(job, s, cancel_ev)
-            LED.announce("done")
             P.eject()
             transport, folder, base = _transfer_season(job, s, base, cancel_ev)
             _finish_season(job, s, transport, folder, base)
@@ -2727,7 +2722,6 @@ def _run_job(job):
         if not use_direct(s):
             db.update_job(job["id"], state="transferring", bytes_sent=0,
                           phase="Waiting to send to your library")
-            LED.announce("done")
             P.eject()
             log.info("Job %d: disc read and ejected; sending in the background.",
                      job["id"])
@@ -2757,7 +2751,6 @@ def _run_job(job):
         row = db.get_job(job_id) or {}
         db.update_job(job_id, state="failed", phase=None,
                       finished_at=int(time.time()), error=str(e))
-        LED.announce("failed")
         P.eject()
         notify.send("failed",
                     title=row.get("title") or row.get("disc_label") or "A disc",
@@ -2780,7 +2773,7 @@ def recover():
     """Resolve anything that was mid-flight when the power went (D4).
 
     A rip cannot be resumed -- MakeMKV has no such notion -- but a *transfer* can be
-    retried, because the file it was sending is still on the card. Distinguishing the
+    retried, because the file it was sending is still in staging. Distinguishing the
     two is the difference between "we lost your forty minutes" and "carrying on".
     """
     for job in db.list_jobs(states=db.INTERRUPTIBLE, limit=50):
@@ -2802,13 +2795,13 @@ def recover():
 
 
 def resume_transfer(job_id):
-    """Retry a failed job whose rip is still on the card. Cheap; no re-read."""
+    """Retry a failed job whose rip is still in staging. Cheap; no re-read."""
     job = db.get_job(job_id)
     if not job:
         return False, "No such job."
     local = job.get("local_path")
     if not local or not os.path.exists(local):
-        return False, "That rip is no longer on the card, so it has to be re-ripped."
+        return False, "That rip is no longer in staging, so it has to be re-ripped."
     # Straight to the sender. Routing this through the rip worker's queue would make
     # a re-send block the drive, which is exactly what early eject exists to prevent.
     db.update_job(job_id, state="transferring", phase="Waiting to send to your library",
@@ -2841,7 +2834,7 @@ def _reverify_season(job, plan, share, mode):
                                 % (episode_label(row), n, len(rows)))
             local = row.get("path")
             if not local or not os.path.exists(local):
-                failed.append("%s is no longer on the card" % episode_label(row))
+                failed.append("%s is no longer in staging" % episode_label(row))
                 continue
             try:
                 r = SH.verify_remote(transport, row["remote_name"], local, mode=mode)
@@ -3012,7 +3005,7 @@ def _send_one(job):
     local = job.get("local_path")
     try:
         if not local or not os.path.exists(local):
-            raise RipFailed("The rip is no longer on the card, so it has to be "
+            raise RipFailed("The rip is no longer in staging, so it has to be "
                             "re-ripped.")
         # A season job's `local_path` is the directory the episodes are in, not a file.
         # Handing that to `_transfer` gets the size of a directory entry and uploads it,
@@ -3043,7 +3036,6 @@ def _send_one(job):
         db.stage_end(job["id"])
         db.update_job(job["id"], state="failed", phase=None,
                       finished_at=int(time.time()), error=str(e))
-        LED.announce("failed")
         notify.send("failed", title=job.get("title") or "A disc", body=str(e))
     except Exception as e:
         log.exception("Job %d hit an unexpected error while sending", job["id"])

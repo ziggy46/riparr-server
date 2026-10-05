@@ -16,7 +16,7 @@ from typing import Dict, List
 from pydantic import BaseModel
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 
-from . import (__version__, artwork as ART, backup as BK, db, drives as DRV, led as LED,
+from . import (__version__, artwork as ART, backup as BK, db, drives as DRV,
                makemkv as MK,
                notify as NT, platform as P, rip as RIP, shares as SH, system as SY,
                tv as TV, updater)
@@ -29,8 +29,11 @@ SESSION_MAX_AGE = 60 * 60 * 24 * 30       # 30 days, matched to the cookie's Max
 # shipped box — which sits on an untrusted LAN behind one login — they are turned off
 # rather than handed to anyone who asks before signing in. They stay on in development
 # (MOCK mode) where they are useful and the box is a laptop, not an appliance.
-_DOCS = None if P.IS_APPLIANCE else "/api/docs"
-_OPENAPI = None if P.IS_APPLIANCE else "/api/openapi.json"
+# RIPARR_API_DOCS=1 turns them on in a deployment too, for wiring up dashboards.
+_SHOW_DOCS = (not P.IS_APPLIANCE
+              or os.environ.get("RIPARR_API_DOCS", "") not in ("", "0", "no", "false"))
+_DOCS = "/api/docs" if _SHOW_DOCS else None
+_OPENAPI = "/api/openapi.json" if _SHOW_DOCS else None
 
 app = FastAPI(title="Riparr", version=__version__, docs_url=_DOCS,
               openapi_url=_OPENAPI)
@@ -57,19 +60,17 @@ RESET_FILENAMES = ("riparr-reset", "riparr-reset.txt")
 
 
 def _check_password_reset():
-    """Honour a reset file left on the boot partition.
+    """Honour a reset file left beside the database.
 
-    A forgotten password used to cost a re-flash of a perfectly healthy box: there is
-    no console, no email, and opening the reset to the network would be a hole in the
-    one thing standing between this appliance and everyone else on the Wi-Fi.
+    There is no console and no email, and opening the reset to the network would be a
+    hole in the one thing standing between this service and everyone else on the LAN.
 
-    A file on the boot partition is the right key for this lock. It requires the card
-    in your hand, which is the same proof of ownership as re-flashing it and vastly
-    less destructive -- settings, shares and disc history all survive. The file is
-    deleted as it is honoured, so a card that is put back keeps working normally.
+    A file in the data directory is the right key for this lock: creating it needs a
+    shell on the host or container, which is proof of ownership. Settings, shares and
+    disc history all survive. The file is deleted as it is honoured, then restart.
     """
-    d = P.boot_dir()
-    if not d:
+    d = os.path.dirname(os.path.abspath(db.DB_PATH))
+    if not os.path.isdir(d):
         return
     for name in RESET_FILENAMES:
         path = os.path.join(d, name)
@@ -97,7 +98,6 @@ def _startup():
     SY.start_scheduler()
     RIP.start()
     BK.start()
-    LED.start()
 
 
 # ─────────────────────────────── auth ───────────────────────────────
@@ -331,7 +331,7 @@ def _capacity(free_bytes, direct=None):
         # The films are not going here, so the card's size is not the limit. Say where
         # they are going instead -- the number somebody wants when rips go direct is
         # their library's free space, which the Library panel already shows.
-        mode, phrase = "direct", "Rips go straight to your library — the card isn't the limit"
+        mode, phrase = "direct", "Rips go straight to your library — staging space isn't the limit"
     elif any(by_kind[k] for k in DISC_ORDER):
         mode = "burst"
         parts = []
@@ -368,7 +368,6 @@ def status(user=Depends(require_user)):
         "storage": dict(storage, **_capacity(storage["free_bytes"])),
         "optical": P.optical_diagnosis(),
         "clock": P.clock_status(),
-        "wifi": P.wifi_status(),
         "makemkv": P.makemkv_status(),
         "drives": _drive_report(),
         # Four fields, not the row. The row carries the SMB password, and the browser
@@ -381,8 +380,6 @@ def status(user=Depends(require_user)):
         # it. The page turns it into "you already ripped this, here it is".
         "duplicate": RIP.pending_duplicate(),
         "library": P.library_status(),
-        "led": {"detected": LED.available(), "state": LED.current_state(),
-                "device": LED.SPI_DEV},
     }
 
 
@@ -422,7 +419,7 @@ def storage_speedtest(body: SpeedTest = SpeedTest(), user=Depends(require_user))
     if db.active_job():
         raise HTTPException(status_code=400,
                             detail="Riparr is working on a disc — this would fight it "
-                                   "for the card. Try again when it has finished.")
+                                   "for the staging disk. Try again when it has finished.")
     card = P.card_speed()
     lib = P.library_status()
     result = {"card": card, "library": lib}
@@ -431,7 +428,7 @@ def storage_speedtest(body: SpeedTest = SpeedTest(), user=Depends(require_user))
     w = card.get("write_mbs")
     if not w:
         result["recommend"] = None
-        result["why"] = "Riparr couldn't measure the card."
+        result["why"] = "Riparr couldn't measure the staging disk."
         return result
     if not lib.get("mounted"):
         # No recommendation rather than "switch to the card". A share that is not
@@ -440,20 +437,19 @@ def storage_speedtest(body: SpeedTest = SpeedTest(), user=Depends(require_user))
         # rip.use_direct), so there is nothing here for the user to fix by changing a
         # setting they would then have to remember to change back.
         result["recommend"] = None
-        result["why"] = ("Your card writes at about %s MB/s. Riparr can't compare that "
-                         "with your library until the share is mounted — rips will use "
-                         "the card while it's away, either way." % w)
+        result["why"] = ("Your staging disk writes at about %s MB/s. Riparr can't "
+                         "compare that with your library until it is mounted at "
+                         "/srv/library — rips are staged until then, either way." % w)
         return result
     # No network measurement here: it would mean writing a test file into somebody's
     # library, and the honest comparison is against what this box has actually done.
     result["recommend"] = "direct" if w < 15 else "auto"
     result["why"] = (
-        ("Your card writes at about %s MB/s, which is slower than this box's network. "
-         "Writing straight to your library will be faster, and it removes the card as "
-         "a size limit." % w)
+        ("Your staging disk writes at about %s MB/s, which is slow enough that writing "
+         "straight to your library will likely be faster." % w)
         if w < 15 else
-        ("Your card writes at about %s MB/s, which is quick enough that staging on it "
-         "costs little — and caching means a rip survives the network dropping out "
+        ("Your staging disk writes at about %s MB/s, which is quick enough that staging "
+         "costs little — and it means a rip survives the network dropping out "
          "mid-disc." % w))
     return result
 
@@ -490,17 +486,6 @@ def drive_signal_test(body: SignalTest = SignalTest(), user=Depends(require_user
                                    "reading one.")
     r = P.duplicate_signal((d or {}).get("device") or "/dev/sr0", mode=body.mode)
     return {"ok": bool(r.get("ok")), "message": r.get("message")}
-
-
-@app.post("/api/system/led/test")
-def led_test(user=Depends(require_user)):
-    """Walk the LED through its primaries so a fresh build can be proved in ten seconds.
-
-    Reports `detected: false` rather than a cheerful success when there is nothing
-    wired up — "I ran the test and the box said OK and the LED stayed dark" is the
-    least debuggable outcome this feature could offer.
-    """
-    return LED.self_test()
 
 
 @app.get("/api/drives/guide")
@@ -592,7 +577,7 @@ def _space_warning(drive):
     free = P.storage_status().get("free_bytes") or 0
     if not size or size + WINDOW_BYTES <= free:
         return None
-    return ("This is a %d GB disc and there's %d GB free on the card. The film itself "
+    return ("This is a %d GB disc and there's %d GB free in staging. The film itself "
             "is smaller than the whole disc, so it may still fit — Riparr will say "
             "for certain once it has read it."
             % (size // 2 ** 30, free // 2 ** 30))
@@ -873,103 +858,6 @@ def shares_list(user=Depends(require_user)):
             "library": {k: P.library_status(db.destination(k)[0]) for k in db.KINDS}}
 
 
-@app.get("/api/system/components")
-def system_components(user=Depends(require_user)):
-    """Which parts of Riparr that live outside /opt/riparr are installed, and current.
-
-    Exists because the two halves can drift silently and nothing noticed for months.
-    riparr-library.service was never installed by any installer, so no box mounted its
-    share at boot -- and the only symptom was a good share reported as lost, which
-    looks like a network problem and sends people to re-enter credentials.
-    """
-    return P.system_components()
-
-
-@app.post("/api/system/components/repair")
-def system_components_repair(user=Depends(require_user)):
-    """Install or refresh the missing parts, without a terminal.
-
-    Only possible when the provisioning door is already present -- the service is
-    unprivileged with NoNewPrivileges=yes and cannot write a unit file. On a box that
-    predates the door there is genuinely no route from here, and saying so honestly is
-    better than a button that fails in a way the user has to interpret.
-    """
-    before = P.system_components()
-    if before.get("ok"):
-        return {"ok": True, "message": "Everything is already installed.",
-                "components": before}
-    if not before.get("repairable"):
-        raise HTTPException(
-            status_code=503,
-            detail="This box is missing the part that installs the other parts, and "
-                   "that one cannot install itself — Riparr runs unprivileged and "
-                   "cannot write a system file. Re-run setup from the Riparr Preparer "
-                   "on your computer: it finds the box, offers 'Update it in place', "
-                   "and keeps your settings, shares and history.")
-    # Poll rather than return "asked": the whole point is to answer "is it fixed now".
-    # Two passes when one is not enough: a box whose apply-system.sh predates it
-    # refreshing itself needs one provision to install the unit that refreshes it, and
-    # a second to run the refreshed script.
-    after = before
-    for _ in range(2):
-        P.request_provision()
-        deadline = time.time() + 25
-        while time.time() < deadline:
-            time.sleep(1)
-            after = P.system_components()
-            if after.get("ok"):
-                return {"ok": True,
-                        "message": "Installed. Everything on this box is up to date.",
-                        "components": after}
-    return {"ok": False,
-            "message": "Riparr asked, but %d part(s) are still missing. The system log "
-                       "on the Events page will say why."
-                       % (after.get("missing", 0) + after.get("stale", 0)),
-            "components": after}
-
-
-@app.post("/api/shares/remount")
-def shares_remount(user=Depends(require_user)):
-    """Mount the configured shares again, without touching what is configured.
-
-    The gap this fills: a share that dropped -- NAS asleep, router rebooted, cable --
-    left a configured, correct, tested share that the box reported as lost, and the
-    only route the interface offered was deleting it and adding it back. That means
-    retyping credentials to fix something that was never wrong with them, and it is the
-    kind of dead end that makes an appliance feel broken.
-
-    Nothing here re-tests or re-validates: the share was already proved when it was
-    added. This asks the root side to run the same idempotent mount it runs at boot.
-
-    Waits for the result rather than returning "asked". A button that says "reconnect"
-    and then leaves the page looking identical is indistinguishable from one that does
-    nothing, and this is exactly the moment somebody is already suspicious.
-    """
-    if not P.request_remount():
-        raise HTTPException(
-            status_code=503,
-            detail="This box can't remount from here yet. Re-run the installer once "
-                   "over SSH to add it: sudo bash /opt/riparr/tools/install.sh")
-
-    # The mount is a systemd oneshot reached through a path unit, so there is no return
-    # value to wait on -- poll the thing that actually matters instead. cifs mounts on
-    # this hardware land in about a second; 20 is generous enough for a NAS that has to
-    # spin its disks up first.
-    deadline = time.time() + 20
-    while time.time() < deadline:
-        time.sleep(0.5)
-        lib = {k: P.library_status(db.destination(k)[0]) for k in db.KINDS}
-        if any(v.get("mounted") for v in lib.values()):
-            return {"ok": True, "message": "Reconnected.", "library": lib}
-
-    lib = {k: P.library_status(db.destination(k)[0]) for k in db.KINDS}
-    return {"ok": False,
-            "message": "Riparr asked, but the share still isn't mounted. The machine "
-                       "is probably asleep or off the network — nothing here needs "
-                       "changing, and rips will use the card until it answers.",
-            "library": lib}
-
-
 @app.post("/api/shares/discover")
 def shares_discover(user=Depends(require_user)):
     return {"hosts": SH.discover()}
@@ -1023,137 +911,6 @@ def shares_delete(share_id: int, user=Depends(require_user)):
         if db.get(share_key) == share_id:
             db.set(share_key, None)
     return {"ok": True}
-
-
-# ─────────────────────────────── wi-fi ───────────────────────────────
-
-class WifiConnect(BaseModel):
-    ssid: str
-    password: str = ""
-
-
-class WifiOrder(BaseModel):
-    ssids: list
-
-
-@app.get("/api/wifi")
-def wifi(user=Depends(require_user)):
-    P.wifi_adopt()          # pick up whatever the card was written with
-    st = dict(P.wifi_status())
-    st["saved"] = _saved_networks()
-    st["can_edit"] = P.MOCK or P.wifi_bridge_available()
-    st["apply"] = P.wifi_apply_state()
-    return st
-
-
-def _saved_networks():
-    """The saved list, without the keys.
-
-    Every entry holds a 256-bit PSK. It is not the passphrase -- it is derived on the
-    way in and the passphrase is never stored -- but it is still the credential that
-    joins that network, and there is no reason for it to cross the wire back to a
-    browser. The interface only ever needs the name and the order.
-    """
-    out = []
-    for n in (db.get("wifi_networks") or []):
-        if not isinstance(n, dict) or not n.get("ssid"):
-            continue
-        out.append({"ssid": n["ssid"],
-                    "secure": bool(n.get("psk")),
-                    "added_at": n.get("added_at")})
-    return out
-
-
-@app.post("/api/wifi/scan")
-def wifi_scan(user=Depends(require_user)):
-    nets = P.wifi_scan()
-    # Only claim a band limit the hardware actually has. Most supported boards are
-    # dual-band (some Wi-Fi 6); the Raspberry Pi Zero 2 W is the 2.4 GHz-only exception,
-    # and even then the honest signal is "nothing on 5 GHz came back", not a promise.
-    dual = any(n.get("band") in ("5", "6") for n in nets)
-    note = ("5 GHz is faster and the better pick when the box and router are close."
-            if dual else
-            "Only 2.4 GHz networks were found — either this board has no 5 GHz radio, "
-            "or none are in range.")
-    return {"networks": nets, "note": note, "saved": _saved_networks()}
-
-
-@app.post("/api/wifi/networks")
-def wifi_network_add(body: WifiConnect, user=Depends(require_user)):
-    """Remember a network. Adding one is the same operation as joining one.
-
-    On a box with no screen those really are the same thing: a connection that does not
-    survive a reboot is a connection that strands the box, and a network you cannot
-    reach yet -- a friend's house you have not driven to -- has to be enterable anyway.
-    So this takes an SSID that may be nowhere in range, derives the PSK, puts it at the
-    top of the list and applies.
-    """
-    ssid = (body.ssid or "").strip()
-    if not ssid:
-        raise HTTPException(status_code=400, detail="A network name is required.")
-    if body.password and not (8 <= len(body.password) <= 63):
-        raise HTTPException(
-            status_code=400,
-            detail="A Wi-Fi password is between 8 and 63 characters. Leave it empty "
-                   "for an open network.")
-    r = P.wifi_connect(ssid, body.password)
-    if not r.get("ok"):
-        raise HTTPException(status_code=400, detail=r.get("message", "Could not save it."))
-    return {"ok": True, "message": r.get("message"), "saved": _saved_networks()}
-
-
-@app.put("/api/wifi/networks")
-def wifi_networks_reorder(body: WifiOrder, user=Depends(require_user)):
-    """Re-order the list, or drop entries from it, by naming what should remain.
-
-    Order is the whole feature: wpa_supplicant joins the highest-priority network it
-    can see, so "prefer home over the guest network at work" is expressed here and
-    nowhere else.
-    """
-    want = [str(x) for x in (body.ssids or [])]
-    have = {n["ssid"]: n for n in (db.get("wifi_networks") or [])
-            if isinstance(n, dict) and n.get("ssid")}
-    if not want:
-        raise HTTPException(
-            status_code=400,
-            detail="Riparr will not save an empty list — that would take the box off "
-                   "the network with no way to put it back except a card reader.")
-    ordered = [have[s] for s in want if s in have]
-    if not ordered:
-        raise HTTPException(status_code=400, detail="None of those networks are saved.")
-    db.set("wifi_networks", ordered)
-    r = P.wifi_apply()
-    if not r.get("ok"):
-        raise HTTPException(status_code=400, detail=r.get("error", "Could not apply it."))
-    return {"ok": True, "saved": _saved_networks()}
-
-
-@app.post("/api/wifi/import")
-def wifi_import(user=Depends(require_user)):
-    """Ask the root side to read the live config and tell us what is in it.
-
-    Deliberately an explicit call rather than a side effect of loading the page: it
-    rewrites /etc/wpa_supplicant and reloads the supplicant, and a GET must not do
-    that. The Network page fires it once, when it has no saved networks at all — which
-    is exactly the state a freshly written card is in, with one network on it that
-    Riparr has never been told about.
-    """
-    r = P.wifi_apply()
-    if not r.get("ok"):
-        raise HTTPException(status_code=400, detail=r.get("error", "Could not read it."))
-    return {"ok": True}
-
-
-@app.get("/api/wifi/apply")
-def wifi_apply_state(user=Depends(require_user)):
-    """What the root side is doing, or said last. Never blocks."""
-    return {"apply": P.wifi_apply_state(),
-            "connected": P.wifi_status().get("ssid")}
-
-
-@app.post("/api/wifi/connect")
-def wifi_connect(body: WifiConnect, user=Depends(require_user)):
-    return P.wifi_connect(body.ssid, body.password)
 
 
 # ─────────────────────────────── queue ───────────────────────────────
@@ -1398,7 +1155,7 @@ def history(user=Depends(require_user)):
     History is the data page: the question it answers is "what happened, how long did
     each part take, and what can I do about it". The four retry verbs are computed
     here rather than in the browser, because whether a retry is possible depends on
-    something only the box can see -- whether the staged file is still on the card.
+    something only the box can see -- whether the staged file is still in staging.
     """
     jobs = []
     for j in db.list_jobs(states=["done", "failed", "cancelled"], limit=100):
@@ -1436,7 +1193,7 @@ def _retries_for(j):
     if state != "done":
         if local:
             out.append({"action": "upload", "label": "Retry upload",
-                        "why": "The rip is still on the card, so this is a re-copy "
+                        "why": "The rip is still in staging, so this is a re-copy "
                                "rather than a re-read of the disc."})
         out.append({"action": "rip", "label": "Retry rip", "needs_disc": True,
                     "why": "Put the disc back in the tray and Riparr will read it "
@@ -1546,23 +1303,6 @@ def makemkv_renewal_dismiss(user=Depends(require_user)):
     return {"ok": True}
 
 
-class PowerAction(BaseModel):
-    action: str
-
-
-@app.post("/api/system/power")
-def system_power(body: PowerAction, user=Depends(require_user)):
-    """Restart or shut down the box.
-
-    The enclosure has no power button, so without this the only way to stop the box is
-    to pull the cable — which is how a running Linux system loses a filesystem.
-    """
-    ok, message = P.power_action(body.action)
-    if not ok:
-        raise HTTPException(status_code=400, detail=message)
-    return {"ok": True, "action": body.action, "message": message}
-
-
 @app.get("/api/artwork")
 def artwork_lookup(label: str = "", user=Depends(require_user)):
     """Cover art for a disc label, only when the match is beyond doubt.
@@ -1593,20 +1333,6 @@ def artwork_image(token: str, user=Depends(require_user)):
         raise HTTPException(status_code=404, detail="No image for that token.")
     return Response(content=blob, media_type=ctype,
                     headers={"Cache-Control": "private, max-age=86400"})
-
-
-@app.post("/api/system/usb-host")
-def system_usb_host(user=Depends(require_user)):
-    """Make both USB-C sockets able to host the drive, then restart.
-
-    The board has two sockets that look identical and only one can host. The other
-    enumerates nothing and logs nothing, so it reads as a dead drive rather than a
-    wrong port. Rather than explain that, offer to fix it.
-    """
-    ok, message = P.usb_host_fix()
-    if not ok:
-        raise HTTPException(status_code=400, detail=message)
-    return {"ok": True, "message": message}
 
 
 @app.get("/api/makemkv/beta-key")

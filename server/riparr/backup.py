@@ -31,15 +31,10 @@ import os
 import re
 import shutil
 import subprocess
-import threading
 import time
 
 from . import platform as P
 
-RUNDIR = "/run/riparr"
-REQUEST = os.path.join(RUNDIR, "dvdtools.request")
-STATE = os.path.join(RUNDIR, "dvdtools.state")
-BRIDGE_UNIT = "/etc/systemd/system/riparr-dvdtools.path"
 
 # What a finished backup must contain, per family. Checked after the tool exits, because
 # an exit status is the tool's opinion and a folder that plays is the fact. dvdbackup in
@@ -100,7 +95,7 @@ def can_backup(family):
             return True, ""
         if installing():
             return False, "the DVD backup tools are still installing"
-        return False, "the DVD backup tools aren't installed yet (Settings → Ripping)"
+        return False, "the DVD backup tools aren't installed (rebuild the image or run deploy/install-tools.sh)"
     if family in ("bluray", "uhd"):
         if P.MOCK or shutil.which("makemkvcon") or os.path.exists("/usr/local/bin/makemkvcon"):
             return True, ""
@@ -109,83 +104,34 @@ def can_backup(family):
 
 
 # ── installing them ──
-
-def _read_state():
-    try:
-        import json
-        with open(STATE) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+# Part of the image here, like MakeMKV: deploy/install-tools.sh installs dvdbackup and
+# builds libdvdcss when the image is built. Nothing installs from the web page.
+INSTALL_HINT = ("The DVD backup tools are built into the Riparr Server image. "
+                "Rebuild the image: docker compose build --no-cache")
 
 
 def installing():
-    st = _read_state() or {}
-    return st.get("phase") in ("starting", "installing", "building")
-
-
-def bridge_available():
-    return os.path.exists(BRIDGE_UNIT) and os.path.isdir(RUNDIR) and os.access(
-        RUNDIR, os.W_OK)
+    return False
 
 
 def status():
     """Everything the settings page shows about DVD backups."""
     t = dvd_tools()
-    st = _read_state() or {}
     return {"ready": t["ready"], "dvdbackup": t["dvdbackup"],
-            "libdvdcss": t["libdvdcss"], "installing": installing(),
-            "phase": st.get("phase"), "message": st.get("message"),
-            "detail": st.get("detail"),
-            "can_install": P.MOCK or bridge_available()}
+            "libdvdcss": t["libdvdcss"], "installing": False,
+            "phase": None, "message": None if t["ready"] else INSTALL_HINT,
+            "detail": None, "can_install": False}
 
 
 def request_install():
-    """Ask the root side to install dvdbackup and libdvdcss. One empty file, as with
-    every other privileged action: the request carries nothing the root side reads."""
-    if P.MOCK:
-        return {"ok": True, "message": "Off-hardware: nothing to install."}
-    if dvd_tools()["ready"]:
+    if P.MOCK or dvd_tools()["ready"]:
         return {"ok": True, "message": "Already installed."}
-    if installing():
-        return {"ok": True, "message": "Already installing."}
-    if not bridge_available():
-        return {"ok": False,
-                "error": "This box is missing the part that installs them. "
-                         "System → Tasks can install the system parts."}
-    try:
-        with open(REQUEST, "w") as f:
-            f.write("%d\n" % int(time.time()))
-    except OSError as e:
-        return {"ok": False, "error": "Could not ask the system to install them: %s" % e}
-    _lib_cache["found"] = None
-    return {"ok": True, "message": "Installing — a few minutes."}
+    return {"ok": False, "error": INSTALL_HINT}
 
 
 def start():
-    """Ask for the DVD tools once per boot, if they are missing.
-
-    Two callers ask, because neither covers every box alone. apply-system.sh asks after
-    an update -- but on a fresh install it runs before the service has ever started, so
-    /run/riparr does not exist yet and there is nowhere to put the request. This asks
-    when the service starts, a minute and a half in so a first boot is not doing
-    everything at once. The state file lives in /run, so an attempt that failed is shown
-    on the settings page for the rest of this boot rather than retried in a loop.
-    """
-    if P.MOCK or not P.IS_APPLIANCE:
-        return
-
-    def later():
-        time.sleep(90)
-        try:
-            if dvd_tools()["ready"] or _read_state() is not None:
-                return
-            if bridge_available():
-                request_install()
-        except Exception:
-            pass
-
-    threading.Thread(target=later, name="riparr-dvdtools", daemon=True).start()
+    """Nothing to start: the tools arrive with the deployment."""
+    return
 
 
 # ── what a folder holds ──
