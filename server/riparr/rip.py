@@ -1581,7 +1581,14 @@ def _identify(job, s):
         raise RipFailed("Nothing on this disc is longer than %d seconds, so there is "
                         "nothing worth ripping." % s["min_title_seconds"])
 
-    name = job.get("title") or remembered.get("title") or pretty_label(d.get("label"))
+    name = job.get("title")
+    if not name and remembered.get("title"):
+        # The disc remembers the bare title and the year apart; put them back together
+        # so _split_year below finds the year again.
+        name = remembered["title"]
+        if remembered.get("year") and not _split_year(name)[1]:
+            name = "%s (%s)" % (name, remembered["year"])
+    name = name or pretty_label(d.get("label"))
 
     # Two separate questions, and they were one setting until a 3D Blu-ray walked into
     # it. "What do I call this" is answered by the volume label; "which title is the
@@ -1697,11 +1704,18 @@ def _rip(job, s, cancel_ev):
     # empty after a rip the user watched happen. `ripped_at` is still set only by
     # _finish(), so duplicate refusal continues to mean "verified", not "attempted".
     if job.get("fingerprint"):
+        film = {}
+        if kind == "movie":
+            # The year and the TMDb film, so a re-rip is named exactly like the first
+            # rip rather than from the bare title alone.
+            film = {"year": job.get("year") or job.get("_year") or None}
+            if job.get("tmdb_id"):
+                film["tmdb_id"] = job["tmdb_id"]
         db.record_disc(job["fingerprint"], label=job.get("disc_label"),
                        title=job.get("title"), kind=kind,
                        size_bytes=job.get("disc_bytes") or 0,
                        disc_family=job.get("disc_family"),
-                       title_index=job.get("chosen_title"))
+                       title_index=job.get("chosen_title"), **film)
     db.update_job(job["id"], state="ripping",
                   phase="Reading the disc",
                   local_path=None, bytes_ripped=0, stage_pct=0)
@@ -2524,7 +2538,14 @@ def _identify_backup(job, s, d):
     """The film path's identify, minus everything about titles. Returns the job, or
     None when it is waiting for a name or was skipped."""
     remembered = db.get_disc(job.get("fingerprint") or "") or {}
-    name = job.get("title") or remembered.get("title") or pretty_label(d.get("label"))
+    name = job.get("title")
+    if not name and remembered.get("title"):
+        # The disc remembers the bare title and the year apart; put them back together
+        # so _split_year below finds the year again.
+        name = remembered["title"]
+        if remembered.get("year") and not _split_year(name)[1]:
+            name = "%s (%s)" % (name, remembered["year"])
+    name = name or pretty_label(d.get("label"))
     family = disc_family(d)
 
     if not name:

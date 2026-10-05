@@ -140,6 +140,9 @@ ADDED_COLUMNS = {
         ("first_episode", "INTEGER"),
         ("series_name", "TEXT"),
         ("tmdb_id", "INTEGER"),        # a film identified once stays identified
+        # Kept apart from `title`, which is the bare name. Without it a re-rip of
+        # "Dune (2021)" with no TMDb key came back as plain "Dune".
+        ("year", "INTEGER"),
     ],
 }
 
@@ -596,6 +599,18 @@ def list_jobs(states=None, limit=50):
     q += " ORDER BY COALESCE(started_at,0) DESC LIMIT ?"
     args.append(limit)
     return [dict(r) for r in conn().execute(q, args)]
+
+
+def last_finished(since):
+    """The most recent rip that ended in a file or a failure after `since`, or None.
+
+    Cancelled jobs are left out: a skipped disc or a refused duplicate is not an
+    outcome anybody waits by the drive for.
+    """
+    r = conn().execute(
+        "SELECT * FROM jobs WHERE state IN ('done','failed') AND finished_at >= ? "
+        "ORDER BY finished_at DESC LIMIT 1", (int(since),)).fetchone()
+    return dict(r) if r else None
 
 
 def list_discs(limit=200):
