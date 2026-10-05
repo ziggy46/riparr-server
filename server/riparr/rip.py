@@ -29,6 +29,7 @@ does not fit, which is D10 as originally written -- the refusal D11 was meant to
 retire. `Transport.supports_follow_copy` is the seam; when it goes True, only
 `_plan_transfer` below needs to change.
 """
+import json
 import os
 import re
 import shutil
@@ -38,6 +39,7 @@ import time
 
 from . import db, tv, notify, platform as P, shares as SH, system as SY
 from . import backup as BK
+from . import naming
 
 log = SY.component("Rip")
 
@@ -655,6 +657,8 @@ def fingerprint(drive, on_progress=None):
 
 
 TINFO = re.compile(r'^TINFO:(\d+),(\d+),\d+,"(.*)"\s*$')
+# SINFO:title,stream,attribute,code,"value" -- one line per fact about one stream.
+SINFO = re.compile(r'^SINFO:(\d+),(\d+),(\d+),\d+,"(.*)"\s*$')
 _DURATION = re.compile(r"^(?:(\d+):)?(\d+):(\d+)$")
 
 
@@ -746,11 +750,32 @@ def _mock_titles():
     ]
 
 
+# Streams for a mock title, per RIPARR_MOCK_DISC, so the media tokens in a naming
+# template have something to show off-hardware. Shaped like read_titles' SINFO output.
+_MOCK_STREAMS = {
+    "uhd": [{"type": "Video", "codec_short": "MpegH", "codec_long": "MpegH HEVC Main10@L5.1",
+             "video_size": "3840x2160"},
+            {"type": "Video", "codec_short": "MpegH", "name": "Dolby Vision",
+             "video_size": "1920x1080"},
+            {"type": "Audio", "codec_short": "TrueHD", "codec_long": "TrueHD Atmos",
+             "layout": "7.1", "channels": "8", "lang": "eng"}],
+    "bluray": [{"type": "Video", "codec_short": "Mpeg4", "codec_long": "Mpeg4 AVC High@L4.1",
+                "video_size": "1920x1080"},
+               {"type": "Audio", "codec_short": "DTS-HD MA", "layout": "5.1",
+                "channels": "6", "lang": "eng"}],
+    "dvd": [{"type": "Video", "codec_short": "Mpeg2", "video_size": "720x480"},
+            {"type": "Audio", "codec_short": "DD", "codec_long": "Dolby Digital",
+             "layout": "5.1", "channels": "6", "lang": "eng"}],
+}
+
+
 def _mt(index, seconds, gb, name="", source="", segments="", chapters=1):
     """One mock title, in the shape `read_titles` returns."""
+    disc = os.environ.get("RIPARR_MOCK_DISC", "bluray")
     return {"index": index, "seconds": int(seconds), "bytes": int(gb * 2 ** 30),
             "name": name, "file": "title_t%02d.mkv" % index, "source": source,
-            "segments": segments, "chapters": chapters}
+            "segments": segments, "chapters": chapters,
+            "streams": [dict(x) for x in _MOCK_STREAMS.get(disc, [])]}
 
 
 def read_titles(device, disc=None, on_progress=None):
@@ -827,7 +852,17 @@ def read_titles(device, disc=None, on_progress=None):
         stdout = "".join(out_lines)
     p = _P()
     titles = {}
+    streams = {}
     for line in (p.stdout or "").splitlines():
+        sm = SINFO.match(line)
+        if sm:
+            # What each stream is -- codec, resolution, channels, language -- which is
+            # what the media tokens in a naming template are made from.
+            field = naming.SINFO_FIELDS.get(int(sm.group(3)))
+            if field:
+                streams.setdefault(int(sm.group(1)), {}).setdefault(
+                    int(sm.group(2)), {})[field] = sm.group(4)
+            continue
         m = TINFO.match(line)
         if not m:
             continue
@@ -849,6 +884,9 @@ def read_titles(device, disc=None, on_progress=None):
             t["segments"] = value
         elif code == 8:
             t["chapters"] = int(value or 0)
+    for idx, by_stream in streams.items():
+        if idx in titles:
+            titles[idx]["streams"] = [by_stream[k] for k in sorted(by_stream)]
     out = [titles[k] for k in sorted(titles)]
     if key and out:
         _titles_cache.update(key=key, titles=out, at=time.time())
@@ -1230,80 +1268,29 @@ def _cleanup_staging(job):
             shutil.rmtree(d, ignore_errors=True)
 
 
-# Characters SMB and NTFS refuse outright. A film called "Mission: Impossible" is not
-# an edge case, and a rip that succeeds for forty minutes and then cannot be written
-# because of a colon is the worst possible place to discover that.
-_ILLEGAL = re.compile(r'[<>"|?*\x00-\x1f]')
-_SEPARATORS = re.compile(r'[/\\:]')
-
-
-def sanitise(name):
-    # Separators become spaces rather than vanishing: "Face/Off" should read as
-    # "Face Off", not "FaceOff". Everything else is simply dropped.
-    s = _SEPARATORS.sub(" ", name or "")
-    s = _ILLEGAL.sub("", s)
-    s = re.sub(r"\s{2,}", " ", s).strip()
-    # Windows also refuses a name ending in a dot or a space, silently, at the server.
-    return s.rstrip(". ") or "Untitled"
-
-
-# What a disc family is called in a filename. Plex and Jellyfin both read several
-# files in one movie folder as versions of the same film, so this is how two copies of
-# Arthur Christmas coexist instead of one deleting the other.
-SOURCE_TAG = {"dvd": "DVD", "bluray": "Bluray", "uhd": "UHD"}
-
-
-# {Season}, {Season:00}, {Episode:000} and so on. The padding is whatever run of
-# zeroes the user wrote, so a template can ask for S1 or S01 or S001 and get it.
-_PAD_TOKEN = re.compile(r"\{(Season|Episode)(?::(0+))?\}")
+# Names are built by naming.py, which reads Riparr's own templates and Radarr's.
+sanitise = naming.sanitise
+SOURCE_TAG = naming.SOURCE_TAG
 
 
 def _render_template(template, title, year=None, source=None, season=None,
-                     episode=None, episode_last=None, episode_title=None):
-    """Fill a Plex/Jellyfin-convention naming template.
+                     episode=None, episode_last=None, episode_title=None, media=None):
+    """Fill a naming template. See naming.py for the language."""
+    return naming.render(template, naming.values_for(
+        title, year, source=source, season=season, episode=episode,
+        episode_title=episode_title, media=media), episode_last=episode_last)
 
-    Unknown placeholders are left alone rather than blanked: a template with a typo
-    should produce a visibly odd name, not a file called ` ().mkv`.
 
-    **A two-episode file expands the episode token into a range.** With `episode_last`
-    set, `E{Episode:00}` renders as `E01-E02` rather than `E01`, which is the form Plex
-    and Jellyfin both read as one file holding two episodes. Doing it inside the token
-    rather than adding a separate `{EpisodeRange}` one is what lets the shipped template
-    -- and any template a user has already written -- handle a double-length premiere
-    without being changed. The cost is that a template using `{Episode:00}` with no `E`
-    in front of it produces `01-E02`, which is odd-looking but still unambiguous.
-    """
-    values = {"Title": sanitise(title), "Year": str(year) if year else "",
-              "Source": SOURCE_TAG.get(source or "", ""),
-              "EpisodeTitle": sanitise(episode_title) if episode_title else ""}
-
-    def pad(m):
-        token, zeroes = m.group(1), m.group(2) or ""
-        width = len(zeroes) or 1
-        value = season if token == "Season" else episode
-        if value is None:
-            return m.group(0)          # not ours to fill; leave it visible
-        out = "%0*d" % (width, int(value))
-        if token == "Episode" and episode_last and int(episode_last) > int(episode):
-            out += "-E%0*d" % (width, int(episode_last))
-        return out
-
-    out = _PAD_TOKEN.sub(pad, template)
-    for k, v in values.items():
-        out = out.replace("{%s}" % k, v)
-    out = re.sub(r"\s*\(\)\s*", " ", out)           # an absent year leaves empty parens
-    out = re.sub(r"\s*\[\]\s*", " ", out)           # ...and an absent source, empty brackets
-    out = re.sub(r"\s+-\s+(\.[A-Za-z0-9]+)$", r"\1", out)   # "Film - .mkv"
-    out = re.sub(r"\s{2,}", " ", out)
-    out = re.sub(r"\s+(\.[A-Za-z0-9]+)$", r"\1", out)  # ...and a space before the suffix
-    segments = []
-    for seg in out.split("/"):
-        seg = seg.strip()
-        if not seg:
-            continue
-        # Only the leaf keeps its extension; a trailing dot on a directory is invalid.
-        segments.append(seg if seg is out.split("/")[-1].strip() else seg.rstrip(". "))
-    return "/".join(segments)
+def _media_for(job, index, backup=False):
+    """Media tokens for one title of this job's disc, from what MakeMKV said about it."""
+    titles = job.get("titles") or []
+    if isinstance(titles, str):
+        try:
+            titles = json.loads(titles)
+        except ValueError:
+            titles = []
+    t = next((x for x in titles if index is not None and x.get("index") == int(index)), None)
+    return naming.media_info(t, job.get("disc_family"), backup=backup) if t else {}
 
 
 # Only a *bracketed* year counts, and the last one wins.
@@ -1972,7 +1959,8 @@ def _transfer(job, s, local_path, cancel_ev):
     year = job.get("_year")
     key, fallback = _TEMPLATES.get(kind) or _TEMPLATES["movie"]
     rel = _render_template(s.get(key) or fallback,
-                           title, year, source=job.get("disc_family"))
+                           title, year, source=job.get("disc_family"),
+                           media=_media_for(job, job.get("chosen_title")))
     name = "%s/%s" % (folder, rel) if folder else rel
 
     transport = SH.Transport(share)
@@ -2140,7 +2128,8 @@ def _episode_name(job, s, plan, row):
         s.get("tv_template") or _TEMPLATES["tv"][1], title,
         plan.get("series_year"), source=job.get("disc_family"),
         season=row.get("season"), episode=row.get("episode"),
-        episode_last=row.get("episode_last"), episode_title=row.get("episode_title"))
+        episode_last=row.get("episode_last"), episode_title=row.get("episode_title"),
+        media=_media_for(job, row.get("title_index")))
     # Season zero is where both Plex and Jellyfin file a special, but the folder they
     # show it under is a matter of taste and Jellyfin's own documentation uses
     # "Specials". The template has already rendered "Season 00"; swap that one segment
@@ -2479,7 +2468,8 @@ def _backup_name(job, s):
     _share, folder = db.destination("movie")
     title = job.get("title") or job.get("disc_label") or "Unknown"
     rel = _render_template(s.get("movie_template") or _TEMPLATES["movie"][1],
-                           title, job.get("_year"), source=job.get("disc_family"))
+                           title, job.get("_year"), source=job.get("disc_family"),
+                           media=_media_for(job, job.get("chosen_title"), backup=True))
     base = os.path.dirname(rel) or os.path.splitext(rel)[0] or sanitise(title)
     return "%s/%s" % (folder, base) if folder else base
 
