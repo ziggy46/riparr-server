@@ -68,17 +68,39 @@ a preview under it shows what the template makes of a sample 4K disc.
 | `{MediaInfo AudioChannels}` | `7.1` |
 | `{MediaInfo AudioLanguages}` | `[DE+FR]`: audio languages other than English |
 | `{MediaInfo 3D}` | `3D` |
-| `{Edition Tags}`, `{ImdbId}`, `{TmdbId}`, `{Release Group}`, `{Custom Formats}` | nothing yet |
+| `{TmdbId}`, `{ImdbId}` | `603`, `tt0133093`, with a [TMDb key](#film-lookup-tmdb) |
+| `{Edition Tags}`, `{Release Group}`, `{Custom Formats}` | nothing yet |
 
 **Text inside the braces only appears with the value**, Radarr's way: `{[Quality Full]}`
 gives `[Remux-1080p]`, or nothing at all. A group nested inside another keeps its outer
 braces, which is how Plex wants IDs: `{tmdb-{TmdbId}}` gives `{tmdb-603}`. `{{Edition Tags}}`
 gives `{Director's Cut}`.
 
-The media tokens come from MakeMKV's description of the title being ripped. Riparr has
-no source yet for IDs, editions or release groups, so those parts of a template are left
-out of the name rather than guessed: a wrong ID is worse than none, since Plex and
-Jellyfin trust it over the title.
+The media tokens come from MakeMKV's description of the title being ripped. The IDs come
+from TMDb, when you've given Riparr a key and the match is clear-cut; otherwise they're
+left out of the name rather than guessed. A wrong ID is worse than none, since Plex and
+Jellyfin trust it over the title. Riparr has no source for editions or release groups.
+
+## Film lookup (TMDb)
+
+With a key from [The Movie Database](https://www.themoviedb.org/settings/api) on
+**Settings → Library**, Riparr looks each film up by the name it has for the disc, which
+is the volume label, or what you typed. TMDb gives it:
+
+- the film's real title and year, so `BLADE_RUNNER` is filed as `Blade Runner (1982)`
+- its TMDb and IMDb IDs, for `{TmdbId}` and `{ImdbId}` and the Plex, Emby and Jellyfin
+  presets
+- its poster, behind the queue and on the Discs page
+
+**A match is only used when it's clear-cut:** the same title, and the same year (or one
+year off, when only one film fits). With no year, only when one film by that name is far
+better known than any other. `DUNE` is not clear-cut: there are two well-known films.
+**When TMDb isn't sure** decides what happens then: keep the name Riparr had and rip
+without IDs (the default), or stop and ask you, with TMDb's suggestions as posters to
+pick from and a search box for anything else. A film you pick is remembered for that disc.
+
+Either kind of TMDb key works: the long "API Read Access Token" or the 32-character "API
+Key". This product uses the TMDB API but is not endorsed or certified by TMDB.
 
 The zeroes set the padding: `{Season:0}` gives `1`, `{Season:000}` gives `001`.
 

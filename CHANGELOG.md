@@ -14,6 +14,23 @@ doesn't display the line.
 
 ---
 
+## 0.7.0
+
+**Films are looked up on TMDb.** Add a free key from themoviedb.org on Settings → Library
+and Riparr finds each film's real title and year, its TMDb and IMDb IDs, and its poster.
+`BLADE_RUNNER` becomes `Blade Runner (1982)`. A match is only used when it's clear-cut;
+when it isn't, Riparr either keeps the name it had or asks you, with TMDb's suggestions to
+pick from — your choice.
+
+**Naming presets, including TRaSH Guides'.** Settings → Library has a preset list for each
+template, with TRaSH Guides' Radarr schemes for Standard, Plex, Emby and Jellyfin, and a
+live preview. Templates understand Radarr's syntax, and new tokens fill in from the disc:
+quality (`Remux-2160p`), video and audio codecs, channels, bit depth, Dolby Vision, 3D,
+audio languages, and the TMDb and IMDb IDs.
+
+**"List shares" shows what it found.** The setup wizard's share list now says how many
+shares it found and lists them as buttons, instead of hiding them in the field.
+
 ## 0.6.0
 
 **Coming from 0.5.1?** Its update message says `git pull && docker compose up -d --build`;

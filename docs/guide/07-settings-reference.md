@@ -110,6 +110,10 @@ adding a share for box sets cannot quietly redirect your films.
 The film and TV templates each have a preset list, including TRaSH Guides' Radarr naming
 schemes, and a live preview. [Library layout](05-library-layout.md#naming-templates) has
 every token.
+
+**Film lookup (TMDb)**, on the same page: a TMDb key, a button to test it, and what to do
+when TMDb isn't sure which film a disc is — keep Riparr's name without IDs *(default)*, or
+ask you. See [Library layout](05-library-layout.md#film-lookup-tmdb).
 | **On unknown disc** | **Use the disc label** *(default)* / Ask me / Skip |
 
 **This is only about the *name*.** Which title gets ripped is a separate setting, under
