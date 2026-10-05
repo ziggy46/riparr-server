@@ -24,12 +24,33 @@ const api = {
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
   c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+/* The host is a polite live region (index.html), so confirmations are read out. An
+   error is an alert and stays until it is dismissed: three seconds is not long enough
+   to read one, let alone act on it. */
 function toast(msg, kind = "") {
+  const host = $("#toasts");
   const el = document.createElement("div");
   el.className = `toast ${kind}`;
-  el.textContent = msg;
-  $("#toasts").append(el);
-  setTimeout(() => { el.style.opacity = "0"; setTimeout(() => el.remove(), 250); }, 3200);
+  const text = document.createElement("span");
+  text.textContent = msg;
+  el.append(text);
+  const close = () => { el.style.opacity = "0"; setTimeout(() => el.remove(), 250); };
+  if (kind === "bad") {
+    el.setAttribute("role", "alert");
+    const x = document.createElement("button");
+    x.className = "toast-x";
+    x.type = "button";
+    x.setAttribute("aria-label", "Dismiss");
+    x.textContent = "\u00d7";
+    x.onclick = close;
+    el.append(x);
+    // Three errors on screen is plenty; the oldest goes first.
+    const errs = $$(".toast.bad", host);
+    if (errs.length >= 3) errs[0].remove();
+  } else {
+    setTimeout(close, 3200);
+  }
+  host.append(el);
 }
 
 const state = { status: null, settings: null };
@@ -796,10 +817,14 @@ views.queue = async () => {
   setDiscArt(inTray && inTray.label);       // fire and forget; never blocks the render
   const busy = jobs.some(j => j.state !== "needs_input");
   const loaded = drives.find(d => d.present);
+  // The rip that just finished stays on the page until the next disc goes in. A
+  // different disc in the tray is the next moment, so the tray takes over again.
+  const filed = !jobs.length && showFiled(q.filed, loaded) ? q.filed : null;
+  if (filed) setFiledArt(filed);
   // Wrapped so a phone can put the disc and the rip first: on a small screen that is
   // what somebody opened the page to see, and it was below two panels of options.
   return `<div class="queue-page">
-    ${head("Queue", "Ripping and uploading happen as one overlapping operation.",
+    ${head("Queue", "",
            `<button class="tool" id="t-refresh"><span class="ti">${icon("arrows-rotate")}</span>Refresh</button>
             <button class="tool" id="t-disc" ${drives.some(d => d.present) ? "" : "disabled"}>
               <span class="ti">${icon("compact-disc")}</span>Disc info</button>
@@ -811,10 +836,82 @@ views.queue = async () => {
            style="background-image:url('${artState.image}')"></div>` : ""}
       ${jobs.length ? `${jobs.map(jobRow).join("")}
         ${trayStrip(drives, state.status.optical)}`
+      : filed ? `${filedCard(filed)}${trayStrip(drives, state.status.optical)}`
       : tray(drives, state.status.optical, loaded && !busy)}
     </div>
     ${sendingStrip(sending)}</div>`;
 };
+
+/* ── the rip that just finished ──
+   Finishing used to be a three-second toast and then an empty page, so the one moment
+   the whole box exists for -- the film is in your library -- left no trace unless you
+   happened to be looking. This keeps it on the card, with where it went and what it
+   cost, until the next disc goes in or it is dismissed. */
+let filedArt = { id: null, image: null };
+const FILED_KEY = "riparr.filedDismissed";
+
+function showFiled(job, loaded) {
+  if (!job) return false;
+  let gone = null;
+  try { gone = localStorage.getItem(FILED_KEY); } catch (e) { /* private window */ }
+  if (gone === String(job.id)) return false;
+  // Still the same disc (not yet ejected), or nothing in the tray at all.
+  return !loaded || (loaded.label || "") === (job.disc_label || "");
+}
+
+function filedName(j) {
+  const t = j.title || pretty(j.disc_label) || "Unknown disc";
+  return j.year && j.kind !== "tv" ? `${t} (${j.year})` : t;
+}
+
+async function setFiledArt(j) {
+  if (filedArt.id === j.id) return;
+  filedArt = { id: j.id, image: null };
+  // The title first, then the disc label: the lookup is strict, and either alone can
+  // miss where the other is certain.
+  let hit = null;
+  for (const label of [j.title, j.disc_label].filter(Boolean)) {
+    try { hit = await api.get(`/api/artwork?label=${encodeURIComponent(label)}`); }
+    catch (e) { return; }
+    if (hit && hit.ok) break;
+  }
+  if (filedArt.id !== j.id || !hit || !hit.ok) return;
+  await new Promise((res) => {
+    const img = new Image();
+    img.onload = img.onerror = res;
+    img.src = hit.image;
+  });
+  if (filedArt.id !== j.id) return;
+  filedArt.image = hit.image;
+  if (location.hash.replace(/^#\//, "").split("/")[0] === "queue" || !location.hash) route();
+}
+
+function filedCard(j) {
+  const ok = j.state === "done";
+  const size = j.bytes_sent || j.bytes_ripped || j.bytes_total;
+  const worked = (j.stages || []).reduce((a, st) => a + st.seconds, 0);
+  const checked = { quick: "size check passed", deep: "every byte checked" }[j.verified_mode];
+  const facts = ok ? [size ? filesize(size) : "", worked ? `took ${duration(worked)}` : "",
+                      checked || ""].filter(Boolean) : [];
+  const art = filedArt.id === j.id && filedArt.image;
+  return `<div class="filed ${ok ? "ok" : "bad"}">
+    <div class="filed-art">${art
+      ? `<img src="${esc(art)}" alt="">`
+      : `<span class="filed-fallback">${icon(ok ? "circle-check" : "triangle-exclamation")}</span>`}</div>
+    <div class="filed-body">
+      <div class="filed-kicker">${icon(ok ? "circle-check" : "triangle-exclamation")}
+        ${ok ? "In your library" : "Didn't finish"} <span class="muted">· ${esc(ago(j.finished_at))}</span></div>
+      <h2 class="filed-title">${esc(filedName(j))} ${familyTag(j.disc_family)}</h2>
+      ${ok && j.dest_path ? `<div class="filed-path">${icon("hard-drive")}<span>${esc(j.dest_path)}</span></div>` : ""}
+      ${!ok && j.error ? `<p class="filed-err">${esc(j.error)}</p>` : ""}
+      ${facts.length ? `<div class="filed-facts">${facts.map(esc).join(" · ")}</div>` : ""}
+      <div class="btn-row filed-acts">
+        <a class="btn sm" href="#/history">${ok ? "See it in History" : "Retry from History"}</a>
+        <button class="btn sm" id="filed-dismiss" data-job="${j.id}">Dismiss</button>
+      </div>
+    </div>
+  </div>`;
+}
 
 /* ── a job in flight ──
    A table row cannot hold a question, and `needs_input` has to be able to ask one, so
@@ -867,7 +964,8 @@ function sendingStrip(sending) {
           j.state === "verifying" ? "checking"
           : done > 0 ? `${Math.round(done)}%` : "waiting"}</span>
         <span class="send-size muted">${esc(filesize(j.bytes_total))}</span>
-        <button class="icon-btn" data-cancel="${j.id}" title="Cancel">${icon("xmark")}</button>
+        <button class="icon-btn" data-cancel="${j.id}" title="Cancel"
+                aria-label="Cancel sending ${esc(j.title || j.disc_label || "this disc")}">${icon("xmark")}</button>
       </div>`;
     }).join("")}
   </div>`;
@@ -966,7 +1064,8 @@ function jobRow(j) {
         ${familyTag(j.disc_family)}
         ${j.mode ? `<span class="badge ${j.mode === "burst" ? "burst" : ""}">${esc(j.mode)}</span>` : ""}
         <span class="badge state">${esc(STATE_LABEL[j.state] || j.state)}</span>
-        <button class="icon-btn" data-cancel="${j.id}" title="Cancel">${icon("xmark")}</button>
+        <button class="icon-btn" data-cancel="${j.id}" title="Cancel"
+                aria-label="Cancel ripping ${esc(j.title || j.disc_label || "this disc")}">${icon("xmark")}</button>
       </div>
       ${j.warning ? `<div class="job-warn">${icon("triangle-exclamation")}
         <span>${esc(j.warning)}</span></div>` : ""}
@@ -1462,6 +1561,23 @@ function tray(drives, optical, canRip) {
   /* "BD-ROM" is what the drive calls it. "4K UHD disc" is what is printed on the box
      the user is holding, and the server works out which of the two this is. */
   const what = d.disc_word || d.media;
+  /* Known before the button is pressed. Rip this disc on a disc Riparr already has
+     would only refuse it and eject it, so the honest offer is the re-rip. */
+  if (d.known) {
+    const k = d.known;
+    const name = k.title ? (k.year ? `${k.title} (${k.year})` : k.title)
+                         : (d.label || "this disc");
+    return `<div class="empty-state tray-loaded known">
+      <div class="big">${icon("circle-check")}</div>
+      <h2>${esc(d.label || "Disc loaded")}</h2>
+      <p>Already in your library: you ripped <b>${esc(name)}</b> ${esc(ago(k.ripped_at))}.</p>
+      ${canRip ? `<div class="btn-row tray-go">
+        <button class="btn" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip it again</button>
+        <a class="btn" href="#/discs/${encodeURIComponent(k.fingerprint)}">See it in Discs</a>
+      </div>` : ""}
+      ${driveLine(d)}
+    </div>`;
+  }
   return `<div class="empty-state tray-loaded">
     <div class="big spinning">${icon("compact-disc")}</div>
     <h2>${esc(d.label || "Disc loaded")}</h2>
@@ -1510,13 +1626,14 @@ function autoRipPanel(ar) {
   return `
     <div class="autorip ${on ? "on" : ar.ready ? "" : "blocked"}">
       <label class="ar-switch ${ar.ready ? "" : "off"}">
-        <input type="checkbox" id="autorip" ${on ? "checked" : ""}
+        <input type="checkbox" id="autorip" role="switch" ${on ? "checked" : ""}
+               aria-labelledby="ar-title" aria-describedby="ar-sub"
                ${ar.ready ? "" : "disabled"}>
         <span class="track"></span>
       </label>
       <div class="ar-text">
-        <div class="ar-title">Auto Rip</div>
-        <div class="ar-sub">${
+        <div class="ar-title" id="ar-title">Auto Rip</div>
+        <div class="ar-sub" id="ar-sub">${
           on ? "Insert a disc and walk away. Riparr does the rest and ejects when it's done."
           : ar.ready ? "Turn this on and Riparr starts ripping the moment a disc is inserted."
           : "Not available yet \u2014 see below."}</div>
@@ -1532,16 +1649,29 @@ function autoRipPanel(ar) {
    govern a rip started by hand too. So they get their own strip, two matched cards,
    each with its control on the top line and the consequence underneath -- the same
    shape twice, which is what makes a panel read as designed rather than accumulated. */
+/* Folded into one line by default: set once, rarely changed, and on a desktop the two
+   open cards pushed the disc -- the thing the page is for -- below the fold. The line
+   says what will actually happen, which is not always what the select says: direct
+   with no library mounted is staged. */
 function ripOptions() {
   const s = state.settings || {};
   const lib = (state.status && state.status.library) || {};
   const direct = s.transfer_mode === "direct";
   const card = s.card_speed || {};
+  const route = direct && !lib.mounted ? "staged, then copied (library not mounted)"
+              : direct ? "straight to your library"
+              : "staged, then sent";
+  const check = { quick: "quick check", deep: "deep check", off: "no check" }[s.verify_mode]
+                || "quick check";
   return `
+  <details class="rip-opts-d" id="rip-opts" ${state.ripOptsOpen ? "open" : ""}>
+  <summary><span class="ropt-k">${icon("gears")} Rip options</span>
+    <span class="ropt-sum">${esc(route)} · ${esc(check)}</span>
+    <span class="ropt-change">${state.ripOptsOpen ? "Done" : "Change"}</span></summary>
   <div class="rip-opts">
     <div class="ropt">
       <div class="ropt-head">
-        <span class="ropt-k">${icon("hard-drive")} Each rip goes</span>
+        <label class="ropt-k" for="ar-route">${icon("hard-drive")} Each rip goes</label>
         <button class="btn sm" id="ar-speedtest"
                 title="Measures your staging disk and says which of these suits it">Test staging speed</button>
         <select id="ar-route" title="Applies to every rip, automatic or started by hand">
@@ -1564,7 +1694,7 @@ function ripOptions() {
 
     <div class="ropt">
       <div class="ropt-head">
-        <span class="ropt-k">${icon("circle-check")} After each rip</span>
+        <label class="ropt-k" for="ar-verify">${icon("circle-check")} After each rip</label>
         <select id="ar-verify" title="Applies to every rip, automatic or started by hand">
           ${opt("quick", "quick check", s.verify_mode)}
           ${direct ? "" : opt("deep", "deep check (slow)", s.verify_mode)}
@@ -1573,7 +1703,7 @@ function ripOptions() {
       </div>
       <p class="ropt-why">${verifyNote(direct)}</p>
     </div>
-  </div>`;
+  </div></details>`;
 }
 
 function checkList(checks, fails, warns) {
@@ -1658,7 +1788,8 @@ views.history = async () => {
     const worked = (j.stages || []).reduce((a, st) => a + st.seconds, 0);
     const took = worked || (j.finished_at && j.started_at
                             ? j.finished_at - j.started_at : null);
-    return `<tr class="hist ${j.state}" data-job="${j.id}">
+    const find = esc([j.title, j.disc_label, j.year].filter(Boolean).join(" "));
+    return `<tr class="hist ${j.state}" data-job="${j.id}" data-find="${find}">
       <td class="stat">${icon(j.state === "done" ? "circle-check"
                              : j.state === "cancelled" ? "ban"
                              : "triangle-exclamation")}</td>
@@ -1682,7 +1813,7 @@ views.history = async () => {
                  title="${esc(r.why)}">${icon(RETRY_ICON[r.action] || "arrows-rotate")
                  } ${esc(r.label)}</button>`).join("")}</td>
     </tr>
-    ${j.dest_path ? `<tr class="hist-dest ${j.state}"><td></td>
+    ${j.dest_path ? `<tr class="hist-dest ${j.state}" data-find="${find}"><td></td>
       <td colspan="7"><span class="muted">${icon("hard-drive")} ${esc(j.dest_path)}</span>${
         j.verified_mode && j.verified_mode !== "off"
           ? ` <span class="badge ok">${esc(j.verified_mode)} verified</span>` : ""}</td></tr>` : ""}`;
@@ -1803,7 +1934,8 @@ views.discs = async (highlight) => {
     const name = d.title || pretty(d.label) || "Unknown disc";
     const me = highlight && d.fingerprint === highlight;
     return `<figure class="rip${me ? " dupe" : ""}" id="${me ? "dupe-tile" : ""}"
-                    data-art="${esc(d.title || d.label || "")}">
+                    data-art="${esc(d.title || d.label || "")}"
+                    data-find="${esc([name, d.label, d.year].filter(Boolean).join(" "))}">
       <div class="rip-art">
         <span class="rip-fallback">${icon("compact-disc")}</span>
         ${familyTag(d.disc_family, "on-art")}
@@ -3068,8 +3200,13 @@ function sw(key, label, on, help) {
     <span class="track"></span><span class="lbl">${esc(label)}
     ${help ? `<small>${esc(help)}</small>` : ""}</span></label>`;
 }
+/* Sticks to the bottom of the window, so Save is never a scroll away from the change,
+   and says when there is something to save. */
 function saveBar() {
-  return `<div class="btn-row"><button class="btn primary" id="save-settings">Save changes</button></div>`;
+  return `<div class="save-bar" id="save-bar">
+    <span class="save-state" id="save-state" aria-live="polite">No unsaved changes</span>
+    <button class="btn" id="discard-settings" type="button" hidden>Discard</button>
+    <button class="btn primary" id="save-settings">Save changes</button></div>`;
 }
 
 
@@ -3105,11 +3242,13 @@ function renderSidebar(section, sub) {
   $("#sidebar").innerHTML = NAV.map(n => {
     const on = n.id === section;
     const badge = badges[n.id] ? `<span class="nav-badge">${badges[n.id]}</span>` : "";
-    let html = `<a class="nav-top ${on ? "on" : ""}" href="${n.href}">
+    let html = `<a class="nav-top ${on ? "on" : ""}" href="${n.href}"${
+      on && !n.children ? ` aria-current="page"` : ""}>
       <span class="ico">${icon(n.icon)}</span>${n.label}${badge}</a>`;
     if (on && n.children) {
       html += n.children.map(c =>
-        `<a class="nav-sub ${c.key === sub ? "on" : ""}" href="${c.href}">${c.label}</a>`).join("");
+        `<a class="nav-sub ${c.key === sub ? "on" : ""}" href="${c.href}"${
+          c.key === sub ? ` aria-current="page"` : ""}>${c.label}</a>`).join("");
     }
     return html;
   }).join("") + `<div class="side-foot">
@@ -3121,25 +3260,66 @@ function renderSidebar(section, sub) {
 }
 
 /* ════════════════════ router ════════════════════ */
-async function route() {
+/* What the last render produced, so a poll that changes nothing changes nothing. */
+let lastRender = { hash: null, html: null };
+
+/* A selector that finds "the same control" in the next render: its id, or failing
+   that its first data- attribute (the cancel buttons have no id). */
+function focusKey(el) {
+  if (!el || el === document.body) return null;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  const a = Array.from(el.attributes).find(x => x.name.startsWith("data-"));
+  return a ? `[${a.name}="${CSS.escape(a.value)}"]` : null;
+}
+
+async function route(opts) {
+  const live = !!(opts && opts.live);
+  currentHash = location.hash;
   const hash = location.hash.replace(/^#\//, "") || "queue";
   const [section, sub] = hash.split("/");
   const view = views[section] || views.queue;
+  const content = $("#content");
+
+  // The poll re-renders the whole page. Doing that under somebody choosing from a
+  // dropdown or typing closed the dropdown and threw their focus away every second, so
+  // a live refresh waits until they are done with the control.
+  const active = document.activeElement;
+  if (live && content.contains(active) && active.matches("select, input, textarea")) {
+    scheduleLiveRefresh(section);
+    return;
+  }
 
   renderSidebar(section, sub);
 
-  const content = $("#content");
+  let html;
   try {
-    content.innerHTML = await view(sub);
+    html = await view(sub);
   } catch (e) {
     content.innerHTML = `<div class="card"><div class="empty-state">
       <div class="big">${icon("triangle-exclamation")}</div><h2>Couldn't load that</h2><p>${esc(e.message)}</p></div></div>`;
+    lastRender = { hash: null, html: null };
     return;
   }
+  if (live && hash === lastRender.hash && html === lastRender.html) {
+    scheduleLiveRefresh(section);
+    return;
+  }
+  const keep = live && content.contains(document.activeElement)
+    ? focusKey(document.activeElement) : null;
+  content.innerHTML = html;
+  lastRender = { hash, html };
   paintIcons(content);
   wireContent(section, sub);
-  $("#sidebar").classList.remove("open");
-  document.body.classList.remove("nav-open");
+  if (keep) {
+    const again = content.querySelector(keep);
+    if (again) again.focus({ preventScroll: true });
+  }
+  if (!live) {
+    $("#sidebar").classList.remove("open");
+    document.body.classList.remove("nav-open");
+    $("#hamburger").setAttribute("aria-expanded", "false");
+  }
+  applySearch();
   scheduleLiveRefresh(section);
 }
 
@@ -3211,14 +3391,14 @@ function scheduleLiveRefresh(section) {
     // long since finished uploading. Nothing was wrong with the box, and nothing was
     // wrong with the job -- the page had simply stopped asking.
     if (document.hidden) { scheduleLiveRefresh(section); return; }
-    route();
+    route({ live: true });
   }, delay);
 }
 
 /* Coming back to the tab should show now, not in a second and a bit. */
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden && (location.hash.replace(/^#\//, "").split("/")[0] || "queue") === "queue") {
-    route();
+    route({ live: true });
   }
 });
 
@@ -3520,6 +3700,18 @@ function wireContent(section, sub) {
   };
 
 
+  const filedX = $("#filed-dismiss");
+  if (filedX) filedX.onclick = () => {
+    try { localStorage.setItem(FILED_KEY, filedX.dataset.job); } catch (e) { /* fine */ }
+    route();
+  };
+
+  const ripOpts = $("#rip-opts");
+  if (ripOpts) ripOpts.ontoggle = () => {
+    state.ripOptsOpen = ripOpts.open;
+    $(".ropt-change", ripOpts).textContent = ripOpts.open ? "Done" : "Change";
+  };
+
   const ripNow = $("#rip-now");
   if (ripNow) ripNow.onclick = async () => {
     // Say something immediately. Starting a rip reads the disc before the job exists,
@@ -3736,7 +3928,8 @@ function wireContent(section, sub) {
     try {
       await api.post(`/api/discs/${encodeURIComponent(b.dataset.rerip)}/rerip`, {});
       toast("Started", "ok");
-      location.hash = "#/queue";
+      if ((location.hash || "#/queue").startsWith("#/queue")) route();
+      else location.hash = "#/queue";
     } catch (e) {
       toast(e.message, "bad");
       b.innerHTML = was;
@@ -3780,6 +3973,8 @@ function wireContent(section, sub) {
       // controls agree with what was actually stored instead of quietly disagreeing
       // until the next reload.
       const adj = applyAdjusted(r);
+      settingsSnapshot = JSON.stringify(collectSettings());
+      markDirty();
       if (adj.verify_mode) {
         toast("Saved. Deep checking needs two copies, so verification is a size check while rips go straight to your library.", "ok");
         route();
@@ -3788,6 +3983,27 @@ function wireContent(section, sub) {
       toast("Settings saved", "ok");
     } catch (e) { toast(e.message, "bad"); }
   };
+  settingsSnapshot = save ? JSON.stringify(collectSettings()) : null;
+  if (save) $("#discard-settings").onclick = () => { settingsSnapshot = null; route(); };
+
+  // Long help folds to two lines with a "More" link. Read once, it is in the way on
+  // every later visit -- and on the Ripping page it was most of the page.
+  $$(".f .help, .section p.help").forEach(h => {
+    if (h.classList.contains("naming-preview") || h.scrollHeight <= 62) return;
+    h.classList.add("clamp");
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "help-more";
+    more.textContent = "More";
+    more.setAttribute("aria-expanded", "false");
+    more.onclick = (e) => {
+      e.preventDefault();
+      const open = h.classList.toggle("open");
+      more.textContent = open ? "Less" : "More";
+      more.setAttribute("aria-expanded", String(open));
+    };
+    h.after(more);
+  });
 
   const themePick = $("#theme-pick");
   if (themePick) themePick.onchange = async () => {
@@ -3939,8 +4155,9 @@ function renderChrome() {
 
 $("#hamburger").onclick = (e) => {
   e.stopPropagation();
-  $("#sidebar").classList.toggle("open");
-  document.body.classList.toggle("nav-open", $("#sidebar").classList.contains("open"));
+  const open = $("#sidebar").classList.toggle("open");
+  document.body.classList.toggle("nav-open", open);
+  $("#hamburger").setAttribute("aria-expanded", String(open));
 };
 // On a phone the menu covers the page; a tap anywhere outside it puts it away.
 document.addEventListener("click", (e) => {
@@ -3948,17 +4165,104 @@ document.addEventListener("click", (e) => {
   if (sb && sb.classList.contains("open") && !sb.contains(e.target)) {
     sb.classList.remove("open");
     document.body.classList.remove("nav-open");
+    $("#hamburger").setAttribute("aria-expanded", "false");
   }
 });
-$("#user-btn").onclick = (e) => { e.stopPropagation(); $("#user-menu").classList.toggle("hidden"); };
-document.addEventListener("click", () => $("#user-menu")?.classList.add("hidden"));
+$("#user-btn").onclick = (e) => {
+  e.stopPropagation();
+  const hidden = $("#user-menu").classList.toggle("hidden");
+  $("#user-btn").setAttribute("aria-expanded", String(!hidden));
+};
+document.addEventListener("click", () => {
+  $("#user-menu")?.classList.add("hidden");
+  $("#user-btn")?.setAttribute("aria-expanded", "false");
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!$("#user-menu").classList.contains("hidden")) {
+    $("#user-menu").classList.add("hidden");
+    $("#user-btn").setAttribute("aria-expanded", "false");
+    $("#user-btn").focus();
+  }
+});
+
+/* ── search ──
+   Finds a film on the two pages that list them: Discs and History. Typing anywhere
+   else goes to Discs, the shelf of everything Riparr has ripped, and filters it. */
+const search = $("#search");
+function applySearch() {
+  const q = search.value.trim().toLowerCase();
+  const items = $$("[data-find]", $("#content"));
+  if (!items.length) return;
+  let shown = 0;
+  items.forEach(el => {
+    const hit = !q || el.dataset.find.toLowerCase().includes(q);
+    el.hidden = !hit;
+    if (hit && !el.classList.contains("hist-dest")) shown++;
+  });
+  let none = $("#search-none");
+  if (q && !shown) {
+    if (!none) {
+      none = document.createElement("p");
+      none.id = "search-none";
+      none.className = "muted search-none";
+      $("#content").append(none);
+    }
+    none.textContent = `Nothing matches \u201c${search.value.trim()}\u201d.`;
+  } else if (none) none.remove();
+}
+search.addEventListener("input", () => {
+  const section = location.hash.replace(/^#\//, "").split("/")[0];
+  if (search.value.trim() && section !== "discs" && section !== "history") {
+    location.hash = "#/discs";
+    return;
+  }
+  applySearch();
+});
+search.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") { search.value = ""; applySearch(); search.blur(); }
+});
+
+/* ── unsaved settings ──
+   Settings pages save with one button, so a change can be left behind by clicking
+   away. The snapshot is taken when the page is wired; anything different from it
+   is unsaved, and leaving asks first. */
+let settingsSnapshot = null;
+const settingsDirty = () => settingsSnapshot !== null
+  && JSON.stringify(collectSettings()) !== settingsSnapshot;
+
+function markDirty() {
+  const bar = $("#save-bar");
+  if (!bar) return;
+  const dirty = settingsDirty();
+  bar.classList.toggle("dirty", dirty);
+  $("#save-state").textContent = dirty ? "You have unsaved changes" : "No unsaved changes";
+  $("#discard-settings").hidden = !dirty;
+}
+
+$("#content").addEventListener("input", markDirty);
+$("#content").addEventListener("change", markDirty);
+
+let currentHash = location.hash;
+window.addEventListener("hashchange", () => {
+  if (settingsDirty() && !confirm("You have unsaved changes on this page.\n\nLeave without saving them?")) {
+    // Put the address back without routing: the page is still the one with the edits.
+    history.replaceState(null, "", currentHash || "#/queue");
+    return;
+  }
+  settingsSnapshot = null;
+  currentHash = location.hash;
+  route();
+});
+window.addEventListener("beforeunload", (e) => {
+  if (settingsDirty()) { e.preventDefault(); e.returnValue = ""; }
+});
 $("#logout").onclick = async (e) => {
   e.preventDefault();
   await api.post("/api/auth/logout");
   location.reload();
 };
 
-window.addEventListener("hashchange", route);
 $("#gate-retry").onclick = () => location.reload();
 
 /* ════════════════════ boot ════════════════════ */

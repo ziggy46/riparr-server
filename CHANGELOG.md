@@ -47,6 +47,34 @@ setup wizard's flow: scan your network, pick the server, list its shares and pic
 then test and save. "List shares" now says how many it found and shows them as buttons,
 instead of hiding them in the field.
 
+**A finished rip stays on the queue.** When a rip is done, the queue shows the film with
+its poster, where it was saved, its size, how long it took and whether the check passed,
+until the next disc goes in. A failed rip shows why, with a link to History.
+
+**The queue is easier to use.**
+- A disc you've already ripped says so as soon as it's in the tray, with **Rip it again**,
+  instead of a Rip button that would only refuse it.
+- The transfer and check settings are folded into one **Rip options** line, which says
+  what will really happen. For example, it says "staged" when the library isn't mounted.
+- The page no longer refreshes under you while you're using a dropdown, and keeps your
+  place when it does refresh.
+- **Search** works: it finds a disc on Discs and History.
+
+**Settings pages.**
+- Save sits at the bottom of the window and says when you have unsaved changes.
+- Leaving with unsaved changes asks first, and **Discard** puts the page back.
+- Long explanations fold to two lines with **More**.
+
+**Accessibility.**
+- Primary buttons are darker, so their text is readable.
+- Errors stay on screen until you dismiss them, and messages are announced to screen
+  readers.
+- The Auto Rip switch, the menus and the queue's controls are named for screen readers.
+- Everything you can reach with the keyboard shows a focus outline.
+
+**Fixed:** a re-rip could lose the film's year and TMDb match, so `Dune (2021)` was saved
+again as `Dune/Dune.mkv`. A disc now remembers both.
+
 ## 0.6.0
 
 **Coming from 0.5.1?** Its update message says `git pull && docker compose up -d --build`;

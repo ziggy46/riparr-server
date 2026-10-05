@@ -580,8 +580,24 @@ def _drive_report():
         d["cannot_read"] = (RIP.unreadable_reason(d, d["libredrive"])
                             if d.get("present") else None)
         d["space_warning"] = _space_warning(d) if d.get("present") else None
+        d["known"] = _known_disc(d) if d.get("present") else None
         out.append(d)
     return out
+
+
+def _known_disc(drive):
+    """The disc in the tray, if Riparr has already ripped it -- recognised by label and
+    size, the same quick check enqueue makes. Lets the queue say "already ripped" up
+    front instead of offering a Rip button whose only effect is to refuse and eject.
+    """
+    try:
+        known = db.disc_by_label_size(drive.get("label") or "", drive.get("size_bytes"))
+    except Exception:
+        return None
+    if not known or not RIP._already_have(known):
+        return None
+    return {"fingerprint": known.get("fingerprint"), "title": known.get("title"),
+            "year": known.get("year"), "ripped_at": known.get("ripped_at")}
 
 
 def _space_warning(drive):
@@ -1064,8 +1080,13 @@ def queue(user=Depends(require_user)):
     # Per-stage medians as well as the total. The total answers "when will this be
     # done"; the stages answer "should the fact that nothing has moved for six minutes
     # worry me", which is the question that actually gets asked.
+    # The rip that just finished, so the page can show where it went once the job has
+    # left the queue. A toast was the only trace before, and it was gone in three
+    # seconds. Twelve hours: long enough to come back to, short enough that it is news.
+    filed = db.last_finished(time.time() - 12 * 3600)
     return {"jobs": [j for j in jobs if j.get("state") not in db.SENDING_STATES],
             "sending": sending,
+            "filed": dict(_job_out(filed), titles=None) if filed else None,
             "drive_busy": bool(db.drive_busy()),
             "typical_seconds": typical, "typical_samples": samples,
             "typical_stages": stages, "typical_kind": kind,

@@ -52,10 +52,10 @@
 <!-- ── main shell ────────────────────────────────────────── -->
 <div id="shell" class="shell hidden">
   <header class="topbar">
-    <button class="hamburger" id="hamburger" aria-label="Menu" data-ic="bars"></button>
+    <button class="hamburger" id="hamburger" aria-label="Menu" aria-controls="sidebar" aria-expanded="false" data-ic="bars"></button>
     <a class="logo" href="#/queue"><img class="logo-mark" src="/static/img/riparr-mark.png" alt=""> <span class="logo-word">Riparr</span></a>
     <label class="search"><span class="mag" data-ic="magnifying-glass"></span>
-      <input id="search" placeholder="Search" autocomplete="off"></label>
+      <input id="search" type="search" placeholder="Find a disc" aria-label="Find a disc in Discs or History" autocomplete="off"></label>
     <div class="grow"></div>
     <div class="pills" id="health-pills"></div>
     <!-- Riparr is free and forkable; this is the only ask on the page, and it sits
@@ -64,7 +64,7 @@
        target="_blank" rel="noopener noreferrer"
        title="Buy me a coffee" aria-label="Buy me a coffee" data-ic="mug-hot"></a>
     <div class="menu-wrap">
-      <button class="icon-btn" id="user-btn" title="Account" data-ic="user"></button>
+      <button class="icon-btn" id="user-btn" title="Account" aria-label="Account" aria-haspopup="true" aria-controls="user-menu" aria-expanded="false" data-ic="user"></button>
       <div class="menu hidden" id="user-menu">
         <div class="menu-head" id="menu-who">Signed in</div>
         <a href="#/system/status">System</a>
@@ -79,7 +79,7 @@
   <main class="content" id="content"></main>
 </div>
 
-<div class="toast-host" id="toasts"></div>
+<div class="toast-host" id="toasts" role="status" aria-live="polite"></div>
 <script src="/static/icons.js"></script>
 <script src="/static/app.js"></script>
 </body>

@@ -220,6 +220,28 @@ check("a film", RIP.planned_destination(job),
        "count": 1, "kind": "movie"})
 check("nothing until there's a name", RIP.planned_destination(dict(job, title=None)), None)
 
+print("the rip that just finished")
+import time  # noqa: E402
+now = int(time.time())
+for state, ago in (("done", 600), ("cancelled", 60), ("failed", 7200)):
+    jid = db.create_job(title="Heat", disc_label="HEAT", kind="movie", fingerprint="",
+                        state=state, phase=None, mode=None, bytes_total=1)
+    db.update_job(jid, finished_at=now - ago)
+got = db.last_finished(now - 3600)
+check("the newest done or failed job, skipping cancelled",
+      (got or {}).get("state"), "done")
+check("nothing older than asked for", db.last_finished(now - 300), None)
+
+print("an already-ripped disc in the tray")
+db.record_disc("fp-heat", label="HEAT", size_bytes=4096, title="Heat", year=1995,
+               ripped_at=now)
+known = main._known_disc({"label": "HEAT", "size_bytes": 4096})
+check("is recognised before Rip is pressed, with its year",
+      (known or {}).get("title"), "Heat")
+check("and the year comes with it", (known or {}).get("year"), 1995)
+check("a disc we don't have isn't", main._known_disc({"label": "ALIEN", "size_bytes": 1}),
+      None)
+
 print()
 if failures:
     print("%d check(s) failed: %s" % (len(failures), ", ".join(failures)))

@@ -154,7 +154,9 @@ h3 { font-size: 13px; font-weight: 500; color: var(--fg-strong);
   max-width: none; width: 100%; color: var(--fg-strong); font-size: 13.5px;
 }
 .topbar .search input:focus { outline: none; box-shadow: none; border: 0; }
-.search:focus-within { border-bottom-color: var(--accent); }
+/* The underline is the focus ring here, so it has to be as visible as one. */
+.search:focus-within { border-bottom-color: var(--accent); box-shadow: 0 1px 0 var(--accent); }
+.topbar .search input::-webkit-search-cancel-button { filter: invert(.6); }
 
 .pills { display: flex; gap: 6px; margin-right: 6px; }
 .pill {
@@ -473,8 +475,16 @@ select option { background: var(--dropdown); }
    whole point is that it does not look available yet. */
 .btn:disabled { opacity: .45; cursor: not-allowed; }
 
-.btn.primary { border-color: var(--btn); background: var(--btn); color: #fff; }
-.btn.primary:hover:not(:disabled) { background: var(--btn-hover); border-color: var(--btn-hover); }
+/* Darkened from the theme's button colour: white on Servarr's #5d9cec is 2.8:1, and
+   the primary button is the one label that has to be readable. Mixing towards black
+   keeps each theme's hue while getting white text past 4.5:1. */
+.btn.primary {
+  --btn-solid: color-mix(in srgb, var(--btn) 70%, #000);
+  border-color: var(--btn-solid); background: var(--btn-solid); color: #fff;
+}
+.btn.primary:hover:not(:disabled) {
+  --btn-solid: color-mix(in srgb, var(--btn-hover) 62%, #000);
+}
 
 .btn.danger { border-color: var(--bad); background: var(--bad); color: #fff; }
 .btn.danger:hover:not(:disabled) { filter: brightness(.92); }
@@ -1885,4 +1895,128 @@ a.tool { text-decoration: none; }
 @media (max-width: 560px) {
   .wz-head { padding: 20px 16px 0; }
   .wz-body { padding: 20px 16px 48px; }
+}
+
+
+/* ── keyboard focus ──
+   One visible ring for everything a keyboard can reach. Form fields keep their own
+   glow (above); this is for buttons, links, summaries and switches, which had none. */
+:where(a, button, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px;
+}
+
+/* ── toasts that wait ── */
+.toast { display: flex; align-items: flex-start; gap: 12px; max-width: min(440px, calc(100vw - 36px)); }
+.toast > span { flex: 1 1 auto; line-height: 1.45; }
+.toast-x {
+  flex: none; margin: -4px -6px -4px 0; padding: 2px 8px;
+  background: none; border: 0; color: var(--fg-muted);
+  font-size: 18px; line-height: 1; cursor: pointer;
+}
+.toast-x:hover { color: var(--fg-strong); }
+
+/* ── search ── */
+[data-find][hidden] { display: none !important; }
+.search-none { margin: 18px 0; text-align: center; }
+
+/* ── save bar ──
+   Sticks to the bottom of the window while the page scrolls under it, so Save is
+   always next to whatever just changed. Quiet until there is something to save. */
+.save-bar {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; align-items: center; gap: 10px; justify-content: flex-end;
+  margin: 8px -4px 0; padding: 12px 4px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+.save-state { margin-right: auto; font-size: 13px; color: var(--fg-muted); }
+.save-bar.dirty { border-top-color: var(--warn); }
+.save-bar.dirty .save-state { color: var(--warn); font-weight: 600; }
+@media (max-width: 820px) {
+  .save-bar { margin-left: -16px; margin-right: -16px; padding: 10px 16px; }
+}
+
+/* ── help that folds ── */
+.help.clamp:not(.open) {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.help-more {
+  flex: 0 0 100%; text-align: left;
+  margin: 2px 0 0 calc(var(--form-label-w) + var(--form-label-gap));
+  padding: 0; border: 0; background: none;
+  color: var(--link); font: inherit; font-size: 12.5px; cursor: pointer;
+}
+.help-more:hover { color: var(--link-hover); text-decoration: underline; }
+p.help + .help-more, .f.wide .help-more, .grid2 .help-more { margin-left: 0; display: block; }
+p.help.clamp { margin-bottom: 0; }
+@media (max-width: 1200px) { .help-more { margin-left: 0; } }
+
+/* ── rip options, folded ──
+   One line saying what every rip will do; open it to change that. */
+.rip-opts-d { margin: -4px 0 20px; }
+.rip-opts-d > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: rgba(255,255,255,.02);
+}
+.rip-opts-d > summary::-webkit-details-marker { display: none; }
+.rip-opts-d > summary:hover { background: rgba(255,255,255,.045); }
+.rip-opts-d > summary .ropt-k { margin-right: 0; }
+.ropt-sum { font-size: 13px; color: var(--fg); }
+.ropt-change { margin-left: auto; font-size: 12.5px; color: var(--link); }
+.rip-opts-d[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.rip-opts-d > .rip-opts { margin: 12px 0 0; }
+label.ropt-k { cursor: default; }
+@media (max-width: 620px) {
+  .rip-opts-d > summary .ropt-k { flex: 0 0 auto; }
+  .ropt-sum { flex: 1 1 100%; order: 3; }
+}
+
+/* ── an already-ripped disc in the tray ── */
+.tray-loaded.known .big { color: var(--ok); opacity: .7; }
+.tray-loaded.known p b { color: var(--fg-strong); }
+
+/* ── the rip that just finished ──
+   The film, where it went, and what it cost -- the one moment this box exists for,
+   given the room the disc had a minute ago. */
+.filed {
+  display: flex; gap: 22px; align-items: center;
+  padding: 26px 28px; max-width: 820px;
+}
+.filed-art {
+  flex: none; width: 112px; aspect-ratio: 2 / 3; border-radius: 6px; overflow: hidden;
+  background: rgba(255,255,255,.04); border: 1px solid var(--line);
+  display: grid; place-items: center;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+.filed-art img { width: 100%; height: 100%; object-fit: cover; display: block;
+                 animation: filed-in .5s ease both; }
+.filed-fallback { font-size: 34px; color: var(--ok); opacity: .55; line-height: 0; }
+.filed.bad .filed-fallback { color: var(--warn); }
+.filed-body { min-width: 0; flex: 1 1 auto; }
+.filed-kicker {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12.5px; font-weight: 600; letter-spacing: .02em; color: var(--ok);
+}
+.filed.bad .filed-kicker { color: var(--warn); }
+.filed-kicker .muted { font-weight: 400; }
+.filed-title { margin: 6px 0 10px; font-size: 22px; line-height: 1.25; color: var(--fg-strong); }
+.filed-title .fam { vertical-align: 3px; margin-left: 4px; }
+.filed-path {
+  display: flex; gap: 8px; align-items: flex-start;
+  font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; line-height: 1.5;
+  color: var(--fg); overflow-wrap: anywhere;
+}
+.filed-path .ic { flex: none; margin-top: 3px; color: var(--fg-muted); }
+.filed-facts { margin-top: 8px; font-size: 13px; color: var(--fg-muted); }
+.filed-err { margin: 0; font-size: 13px; line-height: 1.55; color: var(--fg); max-width: 60ch; }
+.filed-acts { margin-top: 16px; }
+@keyframes filed-in { from { opacity: 0; transform: scale(.97); } }
+@media (prefers-reduced-motion: reduce) { .filed-art img { animation: none; } }
+@media (max-width: 620px) {
+  .filed { padding: 20px 16px; gap: 16px; align-items: flex-start; }
+  .filed-art { width: 76px; }
+  .filed-title { font-size: 18px; }
 }
