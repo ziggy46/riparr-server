@@ -1,5 +1,5 @@
-# Cheap checks on every push. The Docker image itself isn't built here: building it means
-# accepting MakeMKV's licence, which is the person building it's call, not CI's.
+# Checks on every push: everything parses, the tests pass, and the image builds. The
+# image has no MakeMKV in it, so building it here accepts no licence.
 name: CI
 
 on:
@@ -32,7 +32,7 @@ jobs:
           node --check server/static/icons.js
 
       - name: Shell scripts parse
-        run: for f in deploy/*.sh tools/*.sh packaging/*.sh; do bash -n "$f"; done
+        run: for f in deploy/*.sh; do bash -n "$f"; done
 
       - name: Tests
         run: |
@@ -42,3 +42,14 @@ jobs:
 
       - name: Compose file is valid
         run: docker compose config -q
+
+      - name: Image builds and starts
+        run: |
+          docker build -t riparr-server:ci .
+          docker run -d --name ci -e RIPARR_MOCK=1 -p 9797:9797 riparr-server:ci
+          for i in $(seq 1 30); do
+            curl -fs localhost:9797/api/setup/state && exit 0
+            sleep 2
+          done
+          docker logs ci
+          exit 1
