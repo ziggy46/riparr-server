@@ -445,12 +445,22 @@ const wizard = {
         <div class="btn-row">
           <button class="btn" id="w-recheck">List shares with these credentials</button>
         </div>
+        ${res.ok ? `<div class="result ${res.shares.length ? "ok" : ""}" id="w-listed">${
+            res.shares.length
+              ? `<b>Found ${res.shares.length} share${res.shares.length === 1 ? "" : "s"}
+                   on ${esc(host)} ${user ? `as ${esc(user)}` : "as a guest"}</b>
+                 Pick the one rips should go to:
+                 <div class="share-picks">${res.shares.map(s =>
+                   `<button class="btn tiny" data-pick-share="${esc(s)}">${esc(s)}</button>`
+                 ).join("")}</div>`
+              : `<b>Connected to ${esc(host)} ${user ? `as ${esc(user)}` : "as a guest"}</b>
+                 It didn't list any shares, so type the share name below.`}</div>` : ""}
         <label class="f"><span>Share</span>
           <input id="w-share" list="w-sharelist" placeholder="OTHER">
           <datalist id="w-sharelist">${
             res.shares.map(s => `<option value="${esc(s)}"></option>`).join("")}</datalist>
           <span class="help">${res.shares.length
-            ? "Pick one, or type a share that wasn't listed."
+            ? "Pick one above, or type a share that wasn't listed."
             : "Type the share name — it doesn't have to be one we could list."}</span>
         </label>
         <label class="f"><span>Folder inside the share</span>
@@ -465,6 +475,8 @@ const wizard = {
     // Re-ask the server, this time as somebody. Keeps whatever share and folder were
     // already typed, so entering a password does not throw the rest away.
     $("#w-recheck").onclick = () => {
+      $("#w-recheck").disabled = true;
+      $("#w-recheck").textContent = "Listing…";
       this.data.share = $("#w-share").value.trim();
       this.data.path = $("#w-path").value.trim();
       this.pickHost(host, { user: $("#w-suser").value.trim(),
@@ -472,6 +484,19 @@ const wizard = {
     };
     if (this.data.share) $("#w-share").value = this.data.share;
     if (this.data.path) $("#w-path").value = this.data.path;
+
+    // The listed shares as buttons, because a <datalist> only shows itself to somebody
+    // who already knows to click into the field -- the list arrived and nothing on
+    // screen changed, so the button looked like it did nothing.
+    const markPicked = () => $$("[data-pick-share]").forEach(b =>
+      b.classList.toggle("primary", b.dataset.pickShare === $("#w-share").value.trim()));
+    $$("[data-pick-share]").forEach(b => b.onclick = () => {
+      $("#w-share").value = b.dataset.pickShare;
+      markPicked();
+      $("#w-path").focus();
+    });
+    $("#w-share").addEventListener("input", markPicked);
+    markPicked();
     $$("#w-detail input").forEach(i => {
       i.onkeydown = (e) => {
         if (e.key !== "Enter") return;

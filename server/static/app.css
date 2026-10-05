@@ -1207,6 +1207,9 @@ tr.hist.cancelled > td.stat { color: var(--fg-muted); }
 .share-add h3 { font-size: 15px; color: var(--fg-strong); margin-bottom: 6px; }
 .share-add .muted { margin-bottom: 16px; }
 .share-add .result .why { white-space: pre-wrap; }
+/* The shares a server listed, as buttons that fill in the Share field. */
+.share-picks { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+#w-listed { margin: 4px 0 14px; }
 
 /* ── notification channels ──
    Four rows, each wearing the mark of the service it configures, each opening onto
