@@ -404,7 +404,7 @@ _MEANINGS = [
     ("NT_STATUS_CONNECTION_REFUSED",
      "The server refused the connection. File sharing (SMB) may be turned off on it."),
     ("NT_STATUS_HOST_UNREACHABLE",
-     "The box can't reach that server at all. Check the name or address."),
+     "Riparr can't reach that server at all. Check the name or address."),
     ("NT_STATUS_IO_TIMEOUT",
      "The server stopped answering part way through. If it goes to sleep, wake it and "
      "try again."),

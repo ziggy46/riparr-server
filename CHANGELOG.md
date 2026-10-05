@@ -37,6 +37,11 @@ and copies it as text for a bug report.
 request, pause and clear. **Diagnostics** downloads one zip of the logs, recent events,
 the last MakeMKV scan and your settings, with passwords, tokens and keys removed.
 
+**Works on a phone.** Every page fits a phone's screen: the queue puts the disc and the
+rip first, the menu closes when you tap outside it, wide tables scroll inside their own
+box, and text fields no longer make iPhones zoom in. "Add to Home Screen" opens Riparr as
+an app of its own.
+
 **Adding a share works the same everywhere.** Settings → Library → Add a share now has the
 setup wizard's flow: scan your network, pick the server, list its shares and pick one,
 then test and save. "List shares" now says how many it found and shows them as buttons,

@@ -1,0 +1,14 @@
+{
+  "name": "Riparr Server",
+  "short_name": "Riparr",
+  "description": "Rip Blu-rays and DVDs straight onto your NAS.",
+  "start_url": "/#/queue",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1f1f1f",
+  "theme_color": "#241155",
+  "icons": [
+    {"src": "/static/img/riparr-192.png", "sizes": "192x192", "type": "image/png"},
+    {"src": "/static/img/riparr-512.png", "sizes": "512x512", "type": "image/png"}
+  ]
+}

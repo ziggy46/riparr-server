@@ -459,7 +459,7 @@ def _task_key_check():
         notify.send(
             "key_expiring",
             title="A newer MakeMKV key has been published",
-            body=("The key on this box is an older one and may already have lapsed. "
+            body=("The key Riparr has is an older one and may already have lapsed. "
                   "Settings \u2192 General fetches the current one in a click."))
         return "A newer key has been published"
     if days is None:

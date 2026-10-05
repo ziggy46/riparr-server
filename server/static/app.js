@@ -288,7 +288,7 @@ function shareFinder(root, opts = {}) {
            <div class="why">${esc(res.error)}</div></div>`}
         <label class="f"><span>Username</span>
           <input class="sf-user" value="${esc(user)}" autocomplete="off"
-                 placeholder="DOMAIN\\user or user — empty for a guest share"></label>
+                 placeholder="user, or DOMAIN\\user — empty for guest"></label>
         <label class="f"><span>Password</span>
           <input class="sf-pass" type="password" value="${esc(pass)}"
                  autocomplete="new-password"></label>
@@ -497,8 +497,8 @@ const wizard = {
       <div class="wz-step">Step 2 of 5</div>
       <h1>Disc reading</h1>
       <p class="muted">Riparr doesn't read discs itself — <b>MakeMKV</b> does, and it's
-        made by GuinpinSoft, not by us. It is installed along with Riparr Server, when
-        you accepted its licence while building the image or running the installer.</p>
+        made by GuinpinSoft, not by us. It's compiled when the container first starts,
+        once you've accepted its licence with <code>MAKEMKV_ACCEPT_EULA</code>.</p>
 
       <div class="section"><h2>MakeMKV
         <span class="grow"></span>
@@ -656,7 +656,7 @@ const wizard = {
       };
     };
 
-    paint(`Everything is configured. One moment — checking what the box can already do.`,
+    paint(`Everything is configured. One moment — checking what Riparr can already do.`,
           ["Insert a disc", "Riparr identifies it and gets to work"]);
 
     let st = null;
@@ -796,7 +796,9 @@ views.queue = async () => {
   setDiscArt(inTray && inTray.label);       // fire and forget; never blocks the render
   const busy = jobs.some(j => j.state !== "needs_input");
   const loaded = drives.find(d => d.present);
-  return `
+  // Wrapped so a phone can put the disc and the rip first: on a small screen that is
+  // what somebody opened the page to see, and it was below two panels of options.
+  return `<div class="queue-page">
     ${head("Queue", "Ripping and uploading happen as one overlapping operation.",
            `<button class="tool" id="t-refresh"><span class="ti">${icon("arrows-rotate")}</span>Refresh</button>
             <button class="tool" id="t-disc" ${drives.some(d => d.present) ? "" : "disabled"}>
@@ -811,7 +813,7 @@ views.queue = async () => {
         ${trayStrip(drives, state.status.optical)}`
       : tray(drives, state.status.optical, loaded && !busy)}
     </div>
-    ${sendingStrip(sending)}`;
+    ${sendingStrip(sending)}</div>`;
 };
 
 /* ── a job in flight ──
@@ -1736,7 +1738,7 @@ function stageLegend(typical, order, labels) {
       const t = typical[k];
       const full = (labels || {})[k] || k;
       return `<span class="sk${t ? "" : " unknown"}" title="${esc(full)}${
-        t ? ` — usually ${duration(t.seconds)} on this box, over ${t.samples} rip${
+        t ? ` — usually ${duration(t.seconds)} here, over ${t.samples} rip${
               t.samples === 1 ? "" : "s"}`
           : " — no finished rips to average yet"}">
         <i class="sg-${esc(k)}"></i><b>${esc(STAGE_SHORT[k] || full)}</b>${
@@ -1752,7 +1754,7 @@ function stageNote(byKind) {
   const kinds = Object.entries(byKind || {}).filter(([, v]) => Object.keys(v).length);
   const order = ["identify", "decrypt", "save", "upload", "verify"];
   return `
-    ${kinds.length ? `<div class="card stage-key-full"><h3>Typical on this box</h3>
+    ${kinds.length ? `<div class="card stage-key-full"><h3>Typical here</h3>
       ${kinds.map(([k, v]) => `<div class="kind-row">
         ${familyTag(k)}
         <span class="kind-times">${order.filter(n => v[n]).map(n =>
@@ -1760,7 +1762,7 @@ function stageNote(byKind) {
             <span class="muted">${v[n].samples}&times;</span></span>`).join("")}</span>
       </div>`).join("")}</div>` : ""}
     <p class="muted stage-note">${kinds.length
-      ? `Medians over this box's own finished rips, kept separate per kind of disc —
+      ? `Medians over Riparr's own finished rips, kept separate per kind of disc —
          a Blu-ray is several times the data of a DVD, so one blended number would be
          wrong about both.`
       : `Riparr needs two finished rips <b>of the same kind of disc</b> before it can say
@@ -2021,7 +2023,7 @@ settingsPages.library = async (s) => {
         <span class="test-out" id="tmdb-test-out"></span></div></div>
       <label class="f"><span>When TMDb isn't sure</span>
         <select data-set="tmdb_unsure">
-          ${opt("label", "Keep the name Riparr has, without IDs (default)", s.tmdb_unsure)}
+          ${opt("label", "Keep Riparr's name, without IDs (default)", s.tmdb_unsure)}
           ${opt("ask", "Ask me, with TMDb's suggestions", s.tmdb_unsure)}
         </select>
         <span class="help">"Not sure" means TMDb has films by that name but none that
@@ -2219,7 +2221,7 @@ settingsPages.ripping = async (s) => {
     <p class="muted">Put a disc back in that Riparr has already finished and it gives it
       straight back rather than spending another half hour on it. If a browser is open
       it jumps to <b>Discs</b> and points at the film. If nobody is looking at one, this
-      is how the box says so.</p>
+      is how Riparr says so.</p>
     <label class="f" style="margin-top:14px"><span>Tell me with</span>
       <select data-set="duplicate_signal">
         ${opt("flash", "The drive's own light", s.duplicate_signal)}
@@ -2335,7 +2337,7 @@ settingsPages.connect = async (s) => {
     ${testRow("ntfy")}`;
 
   bodies.discord = `
-    <p class="muted">A Discord webhook posts into a <b>channel</b>. If you want the box
+    <p class="muted">A Discord webhook posts into a <b>channel</b>. If you want Riparr
       to tell <i>you</i> — a notification on your phone rather than a line in a channel
       somebody might read on Tuesday — make a server of one and have Riparr mention you
       in it. Both halves are below.</p>
@@ -2367,7 +2369,7 @@ settingsPages.connect = async (s) => {
              placeholder="your Discord user ID, e.g. 218411284957167616">
       <span class="help">A user ID pings you. Prefix a <b>role</b> ID with
         <code>&amp;</code> — <code>&amp;123…</code> — to ping a role instead, for a
-        household that shares the box. Leave empty to post quietly.</span></label>
+        household that shares Riparr. Leave empty to post quietly.</span></label>
 
     <div class="dc-when">
       <div class="dc-when-l">Ping me for</div>
@@ -2456,7 +2458,7 @@ settingsPages.connect = async (s) => {
       is only worth it if you want a copy somewhere permanent. Open a channel to see
       what it needs. ${live ? "A tick on the mark means Riparr has what it needs to "
         + "send; the test button is how you find out whether it arrives."
-      : "Nothing is set up yet, so the box currently has no way to reach you when you "
+      : "Nothing is set up yet, so Riparr currently has no way to reach you when you "
         + "are not on this page."}</p>
     <div class="channels">
       ${CHANNELS.map(c => channelRow(c, !!ch[c.key], summary[c.key], bodies[c.key])).join("")}
@@ -2465,9 +2467,8 @@ settingsPages.connect = async (s) => {
 
   <div class="section"><h2>Handoff</h2><div>
     <p class="muted">Not a notification: this is where finished files go <i>next</i>.
-      Riparr does not transcode — a board this size would take days and the result
-      would be poor — so if you run something that does, write the rip where it is
-      watching for work instead of straight into your library.</p>
+      Riparr does not transcode, so if you run something that does, write the rip
+      where it is watching for work instead of straight into your library.</p>
     <label class="f" style="margin-top:14px"><span>Watch folder</span>
       <input data-set="watch_folder" value="${esc(s.watch_folder)}" placeholder="/Media/_incoming">
       <span class="help">A path on your library share. Tdarr and Unmanic both work this
@@ -2684,7 +2685,7 @@ systemPages.status = async () => {
       and share readings are simulated.</div>` : ""}
 
     <div class="section"><h2>Health</h2>
-      <table><tbody>${healthRows}</tbody></table>
+      <table class="health-table"><tbody>${healthRows}</tbody></table>
       <div class="alert">Health checks re-run every six hours, and whenever you open
         this page. You can force one from
         <a href="#/system/tasks">Tasks</a>; anything logged along the way is on
@@ -2800,7 +2801,7 @@ function healthMessages(st) {
                href: "#/settings/makemkv", action: "Update the key" });
   else if (m.key_stale)
     out.push({ level: "warn", message: "A newer MakeMKV key has been published — the one "
-      + "on this box is older and may already have lapsed.",
+      + "in Riparr is older and may already have lapsed.",
       href: "#/settings/makemkv", action: "Update the key" });
   else if (m.days_left != null && m.days_left <= (state.settings?.warn_key_days ?? 7))
     out.push({ level: "warn", message: `The MakeMKV key expires in ${m.days_left} day(s).`,
@@ -3138,6 +3139,7 @@ async function route() {
   paintIcons(content);
   wireContent(section, sub);
   $("#sidebar").classList.remove("open");
+  document.body.classList.remove("nav-open");
   scheduleLiveRefresh(section);
 }
 
@@ -3935,7 +3937,19 @@ function renderChrome() {
   $("#health-pills").innerHTML = pills.join("");
 }
 
-$("#hamburger").onclick = () => $("#sidebar").classList.toggle("open");
+$("#hamburger").onclick = (e) => {
+  e.stopPropagation();
+  $("#sidebar").classList.toggle("open");
+  document.body.classList.toggle("nav-open", $("#sidebar").classList.contains("open"));
+};
+// On a phone the menu covers the page; a tap anywhere outside it puts it away.
+document.addEventListener("click", (e) => {
+  const sb = $("#sidebar");
+  if (sb && sb.classList.contains("open") && !sb.contains(e.target)) {
+    sb.classList.remove("open");
+    document.body.classList.remove("nav-open");
+  }
+});
 $("#user-btn").onclick = (e) => { e.stopPropagation(); $("#user-menu").classList.toggle("hidden"); };
 document.addEventListener("click", () => $("#user-menu")?.classList.add("hidden"));
 $("#logout").onclick = async (e) => {
@@ -3974,8 +3988,8 @@ const showStarting = (attempt) => showWaiting(
               : "Still starting — this can take a minute after power-on.");
 
 const showUnreachable = () => showWaiting(
-  "Can't reach the Riparr service on this box. It may still be starting; if this "
-  + "keeps happening, check `systemctl status riparr` over SSH.",
+  "Can't reach Riparr. It may still be starting; if this keeps happening, "
+  + "check `docker logs riparr` on the server.",
   { retry: true, spin: false });
 
 async function boot() {
