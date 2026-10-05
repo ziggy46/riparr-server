@@ -1798,3 +1798,36 @@ li.warn .cl-detail, li.fail .cl-detail { color: var(--fg-strong); }
 }
 .tmdb-name { font-size: 12px; line-height: 1.25; color: var(--fg-strong); }
 .tmdb-year { font-size: 11px; }
+
+/* "Will be saved as" under a job's title. One long path, so it wraps anywhere. */
+.job-planned { display: flex; gap: 8px; align-items: baseline; margin: 6px 0 10px;
+               font-size: 12.5px; color: var(--fg-muted); }
+.job-planned code { word-break: break-all; white-space: normal; }
+
+/* The live log on System -> Log Files. */
+.live-log {
+  height: 420px; overflow: auto; margin: 0 0 10px; padding: 10px 12px;
+  background: rgba(0,0,0,.28); border: 1px solid var(--line-2); border-radius: var(--radius);
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word;
+}
+.live-log:empty::before { content: "Waiting for log lines…"; color: var(--fg-muted); }
+.lv-line { padding: 1px 0; }
+.lv-t { color: var(--fg-muted); margin-right: 6px; }
+.lv-c { color: var(--accent, #5a8dee); }
+.lv-debug { color: var(--fg-muted); }
+.lv-warning { color: var(--warn, #e3a33b); }
+.lv-error, .lv-critical { color: var(--bad, #f85149); }
+.section h2 .switch.sm { font-size: 12px; font-weight: 400; margin: 0 6px 0 0; }
+
+a.tool { text-decoration: none; }
+/* Disc details. */
+.disc-dlg { width: min(860px, 94vw); max-height: 86vh; overflow: auto; }
+.dlg-head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.dlg-head h3 { font-size: 17px; color: var(--fg-strong); margin: 0; }
+.disc-titles { display: flex; flex-direction: column; gap: 10px; margin: 12px 0; }
+.disc-title { border: 1px solid var(--line-2); border-radius: var(--radius); padding: 10px 12px; }
+.disc-title.chosen { border-color: var(--accent, #5a8dee); }
+.dt-head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; font-size: 13px; }
+.dt-media { margin: 6px 0 4px; display: flex; flex-wrap: wrap; gap: 6px; }
+.dt-streams { margin: 4px 0 0; padding-left: 18px; font-size: 12px; color: var(--fg-muted); }

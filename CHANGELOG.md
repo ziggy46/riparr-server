@@ -28,6 +28,15 @@ template, with TRaSH Guides' Radarr schemes for Standard, Plex, Emby and Jellyfi
 syntax, and new tokens fill in from the disc: quality (`Remux-2160p`), video and audio
 codecs, channels, bit depth, audio languages, and the TMDb and IMDb IDs.
 
+**See what Riparr will do before it does it.** A rip on the queue shows the path it will
+be saved as, so a wrong name or preset is caught before a long rip. **Disc info** on the
+queue shows every title MakeMKV found, with its streams and what Riparr makes of them,
+and copies it as text for a bug report.
+
+**A live log.** System → Log Files shows the log as it's written, with debug lines on
+request, pause and clear. **Diagnostics** downloads one zip of the logs, recent events,
+the last MakeMKV scan and your settings, with passwords, tokens and keys removed.
+
 **Adding a share works the same everywhere.** Settings → Library → Add a share now has the
 setup wizard's flow: scan your network, pick the server, list its shares and pick one,
 then test and save. "List shares" now says how many it found and shows them as buttons,

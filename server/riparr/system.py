@@ -16,6 +16,7 @@ Two appliance-specific constraints shape everything here:
     on the next boot.
 """
 import glob
+import collections
 import io
 import json
 import logging
@@ -105,6 +106,43 @@ class DbHandler(logging.Handler):
             pass
 
 
+class LiveHandler(logging.Handler):
+    """The last few thousand log lines, in memory, for the live log on Log Files.
+
+    Every line gets a sequence number, so the page asks for "everything after 1234" and
+    never misses or repeats one -- simpler and sturdier than tailing a file that
+    rotates underneath you."""
+    SIZE = 3000
+
+    def __init__(self):
+        super().__init__(logging.DEBUG)
+        self._lines = collections.deque(maxlen=self.SIZE)
+        self._seq = 0
+        self._lock = threading.Lock()
+
+    def emit(self, record):
+        try:
+            text = self.format(record)
+        except Exception:
+            return
+        with self._lock:
+            self._seq += 1
+            self._lines.append({"seq": self._seq, "at": record.created,
+                                "level": record.levelname.lower(),
+                                "component": record.name.replace("riparr.", ""),
+                                "text": text})
+
+    def since(self, after=0, levels=None, limit=1000):
+        with self._lock:
+            lines = [ln for ln in self._lines if ln["seq"] > after
+                     and (not levels or ln["level"] in levels)]
+            last = self._seq
+        return {"lines": lines[-limit:], "last": last}
+
+
+LIVE = LiveHandler()
+
+
 def init():
     """Create the tables and attach the handlers. Safe to call more than once."""
     c = db.conn()
@@ -136,8 +174,10 @@ def init():
     dbh.setLevel(logging.INFO)
     dbh.setFormatter(logging.Formatter("%(message)s"))
 
+    LIVE.setFormatter(logging.Formatter("%(message)s"))
+
     log.setLevel(logging.DEBUG)
-    for h in (main, debug, dbh):
+    for h in (main, debug, dbh, LIVE):
         log.addHandler(h)
     log._riparr_configured = True
     component("Riparr").info("Starting up")

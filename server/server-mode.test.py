@@ -176,6 +176,50 @@ db.create_user("admin", "a-test-password")
 main._check_password_reset()
 check("with no file, nothing happens", db.has_users(), True)
 
+print("the live log")
+import logging  # noqa: E402
+from riparr import system as SY  # noqa: E402
+live = SY.LiveHandler()
+live.setFormatter(logging.Formatter("%(message)s"))
+lg = logging.getLogger("riparr.test-live")
+lg.addHandler(live)
+lg.setLevel(logging.DEBUG)
+lg.info("first")
+lg.debug("noisy")
+lg.warning("second")
+got = live.since(0)
+check("every line, numbered", [(l["seq"], l["text"]) for l in got["lines"]],
+      [(1, "first"), (2, "noisy"), (3, "second")])
+check("only what's new after a given line", [l["text"] for l in live.since(2)["lines"]],
+      ["second"])
+check("debug can be left out", [l["text"] for l in
+                                live.since(0, ("info", "warning"))["lines"]], ["first", "second"])
+check("and the last number is reported even when nothing is new", live.since(3)["last"], 3)
+
+print("diagnostics leave credentials out")
+scrubbed = main._scrub({"makemkv_key": "T-abc", "tmdb_token": "x", "smtp_password": "p",
+                        "discord_webhook": "https://discord/1", "movie_folder": "Movies",
+                        "nested": [{"password": "q", "host": "nas"}], "empty_token": ""})
+check("secrets are replaced", (scrubbed["makemkv_key"], scrubbed["tmdb_token"],
+                               scrubbed["smtp_password"], scrubbed["discord_webhook"]),
+      ("[redacted]",) * 4)
+check("everything else is kept", (scrubbed["movie_folder"], scrubbed["nested"][0]["host"]),
+      ("Movies", "nas"))
+check("inside lists too", scrubbed["nested"][0]["password"], "[redacted]")
+
+print("where a rip will be saved")
+from riparr import rip as RIP  # noqa: E402
+sid = db.add_share("NAS", "tower", "Media", "", "")
+db.set("movie_folder", "Films")
+db.set("movie_template", "{Title} ({Year})/{Title} ({Year}) {[Quality Full]}.mkv")
+job = {"kind": "movie", "title": "Heat", "year": 1995, "disc_family": "bluray",
+       "chosen_title": 0, "titles": [{"index": 0, "streams": [
+           {"type": "Video", "codec_short": "Mpeg4", "video_size": "1920x1080"}]}]}
+check("a film", RIP.planned_destination(job),
+      {"path": "//tower/Media/Films/Heat (1995)/Heat (1995) [Remux-1080p].mkv",
+       "count": 1, "kind": "movie"})
+check("nothing until there's a name", RIP.planned_destination(dict(job, title=None)), None)
+
 print()
 if failures:
     print("%d check(s) failed: %s" % (len(failures), ", ".join(failures)))

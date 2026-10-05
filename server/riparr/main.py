@@ -488,6 +488,31 @@ def drive_signal_test(body: SignalTest = SignalTest(), user=Depends(require_user
     return {"ok": bool(r.get("ok")), "message": r.get("message")}
 
 
+@app.get("/api/disc/details")
+def disc_details(user=Depends(require_user)):
+    """Every title MakeMKV found on the disc, with its streams and what Riparr makes of
+    them -- for checking a name before the rip, or reporting one that came out wrong."""
+    return RIP.disc_details()
+
+
+@app.post("/api/disc/scan")
+def disc_scan(user=Depends(require_user)):
+    ok, message = RIP.scan_disc()
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"ok": True, "message": message}
+
+
+@app.get("/api/disc/raw")
+def disc_raw(user=Depends(require_user)):
+    """MakeMKV's own output from the last scan, exactly as it printed it."""
+    raw = RIP.last_scan_raw()
+    if not raw:
+        raise HTTPException(status_code=404, detail="No disc has been scanned yet.")
+    return Response(content=raw, media_type="text/plain",
+                    headers={"Content-Disposition": 'attachment; filename="makemkv-info.txt"'})
+
+
 @app.get("/api/drives/guide")
 def drives_guide(user=Depends(require_user)):
     """Which drive to buy — the list `docs/guide/01-what-you-need.md` has promised.
@@ -996,6 +1021,10 @@ def _job_out(j):
             j["candidates"] = _with_posters(json.loads(j["candidates"]))
         except (ValueError, TypeError):
             j["candidates"] = []
+    # Where it's going, before it gets there -- so a wrong name or preset is caught
+    # before a forty-minute rip rather than after.
+    if j.get("state") not in db.FINAL_STATES:
+        j["planned"] = RIP.planned_destination(j)
     return j
 
 
@@ -1524,6 +1553,63 @@ def system_events_clear(user=Depends(require_user)):
 @app.get("/api/system/logs")
 def system_logs(user=Depends(require_user)):
     return {"path": SY.LOG_DIR, "files": SY.log_files()}
+
+
+@app.get("/api/system/logs/live")
+def system_logs_live(after: int = 0, debug: bool = False, user=Depends(require_user)):
+    """Log lines newer than `after`, for the live log. Polled about once a second."""
+    levels = None if debug else ("info", "warning", "error", "critical")
+    return SY.LIVE.since(after, levels)
+
+
+_SECRET_WORDS = ("password", "token", "secret", "key", "webhook", "session")
+
+
+def _scrub(obj):
+    """A copy with anything that looks like a credential replaced, for diagnostics."""
+    if isinstance(obj, dict):
+        return {k: ("[redacted]" if v and any(w in str(k).lower() for w in _SECRET_WORDS)
+                    else _scrub(v)) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_scrub(v) for v in obj]
+    return obj
+
+
+@app.get("/api/system/diagnostics")
+def system_diagnostics(user=Depends(require_user)):
+    """Everything worth sending with a bug report, in one zip: logs, recent events, the
+    last raw MakeMKV scan, recent jobs, and status and settings with every password,
+    token, key and webhook taken out."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    budget = 40 * 1024 * 1024
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in SY.log_files():
+            path = SY.log_path(f["name"])
+            if path and f["size"] <= budget:
+                z.write(path, "logs/" + f["name"])
+                budget -= f["size"]
+        dump = lambda name, data: z.writestr(name, json.dumps(data, indent=2, default=str))
+        dump("events.json", SY.events(limit=500))
+        try:
+            dump("status.json", _scrub(status(user)))
+        except Exception as e:
+            z.writestr("status-error.txt", str(e))
+        dump("settings.json", _scrub(db.all_settings()))
+        dump("shares.json", _scrub([dict(r) for r in db.list_shares()]))
+        dump("jobs.json", _scrub([dict(j) for j in db.list_jobs(limit=20)]))
+        z.writestr("disc-scan.txt", RIP.last_scan_raw() or "(no disc has been scanned since "
+                                                         "Riparr started)\n")
+        env = {k: v for k, v in os.environ.items()
+               if k.startswith(("RIPARR_", "MAKEMKV_")) or k in ("PUID", "PGID", "UMASK", "TZ")}
+        dump("about.json", _scrub({"version": __version__, "runtime": P.runtime(),
+                                   "system": P.system_status(), "environment": env,
+                                   "makemkv": P.makemkv_status()}))
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    return Response(content=buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition":
+                             'attachment; filename="riparr-diagnostics-%s.zip"' % stamp})
 
 
 @app.get("/api/system/logs/{name}")

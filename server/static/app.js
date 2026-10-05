@@ -799,6 +799,8 @@ views.queue = async () => {
   return `
     ${head("Queue", "Ripping and uploading happen as one overlapping operation.",
            `<button class="tool" id="t-refresh"><span class="ti">${icon("arrows-rotate")}</span>Refresh</button>
+            <button class="tool" id="t-disc" ${drives.some(d => d.present) ? "" : "disabled"}>
+              <span class="ti">${icon("compact-disc")}</span>Disc info</button>
             <button class="tool" id="t-eject" ${drives.length && !busy ? "" : "disabled"}>
               <span class="ti">${icon("eject")}</span>Eject</button>`)}
     ${autoRipPanel(ar)}
@@ -966,6 +968,7 @@ function jobRow(j) {
       </div>
       ${j.warning ? `<div class="job-warn">${icon("triangle-exclamation")}
         <span>${esc(j.warning)}</span></div>` : ""}
+      ${plannedLine(j)}
       <div class="job-meter">
         <div class="bar${working ? " working" : ""}"><i style="width:${active}%"></i></div>
         <div class="job-figs">
@@ -989,6 +992,108 @@ function jobRow(j) {
         together ? `<span class="pair-note">at once</span>` : ""}</div>
       ${stageClock(j)}
     </div>`;
+}
+
+/* ── disc details ──
+   Everything MakeMKV said about the disc, title by title, and what Riparr makes of each
+   for naming. For checking a name before a long rip, and for a bug report when one
+   comes out wrong: Copy puts a plain-text version on the clipboard. */
+const fmtStream = (x) => [x.type, x.codec_long || x.codec_short, x.video_size,
+  x.layout || (x.channels ? `${x.channels} ch` : ""), x.lang, x.name]
+  .filter(Boolean).join(" · ");
+
+function discReport(d) {
+  const lines = [`Riparr ${state.status ? state.status.version : ""} disc details`,
+    `Drive: ${d.drive ? [d.drive.vendor, d.drive.model, d.drive.device].filter(Boolean).join(" ") : "none"}`,
+    `Label: ${(d.drive && d.drive.label) || "-"}   Media: ${(d.drive && d.drive.media) || "-"}   Family: ${d.family || "-"}`,
+    `From: ${d.source === "job" ? "the rip in progress" : "a scan"}`, ""];
+  for (const t of d.titles) {
+    lines.push(`Title ${t.index}${t.chosen ? " (ripping this one)" : ""}: ${duration(t.seconds)}, ${gb(t.bytes || 0)}, ${t.chapters || 0} chapter${t.chapters === 1 ? "" : "s"}, ${t.source || t.name || ""}`);
+    (t.streams || []).forEach(x => lines.push(`  ${fmtStream(x)}`));
+    const m = t.media || {};
+    lines.push(`  -> ${[m.quality, m.video_codec, m.bit_depth && m.bit_depth + "bit", m.dynamic_range,
+                        m.audio_codec, m.audio_channels, m.audio_languages].filter(Boolean).join(" ")}`);
+  }
+  return lines.join("\n");
+}
+
+async function showDiscDetails() {
+  const dlg = document.createElement("dialog");
+  dlg.className = "notice-dialog disc-dlg";
+  document.body.appendChild(dlg);
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.addEventListener("cancel", (e) => { e.preventDefault(); close(); });
+  let timer = null;
+
+  const paint = async () => {
+    let d;
+    try { d = await api.get("/api/disc/details"); }
+    catch (e) { dlg.innerHTML = `<div class="result bad">${esc(e.message)}</div>`; return; }
+    const titles = d.titles || [];
+    dlg.innerHTML = `
+      <div class="dlg-head"><h3>${esc((d.drive && d.drive.label) || "Disc")}</h3>
+        <span class="grow"></span>${familyTag(d.family)}
+        <button class="icon-btn" data-close title="Close">${icon("xmark")}</button></div>
+      <p class="muted">${d.drive ? esc([d.drive.vendor, d.drive.model].filter(Boolean).join(" ")) + " · " : ""}${
+        d.source === "job" ? "From the rip in progress."
+        : d.source === "scan" ? "From the last scan of this disc."
+        : "This disc hasn't been read yet."}
+        Titles under a minute are menus and idents and are left out.</p>
+      ${d.scanning ? `<div class="result busy"><span class="spin"></span>Reading the disc —
+          a few minutes on a real drive. This updates when it's done.</div>`
+        : !titles.length ? `<div class="btn-row"><button class="btn primary" data-scan>Read the disc</button>
+          <span class="test-out">Only while nothing is ripping.</span></div>` : ""}
+      ${d.scan_error ? `<div class="result bad">${esc(d.scan_error)}</div>` : ""}
+      <div class="disc-titles">${titles.filter(t => t.seconds >= 60).map(t => {
+        const m = t.media || {};
+        const tags = [m.quality, m.video_codec, m.bit_depth && `${m.bit_depth}-bit`, m.dynamic_range,
+                      [m.audio_codec, m.audio_channels].filter(Boolean).join(" "), m.audio_languages]
+                     .filter(Boolean);
+        return `<div class="disc-title${t.chosen ? " chosen" : ""}">
+          <div class="dt-head"><b>Title ${t.index}</b>
+            <span>${esc(duration(t.seconds))}</span><span class="muted">${esc(gb(t.bytes || 0))}</span>
+            <span class="muted">${t.chapters || 0} chapter${t.chapters === 1 ? "" : "s"}</span>
+            <span class="muted">${esc(t.source || t.name || "")}</span>
+            ${t.chosen ? `<span class="badge ok">ripping this one</span>` : ""}</div>
+          <div class="dt-media">${tags.map(x => `<code>${esc(x)}</code>`).join(" ") || `<span class="muted">no stream details</span>`}</div>
+          <ul class="dt-streams">${(t.streams || []).map(x => `<li>${esc(fmtStream(x))}</li>`).join("")}</ul>
+        </div>`;
+      }).join("")}</div>
+      <div class="btn-row">
+        ${titles.length ? `<button class="btn" data-copy>Copy as text</button>` : ""}
+        ${d.raw ? `<a class="btn" href="/api/disc/raw" download>MakeMKV's raw output</a>` : ""}
+        <button class="btn" data-close>Close</button>
+      </div>`;
+    paintIcons(dlg);
+    dlg.querySelectorAll("[data-close]").forEach(b => b.onclick = close);
+    const copy = dlg.querySelector("[data-copy]");
+    if (copy) copy.onclick = async () => {
+      try { await navigator.clipboard.writeText(discReport(d)); toast("Copied", "ok"); }
+      catch (e) { toast("Couldn't copy — your browser blocked it", "bad"); }
+    };
+    const scan = dlg.querySelector("[data-scan]");
+    if (scan) scan.onclick = async () => {
+      scan.disabled = true;
+      try { await api.post("/api/disc/scan", {}); } catch (e) { toast(e.message, "bad"); }
+      paint();
+    };
+    clearTimeout(timer);
+    if (d.scanning && dlg.open) timer = setTimeout(paint, 3000);
+  };
+  dlg.showModal();
+  dlg.innerHTML = `<div class="result busy"><span class="spin"></span>Loading…</div>`;
+  await paint();
+}
+
+/* Where the rip is going, before it gets there. */
+function plannedLine(j) {
+  const p = j.planned;
+  if (!p || !p.path) return "";
+  const what = p.kind === "tv"
+    ? `${p.count} episode${p.count === 1 ? "" : "s"}, the first saved as`
+    : p.kind === "backup" ? "Will be saved in" : "Will be saved as";
+  return `<div class="job-planned">${icon("folder-open")}
+    <span>${what} <code>${esc(p.path)}</code></span></div>`;
 }
 
 /* Point the browser at the disc it already has, once. The acknowledgement is what
@@ -1229,6 +1334,7 @@ function identifyPrompt(j) {
         <input id="ni-name" value="${esc(j.title || "")}" placeholder="e.g. The Matrix (1999)">
         <span class="help">A year in brackets is used as the year. Without one Riparr
           won't invent it.</span></label>
+      ${plannedLine(j)}
       ${state.status && state.status.tmdb ? `
         <div class="ni-tmdb" data-tmdb-for="${j.id}" data-picked="${j.tmdb_id || ""}">
           <div class="ni-label">${(j.candidates || []).length
@@ -2878,6 +2984,18 @@ systemPages.logs = async () => {
     <div class="toolbar">
       <button class="tool" id="lg-refresh"><span class="ti">${icon("arrows-rotate")}</span>Refresh</button>
       <button class="tool" id="lg-delete"><span class="ti">${icon("trash-can")}</span>Delete</button>
+      <a class="tool" href="/api/system/diagnostics" download><span class="ti">${icon("file-zipper")}</span>Diagnostics</a>
+    </div>
+    <div class="section"><h2>Live<span class="grow"></span>
+      <label class="switch sm"><input type="checkbox" id="lv-debug"><span class="track"></span>
+        <span class="lbl">Include debug</span></label>
+      <button class="btn sm" id="lv-pause">Pause</button>
+      <button class="btn sm" id="lv-clear">Clear view</button></h2>
+      <pre class="live-log" id="lv-out" tabindex="0"></pre>
+      <p class="muted" style="font-size:13px">The newest lines, as they're written. To keep
+        or share a log, download a file below — or <b>Diagnostics</b>, which bundles the
+        logs, recent events, the last MakeMKV disc scan and your settings, with passwords,
+        tokens and keys removed. That's the thing to attach to a bug report.</p>
     </div>
     <div class="alert">Log files are in <code>${esc(l.path)}</code>.
       <br><code>riparr.txt</code> is the ordinary record; <code>riparr.debug.txt</code>
@@ -2891,6 +3009,47 @@ systemPages.logs = async () => {
       </table>
     </div>`;
 };
+
+/* The live log: polls for lines newer than the last one it has, about once a second,
+   for as long as the page is open. Sticks to the bottom unless you've scrolled up to
+   read something. */
+let liveLog = null;
+function startLiveLog() {
+  if (liveLog) clearTimeout(liveLog.timer);
+  const out = $("#lv-out");
+  if (!out) { liveLog = null; return; }
+  const me = liveLog = { after: 0, paused: false, timer: null };
+  const MAX_LINES = 2000;
+  const tick = async () => {
+    if (liveLog !== me || !document.body.contains(out)) return;   // page left
+    if (!me.paused && !document.hidden) {
+      let r = null;
+      try {
+        r = await api.get(`/api/system/logs/live?after=${me.after}&debug=${$("#lv-debug").checked}`);
+      } catch (e) { /* the service restarting; keep trying */ }
+      if (r && r.lines.length) {
+        const atBottom = out.scrollHeight - out.scrollTop - out.clientHeight < 40;
+        out.insertAdjacentHTML("beforeend", r.lines.map(l => {
+          const t = new Date(l.at * 1000).toLocaleTimeString();
+          // One line of markup: this is inside a <pre>, so any whitespace here shows.
+          return `<div class="lv-line lv-${esc(l.level)}"><span class="lv-t">${esc(t)}</span><span class="lv-c">${esc(l.component)}</span> ${esc(l.text)}</div>`;
+        }).join(""));
+        while (out.childElementCount > MAX_LINES) out.firstElementChild.remove();
+        if (atBottom) out.scrollTop = out.scrollHeight;
+      }
+      if (r) me.after = r.last;
+    }
+    me.timer = setTimeout(tick, 1000);
+  };
+  $("#lv-pause").onclick = () => {
+    me.paused = !me.paused;
+    $("#lv-pause").textContent = me.paused ? "Resume" : "Pause";
+  };
+  $("#lv-clear").onclick = () => { out.innerHTML = ""; };
+  // Switching debug on or off starts again from the lines still in memory.
+  $("#lv-debug").onchange = () => { out.innerHTML = ""; me.after = 0; };
+  tick();
+}
 
 /* ── shared fragments ── */
 /* `acts` is raw markup for the right-hand side -- the *arr page toolbar, moved into
@@ -3258,6 +3417,7 @@ function wireContent(section, sub) {
     route();
   };
 
+  if ($("#lv-out")) startLiveLog();
   const lgRefresh = $("#lg-refresh");
   if (lgRefresh) lgRefresh.onclick = () => route();
   const lgDelete = $("#lg-delete");
@@ -3271,6 +3431,8 @@ function wireContent(section, sub) {
     route();
   };
 
+  const discBtn = $("#t-disc");
+  if (discBtn) discBtn.onclick = () => showDiscDetails();
   const refresh = $("#t-refresh");
   if (refresh) refresh.onclick = () => route();
   const eject = $("#t-eject");

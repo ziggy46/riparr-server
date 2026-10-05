@@ -685,6 +685,8 @@ def _seconds(text):
 # doing it twice put five minutes of silence in front of every rip. Keyed on the same
 # cheap signature the disc watcher uses, so swapping discs invalidates it.
 _titles_cache = {"key": None, "titles": None, "at": 0.0}
+_last_scan = {"key": None, "at": 0.0, "raw": ""}
+_scan_state = {"running": False, "error": None}
 TITLES_TTL = 1800
 # Ceiling for one `makemkvcon info` scan. See the note at the subprocess call.
 TITLES_TIMEOUT = 1800
@@ -897,6 +899,9 @@ def read_titles(device, disc=None, on_progress=None):
         if idx in titles:
             titles[idx]["streams"] = [by_stream[k] for k in sorted(by_stream)]
     out = [titles[k] for k in sorted(titles)]
+    # The raw scan, for the disc details panel and the diagnostics download: when a
+    # name comes out wrong, this is what says whether MakeMKV or Riparr got it wrong.
+    _last_scan.update(key=key, at=time.time(), raw=p.stdout[-500000:])
     if key and out:
         _titles_cache.update(key=key, titles=out, at=time.time())
     return out
@@ -1982,6 +1987,109 @@ _TEMPLATES = {
               "{Title} ({Year})/Season {Season:00}/"
               "{Title} - S{Season:00}E{Episode:00} - {EpisodeTitle}.mkv"),
 }
+
+
+def disc_details():
+    """What MakeMKV reported about the disc, for the details panel.
+
+    From the job working on it when there is one -- that's the title list the rip
+    actually used -- otherwise from the last scan of the disc that's in the tray now.
+    Each title carries its streams and what Riparr made of them for naming.
+    """
+    drive = next((d for d in P.optical_drives() if d.get("present")), None)
+    job = db.active_job()
+    titles, chosen, family, source = None, None, None, None
+    if job and job.get("titles"):
+        try:
+            titles = json.loads(job["titles"]) if isinstance(job["titles"], str) else job["titles"]
+        except ValueError:
+            titles = None
+        chosen, family, source = job.get("chosen_title"), job.get("disc_family"), "job"
+    if not titles and drive:
+        key = _titles_key(drive)
+        if P.MOCK:
+            titles = _mock_titles()
+        elif _titles_cache["key"] == key and _titles_cache["titles"]:
+            titles = _titles_cache["titles"]
+        family, source = disc_family(drive), "scan" if titles else None
+    out = []
+    for t in titles or []:
+        out.append(dict(t, media=naming.media_info(t, family),
+                        chosen=chosen is not None and t.get("index") == int(chosen)))
+    raw_ok = bool(_last_scan["raw"]) and (source == "job" or (
+        drive and _last_scan["key"] == _titles_key(drive)))
+    return {"drive": drive and {k: drive.get(k) for k in
+                                ("device", "vendor", "model", "label", "media")},
+            "family": family, "source": source, "titles": out,
+            "scanning": _scan_state["running"], "scan_error": _scan_state["error"],
+            "raw": raw_ok, "job_id": job and job.get("id")}
+
+
+def scan_disc():
+    """Read the disc in the tray in the background, for the details panel.
+
+    Refused while a rip needs the drive: a second makemkvcon fighting the first for the
+    disc is how a rip that was fine becomes one that fails."""
+    if _scan_state["running"]:
+        return True, "Already reading the disc."
+    if db.drive_busy():
+        return False, "A rip is using the drive. Its details are shown already."
+    drive = next((d for d in P.optical_drives() if d.get("present")), None)
+    if not drive:
+        return False, "There's no disc in the tray."
+
+    def go():
+        _scan_state.update(running=True, error=None)
+        try:
+            read_titles(drive.get("device"), drive)
+        except Exception as e:
+            _scan_state["error"] = str(e)
+        finally:
+            _scan_state["running"] = False
+    threading.Thread(target=go, name="riparr-disc-scan", daemon=True).start()
+    return True, "Reading the disc. A few minutes on a real drive."
+
+
+def last_scan_raw():
+    return _last_scan["raw"] or ""
+
+
+def planned_destination(job, s=None):
+    """Where this job's rip will be written, for the queue to show before it happens.
+
+    {"path": "//host/share/Movies/Film (2021)/Film (2021) [...].mkv", "count": 1}, or
+    None until there's a name and a share. Built by the same functions the transfer
+    uses, so it can't disagree with them -- except that a name already taken on the
+    share gets a suffix at transfer time, which this can't know without asking it.
+    """
+    s = s or _settings()
+    kind = job.get("kind") or "movie"
+    share, _folder = db.destination(kind)
+    title = job.get("title") or job.get("disc_label")
+    if not share or not title:
+        return None
+    if job.get("_year") is None and job.get("year"):
+        job = dict(job, _year=job["year"])
+    transport = SH.Transport(share)
+    try:
+        if kind == "tv":
+            plan = db.episode_plan(job)
+            rows = [e for e in plan.get("episodes") or [] if e.get("include", True)]
+            if not rows:
+                return None
+            return {"path": transport.describe(_episode_name(job, s, plan, rows[0])),
+                    "count": len(rows), "kind": "tv"}
+        if job.get("output") == BACKUP:
+            return {"path": transport.describe(_backup_name(job, s)) + "/",
+                    "count": 1, "kind": "backup"}
+        key, fallback = _TEMPLATES["movie"]
+        rel = _render_template(s.get(key) or fallback, title, job.get("_year"),
+                               source=job.get("disc_family"),
+                               media=_media_for(job, job.get("chosen_title")))
+        name = "%s/%s" % (_folder, rel) if _folder else rel
+        return {"path": transport.describe(name), "count": 1, "kind": "movie"}
+    except Exception:
+        return None
 
 
 def _transfer(job, s, local_path, cancel_ev):
