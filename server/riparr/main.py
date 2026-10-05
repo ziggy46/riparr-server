@@ -18,7 +18,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 
 from . import (__version__, artwork as ART, backup as BK, db, drives as DRV,
                makemkv as MK,
-               naming as NM, notify as NT, platform as P, rip as RIP, shares as SH, system as SY,
+               naming as NM, notify as NT, tmdb as TM, platform as P, rip as RIP, shares as SH, system as SY,
                tv as TV, updater)
 
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
@@ -379,6 +379,7 @@ def status(user=Depends(require_user)):
         # it. The page turns it into "you already ripped this, here it is".
         "duplicate": RIP.pending_duplicate(),
         "library": P.library_status(),
+        "tmdb": TM.configured(),
     }
 
 
@@ -726,7 +727,7 @@ def autorip_set(body: AutoRip, user=Depends(require_user)):
 # back the same way when untouched, which is what makes "save" on a page you did not
 # retype your SMTP password into not wipe it. `list_shares` established the precedent
 # of never returning a stored password at all; these follow it.
-SECRET_SETTINGS = ("smtp_password", "ntfy_token")
+SECRET_SETTINGS = ("smtp_password", "ntfy_token", "tmdb_token")
 SECRET_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 
 
@@ -865,6 +866,29 @@ def naming_info(user=Depends(require_user)):
     return {"movie": NM.MOVIE_PRESETS, "tv": NM.TV_PRESETS, "tokens": NM.TOKENS}
 
 
+class TmdbTest(BaseModel):
+    token: str = ""
+
+
+@app.post("/api/tmdb/test")
+def tmdb_test(body: TmdbTest = TmdbTest(), user=Depends(require_user)):
+    """Check a TMDb key before saving it -- or the saved one, when none is given."""
+    key = body.token.strip()
+    if key == SECRET_MASK:
+        key = ""
+    if not key and not TM.configured():
+        return {"ok": False, "message": "No TMDb key is set."}
+    return TM.check(key or None)
+
+
+@app.get("/api/tmdb/search")
+def tmdb_search(q: str = "", user=Depends(require_user)):
+    """Films for the "which film is this?" question's search box."""
+    title, year = TM.split(q)
+    return {"results": _with_posters(TM.search(title, year)[:8]),
+            "configured": TM.configured()}
+
+
 class NamingPreview(BaseModel):
     template: str
     kind: str = "movie"
@@ -967,7 +991,25 @@ def _job_out(j):
     open_now = next((st for st in reversed(raw) if st.get("ended") is None), None)
     j["stage_name"] = open_now.get("name") if open_now else None
     j["stage_started"] = open_now.get("started") if open_now else None
+    if j.get("candidates"):
+        try:
+            j["candidates"] = _with_posters(json.loads(j["candidates"]))
+        except (ValueError, TypeError):
+            j["candidates"] = []
     return j
+
+
+def _with_posters(films):
+    """TMDb results with a poster thumbnail the browser can load -- through our own
+    image proxy, so the browser never talks to TMDb and the page needs no key."""
+    out = []
+    for f in films or []:
+        f = dict(f)
+        if f.get("poster_path"):
+            f["poster"] = "/api/artwork/image/%s" % ART._remember(
+                TM.IMAGES + "w185" + f["poster_path"])
+        out.append(f)
+    return out
 
 
 @app.get("/api/queue")
@@ -1081,6 +1123,7 @@ class DiscAnswer(BaseModel):
     include: List[int] = None           # title indexes to keep; None means keep all
     episode_titles: Dict[str, str] = None   # title index -> a name typed by hand
     order: List[int] = None             # title indexes, in the order they should go
+    tmdb_id: int = None                 # a film picked from TMDb's suggestions
 
 
 @app.post("/api/queue/{job_id}/answer")
@@ -1093,7 +1136,8 @@ def rip_answer(job_id: int, body: DiscAnswer, user=Depends(require_user)):
                              name=(body.name or "").strip(), skip=body.skip,
                              season=body.season, first_episode=body.first_episode,
                              series_id=body.series_id, include=body.include,
-                             episode_titles=body.episode_titles, order=body.order)
+                             episode_titles=body.episode_titles, order=body.order,
+                             tmdb_id=body.tmdb_id)
     if not ok:
         raise HTTPException(status_code=400, detail=message)
     return {"ok": True, "message": message}

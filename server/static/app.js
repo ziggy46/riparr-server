@@ -1186,6 +1186,17 @@ function identifyPrompt(j) {
         <input id="ni-name" value="${esc(j.title || "")}" placeholder="e.g. The Matrix (1999)">
         <span class="help">A year in brackets is used as the year. Without one Riparr
           won't invent it.</span></label>
+      ${state.status && state.status.tmdb ? `
+        <div class="ni-tmdb" data-tmdb-for="${j.id}" data-picked="${j.tmdb_id || ""}">
+          <div class="ni-label">${(j.candidates || []).length
+            ? "TMDb's suggestions — pick one to use its name, year and IDs"
+            : "Find it on TMDb, to use its name, year and IDs"}</div>
+          <div class="tmdb-picks">${tmdbPicks(j.candidates || [], j.tmdb_id)}</div>
+          <div class="manual-row">
+            <input class="ni-tmdb-q" placeholder="Search TMDb — e.g. Blade Runner 1982">
+            <button class="btn ni-tmdb-go">Search</button>
+          </div>
+        </div>` : ""}
       ${titles.length > 1 ? `
         <div class="ni-titles">
           <div class="ni-label">Which title is the film?</div>
@@ -1206,6 +1217,21 @@ function identifyPrompt(j) {
 }
 
 const gb = (b) => `${(b / 1073741824).toFixed(1)} GB`;
+
+/* TMDb films as cards. Picking one fills the name in and remembers the ID; the poster
+   comes through Riparr's image proxy. */
+function tmdbPicks(films, picked) {
+  if (!films.length) return "";
+  return films.map(f => {
+    const name = f.year ? `${f.title} (${f.year})` : f.title;
+    return `<button type="button" class="tmdb-pick${String(f.id) === String(picked) ? " on" : ""}"
+        data-tmdb-pick="${f.id}" data-name="${esc(name)}" title="${esc(f.overview || name)}">
+      <span class="tmdb-poster"${f.poster ? ` style="background-image:url('${esc(f.poster)}')"` : ""}></span>
+      <span class="tmdb-name">${esc(f.title)}</span>
+      <span class="tmdb-year muted">${esc(f.year || "")}</span>
+    </button>`;
+  }).join("");
+}
 
 /* ── the tray ──
    The disc and the drive holding it are one fact, so they are drawn once. Which of
@@ -1829,6 +1855,30 @@ settingsPages.library = async (s) => {
           <button class="btn quiet-danger" data-del-share="${sh.id}">Remove</button>
         </div>`).join("")}</div>` : ""}
       <div id="share-add"></div>
+    </div></div>
+
+    <div class="section"><h2>Film lookup (TMDb)</h2><div>
+      <p class="muted">With a key from <a href="https://www.themoviedb.org/settings/api"
+        target="_blank" rel="noopener">The Movie Database</a>, Riparr looks each film up:
+        the disc's real title and year, its TMDb and IMDb IDs for the naming presets, and
+        its poster. A match is only used when it's clear-cut. A free account gives you a
+        key: either the "API Read Access Token" or the "API Key" works.</p>
+      <label class="f"><span>TMDb key</span>
+        <input data-set="tmdb_token" id="tmdb-token" value="${esc(s.tmdb_token || "")}"
+               placeholder="Paste your API Read Access Token" autocomplete="off"
+               spellcheck="false"></label>
+      <div class="f"><span></span><div class="btn-row" style="margin:0">
+        <button class="btn" id="tmdb-test">Test the key</button>
+        <span class="test-out" id="tmdb-test-out"></span></div></div>
+      <label class="f"><span>When TMDb isn't sure</span>
+        <select data-set="tmdb_unsure">
+          ${opt("label", "Keep the name Riparr has, without IDs (default)", s.tmdb_unsure)}
+          ${opt("ask", "Ask me, with TMDb's suggestions", s.tmdb_unsure)}
+        </select>
+        <span class="help">"Not sure" means TMDb has films by that name but none that
+          match the title and year exactly, like a disc labelled just DUNE. Asking stops
+          the queue until you answer; keeping the name doesn't.
+          <br><br>${esc("This product uses the TMDB API but is not endorsed or certified by TMDB.")}</span></label>
     </div></div>
 
     <div class="section"><h2>Naming</h2><div>
@@ -2562,6 +2612,9 @@ systemPages.status = async () => {
           <a href="https://github.com/jackharvest/riparr" target="_blank" rel="noopener">github.com/jackharvest/riparr</a></div>
         <div class="k">MakeMKV</div><div class="v">
           <a href="https://www.makemkv.com/forum/" target="_blank" rel="noopener">makemkv.com/forum</a></div>
+        <div class="k">Film data</div><div class="v">
+          <a href="https://www.themoviedb.org/" target="_blank" rel="noopener">The Movie Database (TMDB)</a>
+          <span class="muted">· This product uses the TMDB API but is not endorsed or certified by TMDB.</span></div>
       </div>
     </div>`;
 };
@@ -3328,10 +3381,45 @@ function wireContent(section, sub) {
     }
   });
 
+  /* TMDb in the "which film is this?" question: pick a card, or search for another. */
+  $$("[data-tmdb-for]").forEach(box => {
+    const wire = () => box.querySelectorAll("[data-tmdb-pick]").forEach(c => c.onclick = () => {
+      const on = !c.classList.contains("on");
+      box.querySelectorAll("[data-tmdb-pick]").forEach(x => x.classList.remove("on"));
+      c.classList.toggle("on", on);
+      box.dataset.picked = on ? c.dataset.tmdbPick : "";
+      const name = $("#ni-name");
+      if (name && on) name.value = c.dataset.name;
+    });
+    wire();
+    const nameInput = $("#ni-name");
+    if (nameInput) nameInput.addEventListener("input", () => {
+      // A typed name is a different answer from the picked film.
+      box.dataset.picked = "";
+      box.querySelectorAll("[data-tmdb-pick]").forEach(x => x.classList.remove("on"));
+    });
+    const q = box.querySelector(".ni-tmdb-q"), go = box.querySelector(".ni-tmdb-go");
+    go.onclick = async () => {
+      if (!q.value.trim()) return;
+      go.disabled = true;
+      let r;
+      try { r = await api.get(`/api/tmdb/search?q=${encodeURIComponent(q.value.trim())}`); }
+      catch (e) { toast(e.message, "bad"); go.disabled = false; return; }
+      box.querySelector(".tmdb-picks").innerHTML = (r.results || []).length
+        ? tmdbPicks(r.results, box.dataset.picked)
+        : `<p class="muted">Nothing on TMDb for that.</p>`;
+      wire();
+      go.disabled = false;
+    };
+    q.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go.click(); } };
+  });
+
   $$("[data-answer]").forEach(b => b.onclick = async () => {
     const picked = $('input[name="ni-title"]:checked');
     const body = { name: ($("#ni-name") || {}).value || "" };
     if (picked) body.title_index = Number(picked.value);
+    const film = $(`[data-tmdb-for="${b.dataset.answer}"]`);
+    if (film && film.dataset.picked) body.tmdb_id = Number(film.dataset.picked);
     if (!body.name.trim() && !picked) {
       toast("Give it a name, or pick which title is the film.", "bad");
       return;
@@ -3541,6 +3629,20 @@ function wireContent(section, sub) {
   /* The destination path preview. "Share" and "folder" only mean anything together,
      and seeing the whole thing is how somebody notices they have typed the share name
      into the folder box. */
+  const tmdbTest = $("#tmdb-test");
+  if (tmdbTest) tmdbTest.onclick = async () => {
+    const out = $("#tmdb-test-out");
+    tmdbTest.disabled = true;
+    out.className = "test-out";
+    out.textContent = "Asking TMDb…";
+    try {
+      const r = await api.post("/api/tmdb/test", { token: $("#tmdb-token").value.trim() });
+      out.className = "test-out " + (r.ok ? "ok" : "bad");
+      out.textContent = r.ok ? r.message + " Save to use it." : r.message;
+    } catch (e) { out.className = "test-out bad"; out.textContent = e.message; }
+    tmdbTest.disabled = false;
+  };
+
   /* Naming: a preset fills the template, editing the template makes it Custom, and
      either one refreshes the preview -- debounced, since it's a round trip. */
   $$("[data-naming]").forEach(input => {

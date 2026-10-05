@@ -1781,3 +1781,20 @@ li.warn .cl-detail, li.fail .cl-detail { color: var(--fg-strong); }
 
 /* The naming preview: one long path, so it wraps anywhere rather than overflowing. */
 .naming-preview code { word-break: break-all; white-space: normal; }
+
+/* TMDb's suggestions in the "which film is this?" question. */
+.ni-tmdb { margin: 6px 0 14px; }
+.tmdb-picks { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0 10px; }
+.tmdb-pick {
+  width: 104px; padding: 6px; border-radius: 8px; cursor: pointer; text-align: left;
+  background: rgba(255,255,255,.03); border: 1px solid var(--line-2); color: inherit;
+  display: flex; flex-direction: column; gap: 4px; font: inherit;
+}
+.tmdb-pick:hover { border-color: var(--fg-muted); }
+.tmdb-pick.on { border-color: var(--accent, #5a8dee); box-shadow: 0 0 0 1px var(--accent, #5a8dee); }
+.tmdb-poster {
+  display: block; width: 100%; aspect-ratio: 2 / 3; border-radius: 4px;
+  background: rgba(255,255,255,.06) center / cover no-repeat;
+}
+.tmdb-name { font-size: 12px; line-height: 1.25; color: var(--fg-strong); }
+.tmdb-year { font-size: 11px; }
