@@ -8,6 +8,25 @@ bother updating.
 
 ---
 
+## Riparr Server (fork of 0.5.0)
+
+**Runs in Docker.** `docker compose up -d --build` builds an image with MakeMKV, dvdbackup
+and libdvdcss compiled in. Pass the drive's `/dev/sr*` and `/dev/sg*` through and open
+port 9797. See docs/guide/02-docker.md.
+
+**Real hardware is any Linux.** Upstream decided it was on real hardware by looking for an
+ARM board's device tree, so on an x86 server it would silently simulate a drive. Linux now
+means real hardware; `RIPARR_MOCK=1` asks for simulation.
+
+**Removed the appliance parts:** the Preparer and SD card flashing, Wi-Fi management and
+connection recovery, the status LED, restart and shut down, the USB-C socket fix, the
+systemd helper units, installing MakeMKV from the web page, and the in-place updater.
+System → Updates still checks for new releases, of this fork.
+
+**Smaller changes.** Wording about "the card" is now about staging. The password reset file
+goes in the `/data` volume. `RIPARR_STAGING` sets the staging path, and `RIPARR_API_DOCS=1`
+turns the API docs on.
+
 ## 0.5.0
 
 **Full disc backups.** Settings → Ripping → Titles → **Full disc backup** keeps the whole

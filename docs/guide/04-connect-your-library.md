@@ -1,6 +1,6 @@
 # 4. Connect Your Library
 
-[← First boot](03-first-boot.md) · [Guide index](README.md) · [Next: Library layout →](05-library-layout.md)
+[← Run it in Docker](02-docker.md) · [Guide index](README.md) · [Next: Library layout →](05-library-layout.md)
 
 **About 1 minute.** This is where your finished rips will land — your NAS, your server,
 wherever Plex or Jellyfin already reads from.
@@ -23,7 +23,7 @@ publishing `Media`, with your films in `Media/Movies/4K`, is:
 
 | Box | What goes in it |
 |---|---|
-| Server | `tower.local` |
+| Server | `192.168.1.20` |
 | Share | `Media` |
 | Folder | `Movies/4K` |
 
@@ -59,8 +59,11 @@ first rip:
 - The credentials work
 - Riparr can actually **write** — not just connect
 
-A share that mounts read-only is the classic one. It looks completely fine until the first
-rip finishes and has nowhere to go.
+A read-only share is the classic one. It looks completely fine until the first rip
+finishes and has nowhere to go.
+
+Riparr copies files over SMB with `smbclient`, so none of this needs anything mounted on
+the server or in the container.
 
 ## Where films and television go
 
@@ -72,34 +75,44 @@ control:
 |---|---|---|
 | Everything in one place | `Media` · `Movies` | `Media` · `TV` |
 | Two folders, one server | `Media` · `Films/Bluray` | `Media` · `Shows` |
-| Two different machines | `Media` on the NAS | `Video` on the spare box |
+| Two different machines | `Media` on the NAS | `Video` on another server |
 | Straight into an existing library | `Media` · `Movies` | `Media` · `TV Shows` |
 
 Add a second share from the **Shares** section on the same page, then pick it in the
 dropdown. Riparr creates per-title folders inside whatever you choose, and does not touch
 anything already there.
 
-Each block also says whether that share is **mounted**. That matters more than it looks:
-writing a rip straight into your library is what Riparr does by default, and a mounted
-share is what makes it possible. On the reference board it is about twice as fast as
-going via the card, and it removes the card as a size limit. A share you added since the
-last restart is mounted on the next one.
+## Straight to your library, or staged first
 
-**A share that isn't mounted doesn't break anything** — that rip stages on the card and
-is sent when the share comes back.
+Each block also says whether that share is **mounted**. That decides how a rip gets there:
+
+- **Straight to your library** — MakeMKV writes the rip directly onto the share as the
+  disc is read. This needs the library mounted on the **host** and bind-mounted into the
+  container at `/srv/library`. Only the default share uses that path; any other share
+  would be `/srv/library-<id>`. Add the bind mount in `docker-compose.yml` and recreate
+  the container — Riparr does not mount anything itself.
+- **Staged first, then sent** — the rip is written to `/srv/staging`, then copied to the
+  share over SMB. This works with nothing mounted at all.
+
+**A share that isn't mounted doesn't break anything.** If nothing is mounted at
+`/srv/library`, each rip automatically stages in `/srv/staging` and is copied over SMB
+afterwards.
 
 ## What happens if the share goes offline later
 
 Nothing dramatic, by design.
 
-- **Mid-rip:** the rip keeps going, buffering onto the SD card. If the share comes back
-  within the hour or so of buffer, you'll never know it happened.
-- **Buffer fills:** the rip **pauses** and holds the disc. It does not fail and does not
+- **Mid-rip, staged:** the rip keeps going into staging. If the share comes back before
+  staging runs out of room, you'll never know it happened.
+- **Straight to your library:** whether to write directly is decided as each rip starts,
+  so a share that is already gone means that rip stages instead. One that disappears
+  partway through a direct rip takes the rip with it; retry it once the share is back.
+- **Staging fills:** the rip **pauses** and holds the disc. It does not fail and does not
   lose your work. The web page explains what happened.
 - **Share returns:** everything resumes where it stopped.
 
-You will not come back to a bricked box or a half-written file in your library.
+You will not come back to a half-written file in your library.
 
 ---
 
-[← First boot](03-first-boot.md) · [Guide index](README.md) · [Next: Library layout →](05-library-layout.md)
+[← Run it in Docker](02-docker.md) · [Guide index](README.md) · [Next: Library layout →](05-library-layout.md)

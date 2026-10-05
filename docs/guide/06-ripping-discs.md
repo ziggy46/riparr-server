@@ -17,73 +17,67 @@ That's it. No button, no clicking, no app.
 
 ## How long it takes
 
-| Disc | Roughly |
-|---|---|
-| DVD | **~20–30 minutes** *(measured)* |
-| Blu-ray | ~3 hours *(estimate)* |
-| 4K UHD | most of a day *(estimate)* |
+It depends almost entirely on your drive and your server's CPU. Blu-ray takes much longer
+than DVD, and 4K UHD longer again.
 
-**Most of that is the box thinking, not the network.** Measured on a retail DVD: about
-**sixteen minutes pass before a single byte is written**. Commercial discs are encrypted,
-and the box unscrambles them in software — that is arithmetic, and this is a small
-computer. Reading and unscrambling takes far longer than writing the film out or sending
-it to your library.
+**Much of that time is spent before anything is written.** Commercial discs are
+encrypted, and they are unscrambled in software — that is CPU work. Reading and
+unscrambling usually takes far longer than writing the film out or sending it to your
+library.
 
-So during a rip the drive spins, the box gets warm, and for a while the progress bar has
-nothing honest to show you — that stretch is real work, not a fault. Riparr shows a
-sweeping bar and a running clock rather than a percentage it would have to invent.
-
-A faster drive will not change these numbers. A faster **card** helps a little: writing
-the film out runs at about 9 MB/s on the reference board, which is marginally slower than
-the Wi-Fi that sends it onward.
+So during a rip the drive spins and for a while the progress bar has nothing honest to
+show you — that stretch is real work, not a fault. Riparr shows a sweeping bar and a
+running clock rather than a percentage it would have to invent.
 
 ### The five stages, and why two of them cannot show a percentage
 
-| Stage | What is happening | On the reference board, one DVD |
-|---|---|---|
-| **Reading the disc** | Cataloguing what is on it | ~9 min |
-| **Decrypting** | Unscrambling, in software. **Nothing is written yet** | ~7 min |
-| **Writing to your library** | The film comes off the disc onto your share | ~9 min |
-| **Filing it in your library** | Moving it from the scratch folder into place | instant |
-| **Verifying** | Proving it arrived | seconds |
+| Stage | What is happening |
+|---|---|
+| **Reading the disc** | Cataloguing what is on it |
+| **Decrypting** | Unscrambling, in software. **Nothing is written yet** |
+| **Writing to your library** | The film comes off the disc onto your share |
+| **Filing it in your library** | Moving it from the scratch folder into place |
+| **Verifying** | Proving it arrived |
 
-Those middle two are named for what is actually happening, so they read differently if
-you have switched rips to stage on the card: **Saving to the card**, then **Uploading**
-— which takes about another 5 minutes, because the film gets written twice.
+Those middle two are named for what is actually happening, so they read differently when
+a rip is staged first: the film is saved to the staging folder, then uploaded — which
+adds time, because the film gets written twice.
 
 The first two have **no percentage available, and never will**. MakeMKV reports none
 during the scan, and the reads go to the drive by a route the operating system cannot
 see — so there is no file growing and no disk counter moving to measure. This was checked
 rather than assumed.
 
-What Riparr does instead is count. It knows how long **this** box took the last few
+What Riparr does instead is count. It knows how long **your** setup took the last few
 times, so the queue shows the stage you are in, how long you have been in it, and
 roughly when to come back. Until two rips have finished it says so plainly rather than
 guessing. If a stage runs long it says *"3 min over the usual"* — never "0 min left".
 
 **History** shows the same five stages for every finished rip, to scale, so you can see
-where your half hour actually went.
+where the time actually went.
 
 ## What the eject actually means
 
 **The disc ejects when the file has landed in your library and been checked.** Eject means
-done. You can unplug the box the moment the tray opens.
+done.
 
-That is the whole rule, and it is the same on every card size.
+That is the whole rule.
 
 > **[unresolved] — this is meant to become two rules.** The design (D11) has Riparr
-> uploading as it rips and ejecting early on a large card, so you can load the next disc
-> while the last one is still travelling. That part is not built yet, so today the tray
-> stays shut until the job is completely finished. When it lands, this section grows a
-> second case: out of the drive, but still travelling.
+> uploading as it rips and ejecting early when the rip is staged, so you can load the
+> next disc while the last one is still travelling. That part is not built yet, so today
+> the tray stays shut until the job is completely finished. When it lands, this section
+> grows a second case: out of the drive, but still travelling.
 
 ## What it does when a disc won't fit
 
-A rip is written to the SD card first, so a title has to fit on the card with room to
+A staged rip is written to `/srv/staging` first, so a title has to fit there with room to
 spare. If it doesn't, **Riparr says so before it starts** rather than failing partway
-through. A 4K title is ~66 GB, which is why 4K wants a 256 GB card.
+through. A 4K title is ~66 GB.
 
-`riparr.local` shows how much room is left in **discs** — "Room for 2 Blu-rays, or 7
+Going straight to your library has no such ceiling — nothing is staged.
+
+The web UI shows how much room is left in **discs** — "Room for 2 Blu-rays, or 7
 DVDs" — not gigabytes.
 
 ## What it does with a disc this drive can't read
@@ -112,7 +106,7 @@ in your library, and highlights it. The **Re-rip** button is right there on the 
 you meant it — a bad rip, a changed setting, a better drive — press it. Leave the disc on
 the open tray and Riparr pulls the tray back in for you.
 
-**If nobody is looking at a browser**, the box has to say it out loud. Two ways, on
+**If nobody is looking at a browser**, Riparr has to say it with the drive. Two ways, on
 **Settings → Ripping → Already-ripped discs**:
 
 | | |
@@ -132,30 +126,30 @@ decide which you prefer.
 
 ## Feeding it a stack
 
-Load discs back to back — rip, eject, next — as long as there is room on the card for the
-one you're putting in. `riparr.local` shows how many more fit.
+Load discs back to back — rip, eject, next. When rips are staged, there has to be room in
+`/srv/staging` for the one you're putting in; the web UI shows how many more fit.
 
-## Reading the box without a browser
+## Reading the drive without a browser
 
 The disc itself is the signal. It stays in while there's work to do and comes back out
 when there isn't.
 
-| The box is | What that means | Can I unplug? |
-|---|---|---|
-| Tray shut, drive quiet | Idle, ready for a disc | Yes |
-| Tray shut, drive working | Ripping | No |
-| Tray shut, drive quiet, still busy on the page | Uploading to your library | **No** |
-| Disc ejected | Done, or it gave up — the page says which | Yes |
-| Disc ejected almost immediately | You've ripped this one before | Yes |
+| The drive is | What that means |
+|---|---|
+| Tray shut, drive quiet | Idle, ready for a disc |
+| Tray shut, drive working | Ripping |
+| Tray shut, drive quiet, still busy on the page | Uploading to your library |
+| Disc ejected | Done, or it gave up — the page says which |
+| Disc ejected almost immediately | You've ripped this one before |
 
 If you want to know without walking over, set up **notifications** — Discord or a webhook,
-on **Settings → Notifications**. That's the honest answer for a box with no screen: it
-tells you where you actually are.
+on **Settings → Notifications**. That's the honest answer when you are not sitting at the
+web page: it tells you where you actually are.
 
 ## The web page
 
-`riparr.local` shows what's in progress, what's queued, what's waiting on you, and how
-much room is left — in **discs**, not gigabytes.
+The web UI at `http://<server>:9797` shows what's in progress, what's queued, what's
+waiting on you, and how much room is left — in **discs**, not gigabytes.
 
 The Queue page is the landing page and it is one screen: the **Auto Rip** switch, then
 either the queue or the tray. The tray is the disc currently loaded, the drive holding
@@ -173,7 +167,7 @@ library.
 **Whatever went wrong, start at History.** Every attempt is a row with its own reason,
 and each row offers only the retries that would actually help:
 
-- **Retry upload** — the rip is still on the card, so this skips the disc entirely.
+- **Retry upload** — the rip is still in staging, so this skips the disc entirely.
   Minutes, not half an hour. This is the one you want after a network hiccup.
 - **Retry fast verification** / **Retry deep verification** — the file reached your
   library but the check did not finish. Neither touches the disc.
@@ -183,22 +177,18 @@ If only *Retry rip* is offered, the staged copy has been cleaned up and the disc
 only remaining source.
 
 **Duplicate.** You've ripped this disc before. Ejected immediately rather
-than spending three hours doing it again. See below.
+than spending hours doing it again. See above.
 
 **Library unreachable.** NAS asleep, network down, credentials changed.
 The rip is safe and paused. Fix the share and it picks up where it stopped.
 
 **Nothing happened at all.** See [troubleshooting](08-troubleshooting.md).
 
-## Yanking the cable
+## If the container stops mid-rip
 
-Fine. Riparr expects it. An interrupted rip is detected on the next boot and either
-resumes or is failed cleanly. You won't get a corrupt file in your library, and you
-won't get a corrupt SD card.
-
-If the web page is in front of you anyway, **Shut down** is in the account menu — the
-person icon, top right. There is no button on the enclosure, so that menu is the only
-place it lives. It is the tidier way to stop the box; it is not the required one.
+Fine. Riparr expects it. An interrupted rip is detected the next time the container
+starts and either resumes or is failed cleanly. You won't get a corrupt file in your
+library.
 
 ---
 

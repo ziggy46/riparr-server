@@ -1,23 +1,23 @@
 # Riparr service
 
-The appliance itself: FastAPI + SQLite in a single process, serving a static frontend
-(D2). No separate database, no separate web server, no container runtime — the binding
-constraint is 512 MB of RAM.
+The service itself: FastAPI + SQLite in a single process, serving a static frontend.
+No separate database and no separate web server; the Docker image is this plus MakeMKV.
 
 ```sh
 ./run.sh              # http://localhost:8000
 ```
 
-Off the Pi it runs in **mock mode**: `riparr/platform.py` reports simulated hardware, a
-simulated drive with a disc in it, and discoverable network shares, so the whole interface
-is exercisable on a laptop. `IS_APPLIANCE` is the only switch.
+Off Linux (or with `RIPARR_MOCK=1`) it runs in **mock mode**: `riparr/platform.py`
+reports simulated hardware, a simulated drive with a disc in it, and discoverable network
+shares, so the whole interface is exercisable on a laptop. `IS_APPLIANCE` is the only
+switch.
 
 ## Layout
 
 | File | Purpose |
 |---|---|
 | `riparr/main.py` | The API and static serving |
-| `riparr/platform.py` | **Everything that differs between the appliance and a Mac.** Nothing else shells out. |
+| `riparr/platform.py` | **Everything that differs between real hardware and a laptop.** Nothing else shells out. |
 | `riparr/db.py` | SQLite. Settings are typed key/value; WAL, because the cable gets yanked (D4) |
 | `riparr/shares.py` | SMB discovery, and the write test that proves a share works |
 | `riparr/updater.py` | Update check and install against the official repository |
@@ -52,7 +52,7 @@ exist.
 
 ## API
 
-Self-documenting at `/api/docs`. The UI is only the first client of it — that is what
+Self-documenting at `/api/docs` (in mock mode, or with `RIPARR_API_DOCS=1`). The UI is only the first client of it — that is what
 makes Homepage widgets and multi-unit setups nearly free later.
 
 ## Not built
