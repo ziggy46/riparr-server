@@ -48,18 +48,37 @@ A backup never goes into a folder that already has something in it. If you alrea
 
 ## Naming templates
 
-If you name things your own way, the templates are editable, Sonarr-style:
+The templates are editable on **Settings → Library**, and understand Radarr and Sonarr's
+naming syntax. The dropdown above each one has presets, including the schemes from
+[TRaSH Guides](https://trash-guides.info/Radarr/Radarr-recommended-naming-scheme/), and
+a preview under it shows what the template makes of a sample 4K disc.
 
-| Token | Becomes | Built? |
-|---|---|---|
-| `{Title}` | `Blade Runner` | yes |
-| `{Year}` | `1982` | yes |
-| `{Source}` | `DVD`, `Bluray`, `UHD` | yes |
-| `{Season:00}` | `01` | yes |
-| `{Episode:00}` | `01` | yes |
-| `{EpisodeTitle}` | `Pilot` | yes |
-| `{Quality}` | `Bluray-1080p` | **not yet** |
-| `{Edition}` | `Director's Cut` | **not yet** |
+| Token | Becomes |
+|---|---|
+| `{Title}` or `{Movie CleanTitle}` | `Blade Runner` |
+| `{Year}` or `{Release Year}` | `1982` |
+| `{Source}` | `DVD`, `Bluray`, `UHD` |
+| `{Season:00}`, `{Episode:00}` | `01` |
+| `{EpisodeTitle}` | `Pilot` |
+| `{Quality Full}` | `Remux-2160p`, `Remux-1080p`, `DVD`; `BR-DISK` / `DVD-R` for a full-disc backup |
+| `{MediaInfo VideoCodec}` | `HEVC`, `AVC`, `VC1`, `MPEG2` |
+| `{MediaInfo VideoBitDepth}` | `10` |
+| `{MediaInfo VideoDynamicRangeType}` | `DV`, `HDR10` (only when MakeMKV says so) |
+| `{MediaInfo AudioCodec}` | `TrueHD Atmos`, `DTS-HD MA`, `AC3` |
+| `{MediaInfo AudioChannels}` | `7.1` |
+| `{MediaInfo AudioLanguages}` | `[DE+FR]`: audio languages other than English |
+| `{MediaInfo 3D}` | `3D` |
+| `{Edition Tags}`, `{ImdbId}`, `{TmdbId}`, `{Release Group}`, `{Custom Formats}` | nothing yet |
+
+**Text inside the braces only appears with the value**, Radarr's way: `{[Quality Full]}`
+gives `[Remux-1080p]`, or nothing at all. A group nested inside another keeps its outer
+braces, which is how Plex wants IDs: `{tmdb-{TmdbId}}` gives `{tmdb-603}`. `{{Edition Tags}}`
+gives `{Director's Cut}`.
+
+The media tokens come from MakeMKV's description of the title being ripped. Riparr has
+no source yet for IDs, editions or release groups, so those parts of a template are left
+out of the name rather than guessed: a wrong ID is worse than none, since Plex and
+Jellyfin trust it over the title.
 
 The zeroes set the padding: `{Season:0}` gives `1`, `{Season:000}` gives `001`.
 
@@ -67,9 +86,8 @@ A file holding two episodes — a double-length premiere or finale — expands
 `E{Episode:00}` to `E01-E02` by itself. That is the form Plex and Jellyfin both read as
 one file containing two episodes, and you do not need to change the template to get it.
 
-A token that is not built is left in the filename as written, rather than blanked — a
+A token Riparr doesn't know is left in the filename as written, rather than blanked — a
 template with a typo should produce a visibly odd name, not a file called ` ().mkv`.
-`{Quality}` waits on Riparr reading the video stream, which it does not do.
 
 ## Two copies of the same film
 

@@ -106,6 +106,10 @@ adding a share for box sets cannot quietly redirect your films.
 |---|---|
 | **Film template** | `{Title} ({Year})/{Title} ({Year}).mkv` |
 | **TV template** | `{Title} ({Year})/Season {Season:00}/{Title} - S{Season:00}E{Episode:00} - {EpisodeTitle}.mkv` |
+
+The film and TV templates each have a preset list, including TRaSH Guides' Radarr naming
+schemes, and a live preview. [Library layout](05-library-layout.md#naming-templates) has
+every token.
 | **On unknown disc** | **Use the disc label** *(default)* / Ask me / Skip |
 
 **This is only about the *name*.** Which title gets ripped is a separate setting, under

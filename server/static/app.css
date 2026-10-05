@@ -1778,3 +1778,6 @@ li.warn .cl-detail, li.fail .cl-detail { color: var(--fg-strong); }
 }
 .notice-dialog p { margin: 0 0 12px; line-height: 1.55; }
 .notice-dialog .btn-row { margin-top: 18px; justify-content: flex-end; }
+
+/* The naming preview: one long path, so it wraps anywhere rather than overflowing. */
+.naming-preview code { word-break: break-all; white-space: normal; }

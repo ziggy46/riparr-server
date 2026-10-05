@@ -1733,6 +1733,24 @@ views.settings = async (sub = "library") => {
 
 const settingsPages = {};
 
+/* A naming template with its preset list and a preview of what it makes. The preview is
+   rendered by the server, which is the only thing that knows the template language. */
+function namingField(kind, label, key, value) {
+  const presets = (state.naming && state.naming[kind]) || [];
+  const current = presets.find(p => p.template === value);
+  return `
+    <label class="f"><span>${esc(label)}</span>
+      <select data-naming-preset="${kind}">
+        ${presets.map(p => `<option value="${esc(p.id)}" ${
+          current && current.id === p.id ? "selected" : ""}>${esc(p.label)}</option>`).join("")}
+        <option value="" ${current ? "" : "selected"}>Custom</option>
+      </select></label>
+    <label class="f"><span></span>
+      <input data-set="${key}" data-naming="${kind}" value="${esc(value || "")}"
+             spellcheck="false" autocomplete="off">
+      <span class="help naming-preview" data-naming-preview="${kind}">&nbsp;</span></label>`;
+}
+
 /* Library — where finished rips go and what they are called.
 
    Two destinations, not one. Films and box sets do not usually belong in the same
@@ -1741,7 +1759,9 @@ const settingsPages = {};
    share *and* its own folder, which makes "two folders on one share" and "two
    different machines" the same control rather than two features. */
 settingsPages.library = async (s) => {
-  const { shares, destinations, library } = await api.get("/api/shares");
+  const [{ shares, destinations, library }, naming] = await Promise.all([
+    api.get("/api/shares"), api.get("/api/naming").catch(() => null)]);
+  state.naming = naming;
   state.libShares = shares;
   const dest = (kind) => destinations[kind] || {};
   const shareOf = (id) => shares.find(sh => sh.id === id);
@@ -1812,16 +1832,23 @@ settingsPages.library = async (s) => {
     </div></div>
 
     <div class="section"><h2>Naming</h2><div>
-      <label class="f"><span>Film file name</span>
-        <input data-set="movie_template" value="${esc(s.movie_template)}"></label>
-      <label class="f"><span>Episode file name</span>
-        <input data-set="tv_template" value="${esc(s.tv_template)}">
-        <span class="help"><code>{Season:00}</code>, <code>{Episode:00}</code> and
-          <code>{EpisodeTitle}</code> as well as <code>{Title}</code>,
-          <code>{Year}</code> and <code>{Source}</code>. The zeroes set the padding.
-          A file holding two episodes expands <code>E{Episode:00}</code> to
-          <code>E01-E02</code> on its own, which is what Plex and Jellyfin read as a
-          double.</span></label>
+      <p class="muted">A template is the folder and file a rip is saved as, relative to
+        the folder above. It understands Radarr and Sonarr's naming syntax, so the
+        schemes from <a href="https://trash-guides.info/Radarr/Radarr-recommended-naming-scheme/"
+        target="_blank" rel="noopener">TRaSH Guides</a> are in the list and can be
+        pasted in as they are.</p>
+      ${namingField("movie", "Films", "movie_template", s.movie_template)}
+      ${namingField("tv", "Episodes", "tv_template", s.tv_template)}
+      <div class="f"><span></span><span class="help">
+        Tokens: ${((naming && naming.tokens) || []).map(t => `<code>${esc(t)}</code>`).join(" ")}.
+        <br><br>Text inside the braces is only written when the value exists, Radarr's
+        way: <code>{[Quality Full]}</code> gives <code>[Remux-1080p]</code> or nothing.
+        The zeroes in <code>{Season:00}</code> set the padding, and a file holding two
+        episodes expands <code>E{Episode:00}</code> to <code>E01-E02</code>, which is what
+        Plex and Jellyfin read as a double.
+        <br><br>The media tokens come from what MakeMKV reports about the disc. Riparr
+        doesn't know a film's IMDb or TMDb ID, edition or release group, so those parts
+        are left out of the name for now rather than guessed.</span></div>
       <label class="f"><span>When a disc can't be identified</span>
         <select data-set="on_unknown_disc">
           ${opt("label", "Use the disc label (default)", s.on_unknown_disc)}
@@ -3514,6 +3541,37 @@ function wireContent(section, sub) {
   /* The destination path preview. "Share" and "folder" only mean anything together,
      and seeing the whole thing is how somebody notices they have typed the share name
      into the folder box. */
+  /* Naming: a preset fills the template, editing the template makes it Custom, and
+     either one refreshes the preview -- debounced, since it's a round trip. */
+  $$("[data-naming]").forEach(input => {
+    const kind = input.dataset.naming;
+    const out = $(`[data-naming-preview="${kind}"]`);
+    const select = $(`[data-naming-preset="${kind}"]`);
+    const presets = (state.naming && state.naming[kind]) || [];
+    let timer = null;
+    const preview = () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        try {
+          const r = await api.post("/api/naming/preview", { template: input.value, kind });
+          out.innerHTML = `${icon("folder-open")} <code>${esc(r.path)}</code>`;
+        } catch (e) { out.textContent = ""; }
+      }, 250);
+    };
+    input.addEventListener("input", () => {
+      const match = presets.find(p => p.template === input.value);
+      if (select) select.value = match ? match.id : "";
+      preview();
+    });
+    if (select) select.onchange = () => {
+      const p = presets.find(x => x.id === select.value);
+      if (!p) return;                         // "Custom" keeps whatever is typed
+      input.value = p.template;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    preview();
+  });
+
   const dests = $$("[data-dest]");
   if (dests.length) {
     const shares = state.libShares || [];

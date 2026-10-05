@@ -18,7 +18,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 
 from . import (__version__, artwork as ART, backup as BK, db, drives as DRV,
                makemkv as MK,
-               notify as NT, platform as P, rip as RIP, shares as SH, system as SY,
+               naming as NM, notify as NT, platform as P, rip as RIP, shares as SH, system as SY,
                tv as TV, updater)
 
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
@@ -855,6 +855,25 @@ def shares_list(user=Depends(require_user)):
     return {"shares": db.list_shares(),
             "destinations": db.destinations(),
             "library": {k: P.library_status(db.destination(k)[0]) for k in db.KINDS}}
+
+
+# ─────────────────────────────── naming ───────────────────────────────
+
+@app.get("/api/naming")
+def naming_info(user=Depends(require_user)):
+    """The presets the Library page offers, and the tokens a template can use."""
+    return {"movie": NM.MOVIE_PRESETS, "tv": NM.TV_PRESETS, "tokens": NM.TOKENS}
+
+
+class NamingPreview(BaseModel):
+    template: str
+    kind: str = "movie"
+
+
+@app.post("/api/naming/preview")
+def naming_preview(body: NamingPreview, user=Depends(require_user)):
+    """What a template makes of a sample 4K disc, so a long one can be read."""
+    return {"path": NM.preview(body.template, "tv" if body.kind == "tv" else "movie")}
 
 
 class DiscoverQuery(BaseModel):
