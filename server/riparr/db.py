@@ -244,6 +244,9 @@ DEFAULTS = {
     # lever (see platform.drive_flash). "tray" opens and closes the tray instead, which
     # is unmissable and is machinery. "both", or "off".
     "duplicate_signal": "flash",
+    # Which networks the share scan sweeps, e.g. "192.168.1.0/24". Empty means this
+    # machine's own /24 -- which inside Docker's bridge network is Docker's, not the LAN.
+    "scan_subnets": "",
     "webhook_url": "",
     "watch_folder": "",
     # Notifications. The box's whole promise is "walk away", so these are the only way

@@ -7,8 +7,10 @@ automatic and a real file is written and read back before setup is allowed to co
 """
 import concurrent.futures
 import hashlib
+import ipaddress
 import os
 import re
+import shutil
 import socket
 import subprocess
 import tempfile
@@ -30,7 +32,7 @@ class SmbToolMissing(Exception):
 
     message = (
         "smbclient isn't installed, so Riparr can't talk to network shares. "
-        "Rebuild the Docker image: docker compose build --no-cache")
+        "It ships in the Riparr Server image, so this container is not running it.")
 
 
 def _auth_file(username, password):
@@ -127,24 +129,90 @@ def describe(host, share, path=""):
     return "//%s/%s" % (host, tail) if tail else "//%s" % host
 
 
-def discover(timeout=2.5):
-    """mDNS first, then a bounded sweep of the local /24. Returns hosts, not shares."""
+# Never sweep more than this many addresses in one go: a /22. A typo like /8 would
+# otherwise be sixteen million connection attempts from somebody's media server.
+MAX_SCAN_ADDRESSES = 1024
+
+
+def parse_subnets(text):
+    """"192.168.1.0/24, 10.0.0.0/24" -> ([IPv4Network, ...], None) or ([], error).
+
+    A bare address means its /24, because that is what people type when they mean
+    "my network". Empty means "work it out".
+    """
+    nets = []
+    for part in (text or "").replace(";", ",").split(","):
+        typed = part.strip()
+        if not typed:
+            continue
+        try:
+            net = ipaddress.ip_network(typed if "/" in typed else typed + "/24",
+                                       strict=False)
+        except ValueError:
+            return [], "%s isn't a network. Use something like 192.168.1.0/24." % typed
+        if net.version != 4:
+            return [], "Only IPv4 networks can be scanned (%s)." % typed
+        nets.append(net)
+    total = sum(max(n.num_addresses - 2, 1) for n in nets)
+    if total > MAX_SCAN_ADDRESSES:
+        return [], ("That's %d addresses. Riparr scans at most %d at once, so use a "
+                    "/22 or smaller." % (total, MAX_SCAN_ADDRESSES))
+    return nets, None
+
+
+def scan_subnets(override=None):
+    """Which networks a sweep covers, as text, and where that came from.
+
+    In order: what the caller passed, the saved setting, RIPARR_SCAN_SUBNETS, and
+    finally this machine's own /24. Inside Docker's default bridge network that last
+    one is Docker's subnet rather than the LAN, which is the whole reason the first
+    three exist.
+    """
+    if override and override.strip():
+        return override.strip(), "given"
+    from . import db
+    saved = (db.get("scan_subnets") or "").strip()
+    if saved:
+        return saved, "setting"
+    env = os.environ.get("RIPARR_SCAN_SUBNETS", "").strip()
+    if env:
+        return env, "environment"
+    ip = P._ip()
+    if not ip:
+        return "", "none"
+    return ".".join(ip.split(".")[:3]) + ".0/24", "local"
+
+
+def discover(timeout=2.5, subnets=None):
+    """mDNS first, then a bounded sweep of the chosen networks.
+
+    Returns {"hosts": [...], "subnets": "the networks swept", "source": where they
+    came from}. Raises ValueError for networks that can't be swept.
+    """
+    text, source = scan_subnets(subnets)
+    nets, err = parse_subnets(text)
+    if err:
+        raise ValueError(err)
     if P.MOCK:
         time.sleep(0.6)
-        return [
+        return {"subnets": text, "source": source, "hosts": [
             {"host": "TOWER.local", "address": "192.168.1.20", "via": "mdns"},
             {"host": "synology.local", "address": "192.168.1.31", "via": "mdns"},
             {"host": "192.168.1.44", "address": "192.168.1.44", "via": "scan"},
-        ]
+        ]}
     found = {}
     for h in _mdns_hosts():
         found[h["address"]] = h
-    for h in _sweep(timeout):
+    for h in _sweep(timeout, nets):
         found.setdefault(h["address"], h)
-    return sorted(found.values(), key=lambda h: h["address"])
+    return {"subnets": text, "source": source,
+            "hosts": sorted(found.values(),
+                            key=lambda h: ipaddress.ip_address(h["address"]))}
 
 
 def _mdns_hosts():
+    if not shutil.which("avahi-browse"):
+        return []
     out = P._run(["avahi-browse", "-artp", "_smb._tcp"], timeout=6) or ""
     hosts = []
     for line in out.splitlines():
@@ -154,14 +222,12 @@ def _mdns_hosts():
     return hosts
 
 
-def _sweep(timeout):
-    ip = P._ip()
-    if not ip:
+def _sweep(timeout, nets):
+    addrs = [str(a) for n in nets for a in (n.hosts() if n.num_addresses > 2 else [n.network_address])]
+    if not addrs:
         return []
-    base = ".".join(ip.split(".")[:3])
 
-    def probe(n):
-        addr = "%s.%d" % (base, n)
+    def probe(addr):
         s = socket.socket()
         s.settimeout(timeout)
         try:
@@ -178,7 +244,7 @@ def _sweep(timeout):
 
     hits = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=64) as ex:
-        for r in ex.map(probe, range(1, 255)):
+        for r in ex.map(probe, addrs):
             if r:
                 hits.append(r)
     return hits

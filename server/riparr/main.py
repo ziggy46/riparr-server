@@ -857,9 +857,21 @@ def shares_list(user=Depends(require_user)):
             "library": {k: P.library_status(db.destination(k)[0]) for k in db.KINDS}}
 
 
+class DiscoverQuery(BaseModel):
+    subnets: str = ""
+
+
 @app.post("/api/shares/discover")
-def shares_discover(user=Depends(require_user)):
-    return {"hosts": SH.discover()}
+def shares_discover(body: DiscoverQuery = DiscoverQuery(), user=Depends(require_user)):
+    """Look for SMB servers. `subnets` overrides which networks are swept, and is
+    remembered once it finds something, so the next scan uses it without asking."""
+    try:
+        r = SH.discover(subnets=body.subnets or None)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if body.subnets.strip() and r["hosts"]:
+        db.set("scan_subnets", r["subnets"])
+    return r
 
 
 @app.post("/api/shares/browse")

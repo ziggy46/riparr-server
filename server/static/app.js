@@ -335,6 +335,13 @@ const wizard = {
       <div class="section"><h2>Network shares<span class="grow"></span><button class="btn" id="w-scan">Scan again</button></h2>
         <div class="body" id="w-hosts"><div class="result busy"><span class="spin"></span>Looking for shares…</div></div>
         <div class="manual-row">
+          <input id="w-subnet" placeholder="network to scan — e.g. 192.168.1.0/24">
+          <button class="btn" id="w-subnet-go">Scan this network</button>
+        </div>
+        <p class="help" style="margin-bottom:12px">Riparr scans its own network unless you
+          say otherwise. In Docker that is usually Docker's internal network rather than
+          your LAN, so put your LAN here. It's remembered once it finds something.</p>
+        <div class="manual-row">
           <input id="w-manual" placeholder="server name or IP — e.g. mothership.example.lan">
           <button class="btn" id="w-manual-go">Use this server</button>
         </div>
@@ -350,6 +357,10 @@ const wizard = {
     $("#w-skip").onclick = () => this.next();
     $("#w-go").onclick = () => this.next();
     $("#w-scan").onclick = () => this.scanHosts();
+    $("#w-subnet-go").onclick = () => this.scanHosts($("#w-subnet").value.trim());
+    $("#w-subnet").onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); $("#w-subnet-go").click(); }
+    };
     $("#w-manual-go").onclick = () => this.pickHost($("#w-manual").value.trim());
     $("#w-manual").onkeydown = (e) => {
       if (e.key === "Enter") { e.preventDefault(); $("#w-manual-go").click(); }
@@ -357,14 +368,23 @@ const wizard = {
     this.scanHosts();
   },
 
-  async scanHosts() {
+  async scanHosts(subnets = "") {
     const box = $("#w-hosts");
-    box.innerHTML = `<div class="result busy"><span class="spin"></span>Looking for shares…</div>`;
-    let hosts = [];
-    try { hosts = (await api.post("/api/shares/discover")).hosts; } catch (e) {}
+    box.innerHTML = `<div class="result busy"><span class="spin"></span>Looking for shares${
+      subnets ? ` on ${esc(subnets)}` : ""}…</div>`;
+    let r;
+    try { r = await api.post("/api/shares/discover", { subnets }); }
+    catch (e) {
+      box.innerHTML = `<div class="result bad">${esc(e.message)}</div>`;
+      return;
+    }
+    const hosts = r.hosts || [];
+    const field = $("#w-subnet");
+    if (field && !field.value) field.value = r.subnets || "";
     if (!hosts.length) {
-      box.innerHTML = `<div class="result">Nothing advertised itself. Type the server
-        name below — discovery finding nothing does not mean there is nothing there.</div>`;
+      box.innerHTML = `<div class="result">Nothing found on ${esc(r.subnets || "this network")}.
+        If that isn't your LAN, put your LAN below and scan again — or type the server
+        name. Finding nothing does not mean there is nothing there.</div>`;
       return;
     }
     box.innerHTML = hosts.map(h => `
