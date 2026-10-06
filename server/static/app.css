@@ -2293,3 +2293,21 @@ body.has-savebar .toast-host { bottom: 78px; }
   .ui-new .np-path > summary, .ui-new .ar-fix,
   .ui-new .stage-why > summary { min-height: 44px; display: inline-flex; align-items: center; }
 }
+
+/* ── new layout, round 5 ── */
+/* Failed reads as a failure; needs-you stays amber. */
+.np-kicker.bad { color: var(--bad); }
+.np-q { font-size: 15px; color: var(--fg-strong); }
+.ni-other { margin: 12px 0 4px; }
+.ni-other > summary { cursor: pointer; color: var(--link); font-size: 13.5px; }
+.ni-other > label.f { margin-top: 10px; }
+.np-todo { margin: 8px 0 6px; padding-left: 18px; font-size: 14px; line-height: 1.6; }
+.np-todo a { margin-left: 4px; }
+.ui-new .tab-dot.ask { background: var(--accent); }
+/* The card says when setup is unfinished; the footer needn't repeat it. */
+.np-foot .ar-fix { display: none; }
+@media (max-width: 620px) {
+  /* A question shouldn't make you scroll past a poster to answer it. */
+  .np-ask .np-art { display: none; }
+  .ni-other > summary { min-height: 44px; display: inline-flex; align-items: center; }
+}

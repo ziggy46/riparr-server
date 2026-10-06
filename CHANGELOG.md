@@ -49,9 +49,15 @@ is one click away. It's saved on the server, so it follows you between devices.
   bar is a real progress bar, focus stays put after Dismiss and Discard, and each
   "More" says what it expands.
 - **When Riparr needs you**, the "which film is this?" question uses the same card:
-  "Needs you", the film's name, the question, and one row of buttons with Rip it as the
-  main one. Eject waits until you've answered. The browser tab says "(1) Needs you" and
-  screen readers hear it too.
+  "Needs you", the film's name, the question, TMDb's suggestions to pick from (typing a
+  name is under "Not listed?"), and a full-size Rip it. Eject waits until you've
+  answered. From any page, even in a background tab, the browser tab says "(1) Needs
+  you", the Queue tab gets a dot, and screen readers hear it.
+- With setup unfinished, the empty Queue card says "Not ready" and lists what's missing,
+  each with a Fix link, instead of "Ready".
+- The rip card names each step once, with the same words as History, and shows how much
+  has been saved or sent ("2.4 GB of 7.8 GB") underneath. It refreshes every second or
+  so while ripping. A failed rip is red; a question is amber.
 - The drive's details (model, device, what it reads) moved into **Disc info**; the card
   shows them only when there's no disc.
 - On phones every button, toggle and "More" link is at least 44px tall.

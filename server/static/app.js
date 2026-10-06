@@ -929,7 +929,7 @@ function nowRipping({ q, ar, drives, loaded, hero, away, busy, filed }) {
   const acts = ({ lead = "", trail = "", ejectDisabled = false } = {}) => {
     const disc = loaded ? `
       <button class="btn sm" id="t-eject" ${busy || ejectDisabled ? "disabled" : ""}
-              ${ejectDisabled ? `title="Answer or skip first"` : ""}>${icon("eject")} Eject</button>
+              ${ejectDisabled ? `title="Answer or skip first"` : busy ? `title="The drive is in use — cancel the rip to eject"` : ""}>${icon("eject")} Eject</button>
       <button class="btn sm" id="t-disc">${icon("compact-disc")} Disc info</button>` : "";
     return lead || disc || trail ? `<div class="np-acts">${lead}${disc}${trail}</div>` : "";
   };
@@ -1011,8 +1011,8 @@ function npLive(j, acts) {
   const working = shown <= 0;
   const eta = overallEta(j);
   const t = stageTiming(j);
-  const verb = { queued: "Waiting", identifying: "Reading the disc", ripping: "Ripping",
-                 transferring: "Sending to your library", verifying: "Checking" }[j.state] || "Ripping";
+  // The stage's own name, the same words History's legend uses, said once.
+  const verb = j.state === "queued" ? "Waiting" : p.name;
   const planned = j.planned && j.planned.path
     ? (j.planned.kind === "tv"
         ? `<div class="np-facts">${j.planned.count} episode${j.planned.count === 1 ? "" : "s"}</div>`
@@ -1024,7 +1024,7 @@ function npLive(j, acts) {
       <span class="muted">· step ${p.step} of ${p.steps}</span></div>
     <h2 class="np-title" tabindex="-1">${esc((j.title || j.disc_label || "Unknown disc")
       + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : ""))}${seasonTag(j)} ${familyTag(j.disc_family)}</h2>
-    <div class="np-sub">${esc(j.phase && j.phase !== verb ? j.phase : p.name)}</div>
+    <div class="np-sub">${esc(npDetail(j, verb))}</div>
     ${j.warning ? `<div class="job-warn">${icon("triangle-exclamation")}<span>${esc(j.warning)}</span></div>` : ""}
     <div class="np-bar${working ? " working" : ""}" role="progressbar" aria-label="Progress of the whole rip"
          aria-valuemin="0" aria-valuemax="100"${working ? "" : ` aria-valuenow="${shown}"
@@ -1041,6 +1041,18 @@ function npLive(j, acts) {
 
 /* The one moment Riparr needs a person, in the same card as everything else: the
    question, the poster for context, and one row of buttons. */
+/* Under the stage name, something it didn't already say: how much has moved, or what
+   the stage is waiting on. */
+function npDetail(j, stageName) {
+  const moved = j.state === "ripping" ? j.bytes_ripped
+              : j.state === "transferring" ? j.bytes_sent
+              : j.state === "verifying" ? j.bytes_verified : 0;
+  if (moved && j.bytes_total) return `${filesize(moved)} of ${filesize(j.bytes_total)}`;
+  const ph = (j.phase || "").trim();
+  const same = (a, b) => a.toLowerCase().split(" ")[0] === b.toLowerCase().split(" ")[0];
+  return ph && !same(ph, stageName) ? ph : "";
+}
+
 function npAsk(j, acts) {
   // The prompt's form, under the same heading as every other card: what's happening,
   // the disc's name, and the question. The old header (label + badge) goes.
@@ -1051,26 +1063,49 @@ function npAsk(j, acts) {
   form.querySelector(".job-head")?.remove();
   // One full-size primary, everything else the same small size, Eject held back while
   // the question is open -- the answer is about the disc that's in there.
+  // TMDb's suggestions lead when there are any; typing a name is the fallback.
+  const picks = form.querySelector(".ni-tmdb");
+  const named = form.querySelector("label.f.wide");
+  if (picks && (j.candidates || []).length && named) {
+    const other = document.createElement("details");
+    other.className = "ni-other";
+    other.innerHTML = `<summary>Not listed? Type the name</summary>`;
+    named.querySelector(":scope > span:first-child")?.remove();
+    other.append(named);
+    picks.after(other);
+    picks.querySelector(".ni-label").textContent = "Pick the film";
+    form.prepend(picks);
+  }
   const row = form.querySelector(".btn-row");
   if (row) {
     row.className = "np-acts";
-    row.querySelectorAll(".btn").forEach(b => b.classList.add("sm"));
+    // Rip it is the one full-size button; the rest are small.
+    row.querySelectorAll(".btn:not(.primary)").forEach(b => b.classList.add("sm"));
     row.insertAdjacentHTML("beforeend",
       acts({ ejectDisabled: true }).replace(/^<div class="np-acts">|<\/div>$/g, ""));
   }
   const name = j.title || pretty(j.disc_label) || "A disc";
   const tv = !!(j.episode_plan || {}).episodes;
   return `
-    <div class="np-kicker ask">${icon("triangle-exclamation")} Needs you
-      <span class="muted">\u00b7 ${tv ? "check the episodes" : "which film is this?"}</span></div>
+    <div class="np-kicker ask">${icon("circle-question")} Needs you</div>
     <h2 class="np-title" tabindex="-1">${esc(name)} ${familyTag(j.disc_family)}</h2>
-    ${j.disc_label && j.disc_label !== name ? `<div class="np-sub">${esc(j.disc_label)}</div>` : ""}
-    ${q ? `<p class="np-q">${esc(q)}</p>` : ""}
+    ${j.disc_label && pretty(j.disc_label) !== name && j.disc_label !== name
+      ? `<div class="np-sub">${esc(j.disc_label)}</div>` : ""}
+    <p class="np-q">${esc(q || (tv ? "Check the episodes before Riparr rips them." : "Which film is this?"))}</p>
     ${form.outerHTML}`;
 }
 
 function npIdle(drives, loaded, busy, acts) {
   const d = loaded || drives[0];
+  const blocking = problems(state.status).filter(p => p.level === "bad");
+  if (!loaded && blocking.length) {
+    return `
+      <div class="np-kicker ask">${icon("triangle-exclamation")} Not ready</div>
+      <h2 class="np-title" tabindex="-1">Finish setting up</h2>
+      <ul class="np-todo">${blocking.map(p => `<li>${esc(p.short || p.message)}${
+        p.href ? ` <a href="${esc(p.href)}">Fix</a>` : ""}</li>`).join("")}</ul>
+      <div class="np-sub">Then insert a disc.</div>`;
+  }
   if (!loaded) {
     return `
       <div class="np-kicker">${icon("compact-disc")} Ready</div>
@@ -1152,6 +1187,7 @@ function announceAsk(asking) {
   const fresh = asking.filter(j => !askSeen.has(j.id));
   if (fresh.length) say(`${fresh[0].title || pretty(fresh[0].disc_label) || "A disc"} needs you.`);
   askSeen = ids;
+  state.asking = asking.length;
   // In the tab title too, so it's seen from another tab.
   document.title = asking.length ? `(${asking.length}) Needs you \u00b7 Riparr` : "Riparr";
 }
@@ -3925,7 +3961,7 @@ function scheduleLiveRefresh(section) {
   // Refresh re-rendered the same stale snapshot. Slower when idle: nothing is racing.
   // 1.2s while a job is live. The phase line, the legs and the ETA all move on their
   // own during a rip, and at 2.5s the numbers visibly stepped rather than counted.
-  const delay = $$(".job").length ? 1200 : 5000;
+  const delay = $$(".job, .np-live").length ? 1200 : 5000;
   liveTimer = setTimeout(() => {
     // A hidden tab must keep the loop alive, not end it. This used to just skip the
     // refresh and never reschedule, so switching away during a rip killed polling for
@@ -3936,6 +3972,21 @@ function scheduleLiveRefresh(section) {
     route({ live: true });
   }, delay);
 }
+
+/* Riparr asking a question has to reach you on any page and in a background tab: the
+   queue's own refresh only runs on the queue, and pauses while hidden. This is a light
+   check every 20s that only touches the tab title, the announcement and the tab dot. */
+setInterval(async () => {
+  if (!state.settings) return;                           // not signed in yet
+  const onQueue = (location.hash.replace(/^#\//, "").split("/")[0] || "queue") === "queue";
+  if (onQueue && !document.hidden) return;               // the queue's own loop has it
+  let q;
+  try { q = await api.get("/api/queue"); } catch (e) { return; }
+  const asking = (q.jobs || []).filter(j => j.state === "needs_input");
+  announceAsk(asking);
+  state.asking = asking.length;
+  renderTabs();
+}, 20000);
 
 /* Coming back to the tab should show now, not in a second and a bit. */
 document.addEventListener("visibilitychange", () => {
@@ -4382,6 +4433,11 @@ function wireContent(section, sub) {
     if (film && film.dataset.picked) body.tmdb_id = Number(film.dataset.picked);
     if (!body.name.trim() && !picked) {
       toast("Give it a name, or pick which title is the film.", "bad");
+      return;
+    }
+    // TMDb offered films and none was picked or typed: a title alone isn't a name.
+    if (film && film.querySelector("[data-tmdb-pick]") && !body.tmdb_id && !body.name.trim()) {
+      toast("Pick one of the films, or type its name.", "bad");
       return;
     }
     b.disabled = true;
@@ -4953,7 +5009,9 @@ function renderTabs(section) {
   const issues = problems(state.status).length;
   bar.innerHTML = TABS.map(([id, label, ic]) =>
     `<a href="#/${id}" class="tab${section === id ? " on" : ""}"${
-      section === id ? ` aria-current="page"` : ""}>${icon(ic)}<span>${label}</span></a>`).join("")
+      section === id ? ` aria-current="page"` : ""}>${icon(ic)}<span>${label}${
+      id === "queue" && state.asking ? `<span class="sr-only">, needs you</span>` : ""}</span>${
+      id === "queue" && state.asking ? `<i class="tab-dot ask" aria-hidden="true"></i>` : ""}</a>`).join("")
     + `<button type="button" class="tab${["settings", "system"].includes(section) ? " on" : ""}"
          id="tab-more" aria-controls="sidebar" aria-expanded="false" aria-haspopup="true"${
          ["settings", "system"].includes(section) ? ` aria-current="page"` : ""}>${icon("bars")}<span>More${
