@@ -53,10 +53,12 @@ is one click away. It's saved on the server, so it follows you between devices.
   name is under "Not listed?"), and a full-size Rip it. Eject waits until you've
   answered. From any page, even in a background tab, the browser tab says "(1) Needs
   you", the Queue tab gets a dot, and screen readers hear it.
-- With setup unfinished, the empty Queue card says "Not ready" and lists what's missing,
-  each with a Fix link, instead of "Ready".
-- The rip card names each step once, with the same words as History, and shows how much
-  has been saved or sent ("2.4 GB of 7.8 GB") underneath. It refreshes every second or
+- With setup unfinished, the Queue card says "Not ready" and lists what's missing, each
+  with a Fix link, instead of "Ready" -- with or without a disc in. A disc can't be
+  started while something blocks the rip.
+- The rip card names each step once, with the same words as History, and puts the
+  step's own numbers on one labelled line ("This step: 2.4 GB of 7.8 GB · 3m of a usual
+  25m"). "Finishing up" only appears when the whole rip is under a minute from done. It refreshes every second or
   so while ripping. A failed rip is red; a question is amber.
 - The drive's details (model, device, what it reads) moved into **Disc info**; the card
   shows them only when there's no disc.

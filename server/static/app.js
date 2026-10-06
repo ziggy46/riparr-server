@@ -1024,17 +1024,22 @@ function npLive(j, acts) {
       <span class="muted">· step ${p.step} of ${p.steps}</span></div>
     <h2 class="np-title" tabindex="-1">${esc((j.title || j.disc_label || "Unknown disc")
       + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : ""))}${seasonTag(j)} ${familyTag(j.disc_family)}</h2>
-    <div class="np-sub">${esc(npDetail(j, verb))}</div>
+    ${npPhase(j, verb) ? `<div class="np-sub">${esc(npPhase(j, verb))}</div>` : ""}
     ${j.warning ? `<div class="job-warn">${icon("triangle-exclamation")}<span>${esc(j.warning)}</span></div>` : ""}
     <div class="np-bar${working ? " working" : ""}" role="progressbar" aria-label="Progress of the whole rip"
          aria-valuemin="0" aria-valuemax="100"${working ? "" : ` aria-valuenow="${shown}"
          aria-valuetext="${shown}%, step ${p.step} of ${p.steps}${eta ? ", " + esc(eta) : ""}"`}>
-      <i style="width:${p.pct.toFixed(1)}%"></i>${p.ticks.map(x =>
+      <i${working ? "" : ` style="transform:scaleX(${(p.pct / 100).toFixed(4)})"`}></i>${p.ticks.map(x =>
         `<b class="np-tick" style="left:${x.toFixed(1)}%"></b>`).join("")}</div>
     <div class="np-figs"><span class="np-pct">${shown}%</span><span class="grow"></span>
       <span class="np-eta">${esc(eta)}</span></div>
-    ${t && t.mine ? `<div class="np-step">This step: ${esc(duration(t.elapsed))} of a usual ${
-      esc(duration(t.mine))}</div>` : ""}
+    ${(() => {
+      // Everything about the current step on one labelled line, so its numbers aren't
+      // read against the whole-rip percentage above.
+      const bits = [npBytes(j), t && t.mine
+        ? `${duration(t.elapsed)} of a usual ${duration(t.mine)}` : ""].filter(Boolean);
+      return bits.length ? `<div class="np-step">This step: ${esc(bits.join(" \u00b7 "))}</div>` : "";
+    })()}
     ${planned}
     ${acts({ trail: `<button class="btn sm" data-cancel="${j.id}">${icon("xmark")} Cancel</button>` })}`;
 }
@@ -1043,11 +1048,14 @@ function npLive(j, acts) {
    question, the poster for context, and one row of buttons. */
 /* Under the stage name, something it didn't already say: how much has moved, or what
    the stage is waiting on. */
-function npDetail(j, stageName) {
+function npBytes(j) {
   const moved = j.state === "ripping" ? j.bytes_ripped
               : j.state === "transferring" ? j.bytes_sent
               : j.state === "verifying" ? j.bytes_verified : 0;
-  if (moved && j.bytes_total) return `${filesize(moved)} of ${filesize(j.bytes_total)}`;
+  return moved && j.bytes_total ? `${filesize(moved)} of ${filesize(j.bytes_total)}` : "";
+}
+
+function npPhase(j, stageName) {
   const ph = (j.phase || "").trim();
   const same = (a, b) => a.toLowerCase().split(" ")[0] === b.toLowerCase().split(" ")[0];
   return ph && !same(ph, stageName) ? ph : "";
@@ -1084,7 +1092,7 @@ function npAsk(j, acts) {
     row.insertAdjacentHTML("beforeend",
       acts({ ejectDisabled: true }).replace(/^<div class="np-acts">|<\/div>$/g, ""));
   }
-  const name = j.title || pretty(j.disc_label) || "A disc";
+  const name = (j.episode_plan || {}).series || j.title || pretty(j.disc_label) || "A disc";
   const tv = !!(j.episode_plan || {}).episodes;
   return `
     <div class="np-kicker ask">${icon("circle-question")} Needs you</div>
@@ -1112,14 +1120,21 @@ function npIdle(drives, loaded, busy, acts) {
       <h2 class="np-title" tabindex="-1">Nothing in the tray</h2>
       <div class="np-sub">${state.autoripOn
         ? "Insert a disc and close the tray. Riparr takes it from there."
-        : "Insert a disc and close the tray, then press Rip."}</div>`;
+        : "Insert a disc and close the tray, then press Rip this disc."}</div>`;
   }
+  const todo = blocking.length ? `<ul class="np-todo">${blocking.map(p => `<li>${esc(p.short || p.message)}${
+    p.href ? ` <a href="${esc(p.href)}">Fix</a>` : ""}</li>`).join("")}</ul>` : "";
   return `
-    <div class="np-kicker">${icon("compact-disc")} Disc loaded</div>
+    <div class="np-kicker${blocking.length ? " ask" : ""}">${icon(blocking.length ? "triangle-exclamation" : "compact-disc")} ${
+      blocking.length ? "Disc loaded \u00b7 not ready to rip" : "Disc loaded"}</div>
     <h2 class="np-title" tabindex="-1">${esc(pretty(d.label) || d.label || "A disc")} ${familyTag(d.disc_family)}</h2>
-    ${d.label ? `<div class="np-sub">${esc(d.label)}${d.disc_word ? ` · ${esc(d.disc_word)}` : ""}</div>` : ""}
+    ${d.label ? `<div class="np-sub">${esc(d.label)}${d.disc_word ? ` \u00b7 ${esc(d.disc_word)}` : ""}</div>` : ""}
+    ${todo}
     ${d.space_warning ? `<p class="np-err">${esc(d.space_warning)}</p>` : ""}
-    ${acts({ lead: busy ? "" : `<button class="btn sm primary" id="rip-now">${icon("play")} Rip this disc</button>` })}`;
+    ${acts({ lead: busy ? "" : blocking.length
+      // A rip that can only fail isn't offered as though it would work.
+      ? `<button class="btn sm" disabled>Fix ${blocking.length} thing${blocking.length === 1 ? "" : "s"} first</button>`
+      : `<button class="btn sm primary" id="rip-now">${icon("play")} Rip this disc</button>` })}`;
 }
 
 /* The end of a path, which is the part that says where it went; the whole of it is one
@@ -1370,7 +1385,10 @@ function overallEta(j) {
     return total < 60 ? "finishing up" : `done around ${clockAt(now + total)}`;
   }
   // A stage just past its usual time is still finishing, not late.
-  if (t && t.mine && t.over && -t.left < 60) return "finishing up";
+  if (t && t.mine && t.over && -t.left < 60) {
+    // A step just past its usual time is nearly done; the steps after it aren't.
+    return t.restSecs < 60 ? "finishing up" : `done around ${clockAt(now + t.restSecs + 30)}`;
+  }
   if (j.eta_seconds) return j.eta_seconds < 60 ? "finishing up" : `${duration(j.eta_seconds)} left`;
   if (t && t.over) return "taking longer than usual";
   if (j.started_at && state.typical && j.started_at + state.typical > now + 60)
@@ -1939,7 +1957,7 @@ function tray(drives, optical, canRip) {
       <div class="big">${icon("compact-disc")}</div>
       <h2>Nothing in the queue</h2>
       <p>${state.autoripOn ? "Insert a disc and close the tray. Riparr takes it from there."
-           : "Insert a disc and close the tray, then press Rip."}</p>
+           : "Insert a disc and close the tray, then press Rip this disc."}</p>
       ${driveLine(d)}
     </div>`;
   }
@@ -3248,8 +3266,8 @@ settingsPages.general = async (s) => {
           ${opt("new", "New (preview)", s.ui_layout || "classic")}
         </select>
         <span class="help">The new layout puts the disc being ripped front and centre, uses
-          tabs at the bottom on a phone, groups History by disc and shows each setting as
-          one line with its current value. Switch back any time.</span></label>
+          tabs at the bottom on a phone, groups History by disc and keeps Settings short by
+          folding the explanations. Switch back any time.</span></label>
     </div></div>
 
     <div class="section"><h2>Password</h2><div>
@@ -3778,7 +3796,12 @@ function problems(st) {
   const checks = ((st.autorip || {}).checks || []).filter(c => c.state !== "ok")
     .map(c => ({ level: c.state === "fail" ? "bad" : "warn", what: c.what,
                  message: `${c.what}: ${c.detail}${c.why ? ` \u2014 ${c.why}` : ""}`,
-                 short: `${(CHECK_NEED[c.what] || [0, c.what])[1]}: ${c.detail}`,
+                 short: (() => {
+                   const topic = (CHECK_NEED[c.what] || [0, c.what])[1];
+                   // "Share: Share hasn't been tested" says it twice.
+                   return c.detail.toLowerCase().startsWith(topic.toLowerCase())
+                     ? c.detail : `${topic}: ${c.detail}`;
+                 })(),
                  href: c.where }));
   return checks.concat(healthMessages(st));
 }
@@ -3954,7 +3977,20 @@ function scheduleLiveRefresh(section) {
   if (section !== "queue") return;
   // Still true: a job waiting for input has a form in it, and re-rendering underneath
   // somebody mid-sentence is worse than a stale page.
-  if ($$(".job.needs").length) return;
+  if ($$(".job.needs").length) {
+    // Don't redraw the form under somebody -- but notice if the question went away
+    // (answered on another device, skipped, cancelled), and only then redraw.
+    liveTimer = setTimeout(async () => {
+      const onPage = $$("[data-answer], [data-answer-season], [data-skip]")
+        .map(b => Number(b.dataset.answer || b.dataset.answerSeason || b.dataset.skip));
+      let q;
+      try { q = await api.get("/api/queue"); } catch (e) { scheduleLiveRefresh(section); return; }
+      const still = new Set((q.jobs || []).filter(j => j.state === "needs_input").map(j => j.id));
+      if (onPage.some(id => !still.has(id))) route();
+      else scheduleLiveRefresh(section);
+    }, 8000);
+    return;
+  }
   // An *idle* queue has to keep looking too. Putting a disc in is the one thing on this
   // page that happens with no user action, and this used to return early whenever the
   // queue was empty -- so the tray stayed empty until the user clicked something, and

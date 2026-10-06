@@ -2311,3 +2311,15 @@ body.has-savebar .toast-host { bottom: 78px; }
   .np-ask .np-art { display: none; }
   .ni-other > summary { min-height: 44px; display: inline-flex; align-items: center; }
 }
+
+/* ── bug fixes after the fifth review ── */
+/* The fill scales rather than resizing, so it glides between refreshes. */
+.np-bar > i { width: 100%; transform-origin: left center; transition: transform .9s ease; }
+@media (prefers-reduced-motion: reduce) { .np-bar > i { transition: none; } }
+/* Red text on the dark card, lifted to pass 4.5:1. */
+.np-kicker.bad, .hist-err { color: color-mix(in srgb, var(--bad) 75%, #fff); }
+@media (max-width: 820px) {
+  /* The row menu opens to the right of its button on a phone, where there's room. */
+  .row-menu-pop { right: auto; left: 0; }
+  .ui-new .np-todo a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 6px; }
+}
