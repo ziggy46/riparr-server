@@ -16,6 +16,20 @@ doesn't display the line.
 
 ## Unreleased
 
+**A new layout, as a preview.** Turn it on from the account menu (**Try the new
+layout**) or **Settings → General → Layout**; the classic layout stays the default and
+is one click away. It's saved on the server, so it follows you between devices.
+- **Queue** shows the disc being ripped as one large card: poster, title, one bar, the
+  finish time, and Disc info and Eject on the card. Auto Rip and the rip options move
+  to a footer.
+- **Phones** get tabs at the bottom (Queue, History, Discs, More) instead of the menu
+  button in the top corner. More opens Settings and System, and shows a dot when
+  something needs attention.
+- **History** shows one line per disc, with how its latest rip went, and every attempt
+  underneath when you open it.
+- **Settings** show each simple setting as one line with its current value; tap it to
+  change it and read the explanation.
+
 **TMDb for TV.** With a TMDb key, season discs look the show up on TMDb as well as films:
 the episode names, plus the show's TMDb, TVDB and IMDb IDs. Without a key, TVmaze is used
 as before. **Settings → Ripping → Episode names from** can pin it to one. A box set

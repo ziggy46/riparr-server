@@ -2068,3 +2068,127 @@ body.has-savebar .toast-host { bottom: 78px; }
 .notes.md li { margin-bottom: 4px; }
 .notes.md pre { margin: 0 0 10px; padding: 10px 12px; overflow-x: auto;
                 background: rgba(0,0,0,.25); border-radius: var(--radius); }
+
+/* ════════════════════ the new layout (preview) ════════════════════
+   Everything below applies only under body.ui-new; classic is untouched. */
+
+/* ── Queue: now ripping ── */
+.np-page { display: flex; flex-direction: column; gap: 16px; }
+.np-page > .page-head { margin-bottom: 0; }
+.np-card { padding: 0; overflow: hidden; }
+.np { display: flex; gap: 24px; align-items: flex-start; padding: 24px 26px 20px; }
+.np-art {
+  flex: none; width: 150px; aspect-ratio: 2 / 3; border-radius: 8px; overflow: hidden;
+  background: rgba(255,255,255,.04); border: 1px solid var(--line);
+  display: grid; place-items: center; box-shadow: 0 12px 34px rgba(0,0,0,.4);
+}
+.np-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.np-art-none { font-size: 44px; color: var(--fg-muted); opacity: .4; line-height: 0; }
+.np-body { flex: 1 1 auto; min-width: 0; }
+.ui-new .np-body .job { max-width: none; padding: 0; border: 0; background: none; }
+.ui-new .np-body .job-title { font-size: 22px; line-height: 1.25; color: var(--fg-strong); }
+.ui-new .np-body .job-phase { font-size: 14px; margin-top: 4px; }
+.ui-new .np-body .job-meter .bar { height: 8px; border-radius: 4px; }
+.ui-new .np-body .job-meter .bar > i { border-radius: 4px; }
+.ui-new .np-body .job-pct { font-size: 15px; color: var(--fg-strong); }
+.ui-new .np-body .job-eta { font-size: 14px; }
+.np-acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+.np-card > .empty-state + .np-acts { justify-content: center; margin: -36px 0 22px; position: relative; z-index: 1; }
+.np-last {
+  display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  font-size: 13px; color: var(--fg); text-decoration: none;
+}
+.np-last .ic { color: var(--ok); }
+.np-last b { color: var(--fg-strong); font-weight: 600; }
+.np-last:hover { background: rgba(255,255,255,.03); }
+/* Auto Rip and the options, demoted to a footer. */
+.np-foot .autorip { padding: 12px 14px; margin-bottom: 12px; }
+.np-foot .ar-title { font-size: 14px; }
+.np-foot .rip-opts-d { margin: 0; }
+@media (max-width: 620px) {
+  .np { flex-direction: column; align-items: stretch; gap: 16px; padding: 18px 16px; }
+  .np-art { width: 100%; max-width: none; aspect-ratio: 16 / 9; }
+  .np-art img { object-position: center 25%; }
+  .ui-new .np-body .job-title { font-size: 19px; }
+}
+
+/* ── phones: tabs at the bottom ── */
+.tabbar { display: none; }
+@media (max-width: 820px) {
+  .ui-new .tabbar {
+    display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 45;
+    background: var(--sidebar); border-top: 1px solid var(--line);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .ui-new .hamburger { display: none; }
+  .ui-new .tab {
+    flex: 1 1 0; min-width: 0; min-height: 56px; position: relative;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: none; border: 0; color: var(--fg-muted); font: inherit; font-size: 11.5px;
+    text-decoration: none; cursor: pointer;
+  }
+  .ui-new .tab .ic { font-size: 19px; }
+  .ui-new .tab.on { color: var(--accent); }
+  .ui-new .tab-dot {
+    position: absolute; top: 8px; left: calc(50% + 8px);
+    width: 8px; height: 8px; border-radius: 50%; background: var(--warn);
+    box-shadow: 0 0 0 2px var(--sidebar);
+  }
+  .ui-new .content { padding-bottom: calc(80px + env(safe-area-inset-bottom)); }
+  .ui-new .save-bar { bottom: calc(57px + env(safe-area-inset-bottom)); }
+  .ui-new .toast-host { bottom: calc(70px + env(safe-area-inset-bottom)); }
+  body.ui-new.has-savebar .toast-host { bottom: calc(130px + env(safe-area-inset-bottom)); }
+  /* The drawer opens above the tab bar, not under it. */
+  .ui-new .sidebar { bottom: calc(57px + env(safe-area-inset-bottom)); }
+}
+
+/* ── History: grouped by disc ── */
+.hg-list { padding: 0; }
+.hg + .hg { border-top: 1px solid var(--line); }
+.hg-head {
+  width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.hg-head:hover { background: rgba(255,255,255,.03); }
+.hg-stat { flex: none; font-size: 15px; line-height: 0; }
+.hg.done .hg-stat { color: var(--ok); }
+.hg.failed .hg-stat { color: var(--bad); }
+.hg.cancelled .hg-stat { color: var(--fg-muted); }
+.hg-name { flex: 1 1 auto; min-width: 0; font-size: 14px; }
+.hg-name b { color: var(--fg-strong); font-weight: 600; margin-right: 4px; }
+.hg-result { display: block; margin-top: 3px; font-size: 13px; color: var(--fg-muted); }
+.hg.failed .hg-result { color: var(--bad); }
+.hg-meta { flex: none; font-size: 13px; color: var(--fg-muted); white-space: nowrap; }
+.hg-chev { flex: none; line-height: 0; color: var(--fg-muted); transition: transform .15s; }
+.hg-head[aria-expanded="true"] .hg-chev { transform: rotate(180deg); }
+.hg-body { padding: 0 6px 10px 34px; }
+.hg-body .hist-table { font-size: 13px; }
+@media (max-width: 620px) {
+  .hg-head { flex-wrap: wrap; }
+  .hg-meta { order: 3; flex-basis: 100%; padding-left: 27px; margin-top: -4px; }
+  .hg-body { padding-left: 6px; }
+}
+
+/* ── Settings: one line per setting ── */
+.sr-row { border-bottom: 1px solid var(--line); max-width: var(--form-group-w); }
+.sr-head {
+  width: 100%; display: flex; align-items: center; gap: 12px; padding: 13px 4px;
+  background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.sr-head:hover { background: rgba(255,255,255,.03); }
+.sr-k { flex: 1 1 auto; min-width: 0; font-size: 14px; color: var(--fg-strong); }
+.sr-v { flex: 0 1 auto; min-width: 0; max-width: 55%; font-size: 13.5px; color: var(--fg-muted);
+        text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-head .ic { flex: none; color: var(--fg-muted); transition: transform .15s; }
+.sr-head[aria-expanded="true"] .ic { transform: rotate(180deg); }
+.sr-body { margin: 0 4px 16px; }
+.sr-body > span:first-child { display: none; }
+.sr-body > input, .sr-body > select, .sr-body > textarea { flex: 1 1 100%; }
+.ui-new .sr-body .help { margin-left: 0; }
+
+/* Checkbox explanations fold to one line too, in the new layout. */
+.switch small.clamp:not(.open) {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden;
+}
+.switch .lbl > .help-more { display: block; margin: 2px 0 0; }

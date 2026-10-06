@@ -888,6 +888,9 @@ views.queue = async () => {
   // different disc in the tray is the next moment, so the tray takes over again.
   const filed = !hero.length && showFiled(q.filed, loaded) ? q.filed : null;
   if (filed) setFiledArt(filed);
+  if (newLayout()) {
+    return nowRipping({ q, ar, drives, loaded, hero, away, busy, filed });
+  }
   // Wrapped so a phone can put the disc and the rip first: on a small screen that is
   // what somebody opened the page to see, and it was below two panels of options.
   return `<div class="queue-page">
@@ -908,6 +911,40 @@ views.queue = async () => {
     </div>
     ${sendingStrip(away)}</div>`;
 };
+
+/* ── the new layout's queue: "now ripping" ──
+   One object, the disc, as large as the page allows: its poster, its title, one bar,
+   one finish time, and the things you can do to it on the card itself. What's still
+   uploading and what was filed last sit in a short strip under it, and Auto Rip and
+   the rip options -- set once, rarely touched -- fold into a footer. */
+function nowRipping({ q, ar, drives, loaded, hero, away, busy, filed }) {
+  const art = artState.image;
+  const poster = (img) => `<div class="np-art">${img
+    ? `<img src="${esc(img)}" alt="">`
+    : `<span class="np-art-none">${icon("compact-disc")}</span>`}</div>`;
+  const acts = `<div class="np-acts">
+      <button class="btn sm" id="t-disc" ${drives.some(d => d.present) ? "" : "disabled"}>${
+        icon("compact-disc")} Disc info</button>
+      <button class="btn sm" id="t-eject" ${drives.length && !busy ? "" : "disabled"}>${
+        icon("eject")} Eject</button></div>`;
+  const body = hero.length
+    ? hero.map(j => j.state === "needs_input" ? identifyPrompt(j)
+        : `<div class="np">${poster(art)}<div class="np-body">${jobRow(j)}${acts}</div></div>`).join("")
+    : filed ? filedCard(filed)
+    : `${tray(drives, state.status.optical, loaded && !busy)}${loaded ? acts : ""}`;
+  // "Last filed" only when the card is busy with something else; otherwise the card is it.
+  const last = q.filed && (hero.length || !filed) && q.filed.state === "done"
+    ? `<a class="np-last" href="#/history">${icon("circle-check")}
+         <span>Last filed <b>${esc(filedName(q.filed))}</b> \u00b7 ${esc(ago(q.filed.finished_at))}</span></a>`
+    : "";
+  return `<div class="np-page">
+    ${head("Queue", "")}
+    <div class="card np-card">${body}${trayStrip(drives, state.status.optical)}</div>
+    ${sendingStrip(away)}
+    ${last}
+    <div class="np-foot">${autoRipPanel(ar)}</div>
+  </div>`;
+}
 
 /* ── the rip that just finished ──
    Finishing used to be a three-second toast and then an empty page, so the one moment
@@ -1146,7 +1183,8 @@ function jobRow(j) {
     <div class="job">
       <div class="job-head">
         <div class="grow">
-          <div class="job-title">${esc(j.title || j.disc_label || "Unknown disc")}${
+          <div class="job-title">${esc((j.title || j.disc_label || "Unknown disc")
+            + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : ""))}${
             seasonTag(j)}</div>
           <div class="job-phase">${esc(j.phase || STATE_LABEL[j.state] || j.state)}</div>
         </div>
@@ -1909,6 +1947,8 @@ views.history = async () => {
                                                          : "size check passed"}</span>` : ""}</td></tr>` : ""}`;
   };
 
+  if (newLayout()) return historyGrouped(jobs, key, row, h, typical, byKind);
+
   return `${head("History", "Every attempt, what each stage cost, and what can be retried.",
                  stageLegend(typical, h.stage_order, h.stage_labels))}
     <div class="card"><table class="hist-table">
@@ -1921,6 +1961,47 @@ views.history = async () => {
     </table></div>
     ${stageNote(byKind)}`;
 };
+
+/* ── History, grouped by disc (new layout) ──
+   One line per disc: how it ended most recently, when, and how many attempts. The
+   attempts themselves -- with the stage bars, paths and retries -- open underneath,
+   because on most days nobody needs them. */
+const histOpen = new Set();
+function historyGrouped(jobs, key, row, h, typical, byKind) {
+  const groups = new Map();
+  for (const j of jobs) {
+    if (!groups.has(key(j))) groups.set(key(j), []);
+    groups.get(key(j)).push(j);          // newest first, as the jobs come
+  }
+  const head_ = head("History", "Every disc, how its latest rip went, and every attempt underneath.",
+                     stageLegend(typical, h.stage_order, h.stage_labels));
+  const items = [...groups.entries()].map(([k, list]) => {
+    const j = list[0];
+    const ok = j.state === "done";
+    const name = (j.title || pretty(j.disc_label) || "Unknown disc")
+      + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : "");
+    const result = ok ? (j.verified_mode === "deep" ? "In your library \u00b7 full check passed"
+                         : j.verified_mode === "quick" ? "In your library \u00b7 size check passed"
+                         : "In your library")
+      : j.state === "cancelled" ? "Cancelled" : (j.error || "Didn't finish").split(/[.:]\s/)[0];
+    const open = histOpen.has(k);
+    const find = esc([j.title, j.disc_label, j.year].filter(Boolean).join(" "));
+    return `<div class="hg ${esc(j.state)}" data-find="${find}">
+      <button class="hg-head" type="button" data-hg="${esc(k)}" aria-expanded="${open}">
+        <span class="hg-stat">${icon(ok ? "circle-check" : j.state === "cancelled" ? "ban"
+                                     : "triangle-exclamation")}</span>
+        <span class="hg-name"><b>${esc(name)}</b> ${familyTag(j.disc_family)}
+          <span class="hg-result">${esc(result)}</span></span>
+        <span class="hg-meta">${list.length > 1 ? `${list.length} attempts \u00b7 ` : ""}${
+          esc(ago(j.finished_at))}</span>
+        <span class="hg-chev">${icon("chevron-down")}</span>
+      </button>
+      <div class="hg-body"${open ? "" : " hidden"}><table class="hist-table">
+        <tbody>${list.map(row).join("")}</tbody></table></div>
+    </div>`;
+  }).join("");
+  return `${head_}<div class="card hg-list">${items}</div>${stageNote(byKind)}`;
+}
 
 /* A proportional bar of the stages, because the interesting fact about a rip is not
    that it took thirty minutes -- it is that half of that was spent before a single
@@ -2858,6 +2939,14 @@ settingsPages.general = async (s) => {
         <select id="theme-pick">${themes.map(t =>
           `<option value="${t}" ${s.theme === t ? "selected" : ""}>${t}</option>`).join("")}</select>
       </label>
+      <label class="f"><span>Layout</span>
+        <select id="layout-pick">
+          ${opt("classic", "Classic (the *arr layout)", s.ui_layout || "classic")}
+          ${opt("new", "New (preview)", s.ui_layout || "classic")}
+        </select>
+        <span class="help">The new layout puts the disc being ripped front and centre, uses
+          tabs at the bottom on a phone, groups History by disc and shows each setting as
+          one line with its current value. Switch back any time.</span></label>
     </div></div>
 
     <div class="section"><h2>Password</h2><div>
@@ -3469,6 +3558,7 @@ async function route(opts) {
   }
 
   renderSidebar(section, sub);
+  renderTabs(section);
 
   let html;
   try {
@@ -3885,6 +3975,14 @@ function wireContent(section, sub) {
   };
 
 
+  $$("[data-hg]").forEach(b => b.onclick = () => {
+    const k = b.dataset.hg, body = b.nextElementSibling;
+    const open = body.hidden;
+    body.hidden = !open;
+    b.setAttribute("aria-expanded", String(open));
+    if (open) histOpen.add(k); else histOpen.delete(k);
+  });
+
   const filedX = $("#filed-dismiss");
   if (filedX) filedX.onclick = () => {
     try { localStorage.setItem(FILED_KEY, filedX.dataset.job); } catch (e) { /* fine */ }
@@ -4171,10 +4269,13 @@ function wireContent(section, sub) {
   settingsSnapshot = save ? JSON.stringify(collectSettings()) : null;
   if (save) $("#discard-settings").onclick = () => { settingsSnapshot = null; route(); };
 
+  if (newLayout() && section === "settings") summaryRows();
+
   // Long help folds to one line with a "More" link. Read once, it is in the way on
   // every later visit -- and on the Ripping page it was most of the page.
-  $$(".f .help, .section p.help").forEach(h => {
+  $$(`.f .help, .section p.help${newLayout() ? ", .switch .lbl small" : ""}`).forEach(h => {
     if (h.classList.contains("naming-preview") || h.scrollHeight <= 42) return;
+    if (h.closest(".sr-row")) return;      // a summary row shows its help in full
     h.classList.add("clamp");
     const more = document.createElement("button");
     more.type = "button";
@@ -4189,6 +4290,9 @@ function wireContent(section, sub) {
     };
     h.after(more);
   });
+
+  const layoutPick = $("#layout-pick");
+  if (layoutPick) layoutPick.onchange = () => setLayout(layoutPick.value);
 
   const themePick = $("#theme-pick");
   if (themePick) themePick.onchange = async () => {
@@ -4416,6 +4520,51 @@ search.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && search.value.trim() && !onListPage()) location.hash = "#/discs";
 });
 
+/* ── settings as summary rows (new layout) ──
+   Each simple setting -- one label, one control -- becomes a line with its current
+   value; tapping it opens the control and its explanation underneath. The controls are
+   the same elements, only folded, so saving, Discard and the unsaved-changes guard work
+   exactly as before. Anything more involved (naming templates, the share finder) is
+   left as it is. */
+function rowValue(ctl) {
+  if (ctl.tagName === "SELECT") return ctl.selectedOptions[0]?.textContent.replace(/\s*\(default\)\s*$/, "") || "";
+  if (ctl.type === "password") return ctl.value ? "Set" : "Not set";
+  return ctl.value.trim() || "Not set";
+}
+function summaryRows() {
+  $$("#content .f").forEach(f => {
+    const ctls = $$("input, select, textarea", f);
+    if (ctls.length !== 1 || !ctls[0].matches("[data-set]") || ctls[0].type === "checkbox") return;
+    if (f.closest(".grid2, .dests, [data-naming], .sf, #share-add")) return;
+    const ctl = ctls[0];
+    const label = f.querySelector(":scope > span:first-child")?.textContent.trim();
+    if (!label) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sr-head";
+    btn.setAttribute("aria-expanded", "false");
+    btn.innerHTML = `<span class="sr-k"></span><span class="sr-v"></span>${icon("chevron-down")}`;
+    btn.querySelector(".sr-k").textContent = label;
+    const paint = () => { btn.querySelector(".sr-v").textContent = rowValue(ctl); };
+    paint();
+    ctl.addEventListener("change", paint);
+    ctl.addEventListener("input", paint);
+    const row = document.createElement("div");
+    row.className = "sr-row";
+    f.before(row);
+    row.append(btn, f);
+    f.classList.add("sr-body");
+    f.hidden = true;
+    btn.onclick = () => {
+      const open = f.hidden;
+      f.hidden = !open;
+      btn.setAttribute("aria-expanded", String(open));
+      if (open) ctl.focus({ preventScroll: true });
+    };
+  });
+  paintIcons($("#content"));
+}
+
 /* ── unsaved settings ──
    Settings pages save with one button, so a change can be left behind by clicking
    away. The snapshot is taken when the page is wired; anything different from it
@@ -4451,6 +4600,10 @@ window.addEventListener("hashchange", () => {
 window.addEventListener("beforeunload", (e) => {
   if (settingsDirty()) { e.preventDefault(); e.returnValue = ""; }
 });
+$("#layout-toggle").onclick = (e) => {
+  e.preventDefault();
+  setLayout(newLayout() ? "classic" : "new");
+};
 $("#logout").onclick = async (e) => {
   e.preventDefault();
   await api.post("/api/auth/logout");
@@ -4490,6 +4643,57 @@ const showUnreachable = () => showWaiting(
   + "check `docker logs riparr` on the server.",
   { retry: true, spin: false });
 
+/* ── the layout switch ──
+   "new" is a preview of a different shape for the app: the queue as one now-ripping
+   card, a tab bar on phones, History grouped by disc and settings as summary rows.
+   Everything it changes is scoped to body.ui-new, so classic is untouched. */
+const newLayout = () => (state.settings || {}).ui_layout === "new";
+
+/* Tabs at the bottom of a phone, where a thumb reaches, instead of a menu button in the
+   top corner. More opens the same drawer the menu button did, with Settings and System
+   in it, and carries the dot when something needs attention. Shown by CSS only in the
+   new layout and only on narrow screens. */
+const TABS = [["queue", "Queue", "table"], ["history", "History", "clock-rotate-left"],
+              ["discs", "Discs", "compact-disc"]];
+function renderTabs(section) {
+  let bar = $("#tabs");
+  if (!bar) {
+    bar = document.createElement("nav");
+    bar.id = "tabs";
+    bar.className = "tabbar";
+    bar.setAttribute("aria-label", "Sections");
+    $("#shell").append(bar);
+  }
+  section = section || (location.hash.replace(/^#\//, "").split("/")[0] || "queue");
+  const issues = problems(state.status).length;
+  bar.innerHTML = TABS.map(([id, label, ic]) =>
+    `<a href="#/${id}" class="tab${section === id ? " on" : ""}"${
+      section === id ? ` aria-current="page"` : ""}>${icon(ic)}<span>${label}</span></a>`).join("")
+    + `<button type="button" class="tab${["settings", "system"].includes(section) ? " on" : ""}"
+         id="tab-more" aria-controls="sidebar" aria-expanded="false">${icon("bars")}<span>More</span>${
+         issues ? `<i class="tab-dot" aria-label="${issues} need attention"></i>` : ""}</button>`;
+  paintIcons(bar);
+  $("#tab-more").onclick = (e) => {
+    e.stopPropagation();
+    const open = $("#sidebar").classList.toggle("open");
+    document.body.classList.toggle("nav-open", open);
+    $("#tab-more").setAttribute("aria-expanded", String(open));
+  };
+}
+function applyLayout() {
+  document.body.classList.toggle("ui-new", newLayout());
+  const item = $("#layout-toggle");
+  if (item) item.textContent = newLayout() ? "Back to the classic layout" : "Try the new layout";
+  renderTabs();
+}
+async function setLayout(which) {
+  try { await api.put("/api/settings", { ui_layout: which }); }
+  catch (e) { toast(e.message, "bad"); return; }
+  state.settings.ui_layout = which;
+  applyLayout();
+  route();
+}
+
 async function boot() {
   paintIcons();          // the static chrome in index.html
   let setup;
@@ -4522,6 +4726,7 @@ async function boot() {
   catch (e) { showGate(); return; }
   state.settings = await api.get("/api/settings");
   $("#theme").href = `/static/themes/${state.settings.theme || "servarr"}.css`;
+  applyLayout();
 
   $("#gate").classList.add("hidden");
   $("#wizard").classList.add("hidden");
