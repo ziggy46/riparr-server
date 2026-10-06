@@ -891,31 +891,11 @@ views.queue = async () => {
   announceFiled(q.filed);
   announceAsk(hero.filter(j => j.state === "needs_input"));
   if (filed) setFiledArt(filed);
-  if (newLayout()) {
-    return nowRipping({ q, ar, drives, loaded, hero, away, busy, filed });
-  }
-  // Wrapped so a phone can put the disc and the rip first: on a small screen that is
-  // what somebody opened the page to see, and it was below two panels of options.
-  return `<div class="queue-page">
-    ${head("Queue", "",
-           `<button class="tool" id="t-refresh"><span class="ti">${icon("arrows-rotate")}</span>Refresh</button>
-            <button class="tool" id="t-disc" ${drives.some(d => d.present) ? "" : "disabled"}>
-              <span class="ti">${icon("compact-disc")}</span>Disc info</button>
-            <button class="tool" id="t-eject" ${drives.length && !busy ? "" : "disabled"}>
-              <span class="ti">${icon("eject")}</span>Eject</button>`)}
-    ${autoRipPanel(ar)}
-    <div class="card disc-cell${artState.image ? " has-art" : ""}">
-      ${artState.image ? `<div class="tray-art" role="presentation"
-           style="background-image:url('${artState.image}')"></div>` : ""}
-      ${hero.length ? `${hero.map(jobRow).join("")}
-        ${trayStrip(drives, state.status.optical)}`
-      : filed ? `${filedCard(filed)}${trayStrip(drives, state.status.optical)}`
-      : tray(drives, state.status.optical, loaded && !busy)}
-    </div>
-    ${sendingStrip(away)}</div>`;
+  return nowRipping({ q, ar, drives, loaded, hero, away, busy, filed });
 };
 
-/* ── the new layout's queue: "now ripping" ──
+
+/* ── the queue: "now ripping" ──
    One object, the disc, as large as the page allows: its poster, its title, one bar,
    one finish time, and the things you can do to it on the card itself. What's still
    uploading and what was filed last sit in a short strip under it, and Auto Rip and
@@ -1267,37 +1247,6 @@ async function setFiledArt(j) {
   if ((location.hash.replace(/^#\//, "").split("/")[0] || "queue") === "queue") route({ live: true });
 }
 
-function filedCard(j) {
-  const ok = j.state === "done";
-  const size = j.bytes_sent || j.bytes_ripped || j.bytes_total;
-  const worked = (j.stages || []).reduce((a, st) => a + st.seconds, 0);
-  const checked = { quick: "size check passed", deep: "full check passed" }[j.verified_mode];
-  const facts = ok ? [size ? filesize(size) : "", worked ? `took ${duration(worked)}` : "",
-                      checked || ""].filter(Boolean) : [];
-  const art = filedArt.id === j.id && filedArt.image;
-  return `<div class="filed ${ok ? "ok" : "bad"}">
-    <div class="filed-art">${art
-      ? `<img src="${esc(art)}" alt="">`
-      : `<span class="filed-fallback">${icon(ok ? "circle-check" : "triangle-exclamation")}</span>`}</div>
-    <div class="filed-body">
-      <div class="filed-kicker">${icon(ok ? "circle-check" : "triangle-exclamation")}
-        ${ok ? "In your library" : "Didn't finish"} <span class="muted">· ${esc(ago(j.finished_at))}</span></div>
-      <h2 class="filed-title">${esc(filedName(j))} ${familyTag(j.disc_family)}</h2>
-      ${ok && j.dest_path ? `<div class="filed-path">${icon("hard-drive")}<span>${esc(j.dest_path)}</span></div>` : ""}
-      ${!ok && j.error ? `<p class="filed-err">${esc(j.error)}</p>` : ""}
-      ${facts.length ? `<div class="filed-facts">${facts.map(esc).join(" · ")}</div>` : ""}
-      ${ok ? `<div class="job-steps filed-steps">${["Rip", j.mode === "direct" ? "To library" : "Upload",
-          j.verified_mode && j.verified_mode !== "off" ? "Check" : null].filter(Boolean)
-          .map(l => `<div class="step done">${icon("circle-check")}<span class="step-l">${l}</span></div>`)
-          .join("")}</div>` : ""}
-      <div class="btn-row filed-acts">
-        <a class="btn sm" href="#/history">${ok ? "See it in History" : "Retry from History"}</a>
-        <button class="btn sm" id="filed-dismiss" data-job="${j.id}">Dismiss</button>
-      </div>
-    </div>
-  </div>`;
-}
-
 /* ── a job in flight ──
    A table row cannot hold a question, and `needs_input` has to be able to ask one, so
    a job is a block rather than a `<tr>`. That also buys room for the phase line, which
@@ -1395,99 +1344,6 @@ function overallEta(j) {
     return `usually done by ${clockAt(j.started_at + state.typical)}`;
   if (j.started_at) return `${duration(Math.max(0, now - j.started_at))} so far`;
   return "";
-}
-
-function jobRow(j) {
-  if (j.state === "needs_input") return identifyPrompt(j);
-  const ripPct = pct(j.bytes_ripped, j.bytes_total);
-  const sentPct = pct(j.bytes_sent, j.bytes_total);
-  const verPct = pct(j.bytes_verified, j.bytes_total);
-  // The bar shows the stage that is happening now, which is what a stepper promises.
-  // stage_pct is reported by every stage including identification, where there are no
-  // bytes to count -- reading an encrypted disc is minutes of CPU before a file exists,
-  // and that was the stretch with nothing on screen at all.
-  const stage = typeof j.stage_pct === "number" ? j.stage_pct * 100 : null;
-  const byBytes = j.state === "ripping" ? ripPct
-                : j.state === "transferring" ? sentPct
-                : j.state === "verifying" ? verPct : 0;
-  const active = stage !== null ? stage : byBytes;
-  // Reading the disc reports nothing, and MakeMKV is silent until its first progress
-  // line, so a real rip opens with a bar sitting at zero. Sweep it instead: "moving,
-  // but I cannot tell you how far" is a different message from "stopped".
-  const working = active <= 0
-    && ["identifying", "queued", "ripping", "transferring", "verifying"].includes(j.state);
-
-  // Three steps, always all three, so the shape of the job is legible before it starts
-  // and the user can see what is still to come. The old version was three spans of
-  // 11.5px muted text distinguished only by colour -- the active one was technically
-  // marked and practically invisible.
-  // In direct mode the bytes coming off the disc are going onto the share *as they
-  // are read* -- there is no separate upload, only a rename at the end. So Rip and
-  // Upload are genuinely one operation and the stepper says so: both light together,
-  // joined, and both carry the same number, because it is the same number. This is
-  // what D11 promised and the mount delivered by another route.
-  const together = j.mode === "direct";
-  const steps = [
-    { key: "ripping", label: "Rip", pct: ripPct },
-    { key: "transferring", label: together ? "To library" : "Upload",
-      pct: together ? ripPct : sentPct },
-    { key: "verifying", label: "Verify", pct: verPct },
-  ];
-  const order = ["queued", "identifying", "ripping", "transferring", "verifying"];
-  const at = order.indexOf(j.state);
-  // Identification belongs to Rip as far as anyone watching is concerned -- it is the
-  // box reading the disc. Without this map no step matched `identifying` at all, so
-  // for the first ten minutes of every rip all three pills sat grey and the interface
-  // looked idle while the drive was audibly working.
-  const stageOf = { queued: "ripping", identifying: "ripping", ripping: "ripping",
-                    transferring: "transferring", verifying: "verifying" };
-  const nowKey = stageOf[j.state];
-  const stepHtml = steps.map((st, i) => {
-    const mine = order.indexOf(st.key);
-    // Direct mode: while the disc is being read the film is already landing on the
-    // share, so "ripping" lights the transfer step too.
-    const isNow = nowKey === st.key
-      || (together && st.key === "transferring" && nowKey === "ripping")
-      || (together && st.key === "ripping" && nowKey === "transferring");
-    const done = st.pct >= 100 || (at > mine && at !== -1);
-    const cls = [isNow ? "now" : done ? "done" : "todo"];
-    if (together && i < 2) cls.push(i === 0 ? "pair-a" : "pair-b");
-    const mark = done ? icon("circle-check") : isNow ? `<span class="pip"></span>`
-                                                     : `<span class="pip hollow"></span>`;
-    // The live pill shows the stage's own number, which during identification is the
-    // only number there is.
-    return `<div class="step ${cls.join(" ")}">${mark}<span class="step-l">${st.label}</span></div>`;
-  }).join("");
-
-  return `
-    <div class="job">
-      <div class="job-head">
-        <div class="grow">
-          <div class="job-title">${esc((j.title || j.disc_label || "Unknown disc")
-            + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : ""))}${
-            seasonTag(j)}</div>
-          <div class="job-phase">${esc(j.phase || STATE_LABEL[j.state] || j.state)}</div>
-        </div>
-        ${familyTag(j.disc_family)}
-        <span class="badge state">${esc(STATE_LABEL[j.state] || j.state)}</span>
-        <button class="icon-btn" data-cancel="${j.id}" title="Cancel"
-                aria-label="Cancel ripping ${esc(j.title || j.disc_label || "this disc")}">${icon("xmark")}</button>
-      </div>
-      ${j.warning ? `<div class="job-warn">${icon("triangle-exclamation")}
-        <span>${esc(j.warning)}</span></div>` : ""}
-      ${plannedLine(j)}
-      <div class="job-meter">
-        <div class="bar${working ? " working" : ""}"><i style="width:${active}%"></i></div>
-        <div class="job-figs">
-          <span class="job-pct">${active > 0 ? `${Math.round(active)}%` : ""}</span>
-          <span class="grow"></span>
-          ${(() => { const e = overallEta(j); return e ? `<span class="job-eta">${esc(e)}</span>` : ""; })()}
-        </div>
-      </div>
-      <div class="job-steps${together ? " paired" : ""}">${stepHtml}${
-        together ? `<span class="pair-note">at once</span>` : ""}</div>
-      ${stageClock(j)}
-    </div>`;
 }
 
 /* ── disc details ──
@@ -1634,34 +1490,6 @@ function stageTiming(j) {
   const restSecs = rest.reduce((a, k) => a + med[k].seconds, 0);
   const left = mine ? mine - elapsed : null;
   return { name, elapsed, mine, left, over: mine ? left < 0 : false, restSecs };
-}
-
-function stageClock(j) {
-  const t = stageTiming(j);
-  if (!t) return "";
-  const { name, elapsed, mine, left, over } = t;
-  const label = stageLabel(j, name);
-
-  if (!mine) {
-    return `<div class="clock">
-      <span class="clock-stage">${esc(label)}</span>
-      <span class="clock-el">${esc(duration(elapsed))}</span>
-      <span class="grow"></span>
-      <span class="muted">no history for this stage yet</span></div>`;
-  }
-  // A stage that has run long is not a stage that has failed, and saying "0 min left"
-  // for six minutes is how an interface loses the user's trust. Say the true thing.
-  const rem = over && -left >= 60 ? `${duration(-left)} over the usual ${duration(mine)}`
-            : left < 60 ? "finishing this stage"
-            : `about ${duration(left)} left in this stage`;
-  // No bar of its own and no overall estimate: the bar above is the one bar, and the
-  // estimate above is the one "when". This line is only about the stage.
-  return `<div class="clock${over && -left >= 60 ? " over" : ""}">
-    <span class="clock-stage"><i class="sg-${esc(name)}"></i>${esc(label)}</span>
-    <span class="clock-el">${esc(duration(elapsed))} of ~${esc(duration(mine))}</span>
-    <span class="grow"></span>
-    <span class="clock-est">${esc(rem)}</span>
-  </div>`;
 }
 
 /* The server is allowed to change a setting you did not send -- see db.reconcile,
@@ -2231,22 +2059,10 @@ views.history = async () => {
                                                          : "size check passed"}</span>` : ""}</td></tr>` : ""}`;
   };
 
-  if (newLayout()) return historyGrouped(jobs, key, row, h, typical, byKind);
-
-  return `${head("History", "Every attempt, what each stage cost, and what can be retried.",
-                 stageLegend(typical, h.stage_order, h.stage_labels))}
-    <div class="card"><table class="hist-table">
-      <thead><tr>
-        <th class="stat"></th><th>Title</th><th class="num">Attempt</th>
-        <th class="num">Size</th><th class="num">Took</th><th>Where the time went</th>
-        <th class="num">When</th><th class="act"></th>
-      </tr></thead>
-      <tbody>${jobs.map(row).join("")}</tbody>
-    </table></div>
-    ${stageNote(byKind)}`;
+  return historyGrouped(jobs, key, row, h, typical, byKind);
 };
 
-/* ── History, grouped by disc (new layout) ──
+/* ── History, grouped by disc ──
    One line per disc: how it ended most recently, when, and how many attempts. The
    attempts themselves -- with the stage bars, paths and retries -- open underneath,
    because on most days nobody needs them. */
@@ -3260,14 +3076,7 @@ settingsPages.general = async (s) => {
         <select id="theme-pick">${themes.map(t =>
           `<option value="${t}" ${s.theme === t ? "selected" : ""}>${t}</option>`).join("")}</select>
       </label>
-      <label class="f"><span>Layout</span>
-        <select id="layout-pick">
-          ${opt("classic", "Classic (the *arr layout)", s.ui_layout || "classic")}
-          ${opt("new", "New (preview)", s.ui_layout || "classic")}
-        </select>
-        <span class="help">The new layout puts the disc being ripped front and centre, uses
-          tabs at the bottom on a phone, groups History by disc and keeps Settings short by
-          folding the explanations. Switch back any time.</span></label>
+
     </div></div>
 
     <div class="section"><h2>Password</h2><div>
@@ -3918,7 +3727,7 @@ async function route(opts) {
     document.body.classList.remove("nav-open");
     $("#hamburger").setAttribute("aria-expanded", "false");
   }
-  document.body.classList.toggle("has-savebar", !!$("#save-bar") && !newLayout());
+  document.body.classList.remove("has-savebar");      // shown once there's a change
   if (state.status) renderChrome();
   applySearch();
   scheduleLiveRefresh(section);
@@ -4649,7 +4458,7 @@ function wireContent(section, sub) {
 
   // Long help folds to one line with a "More" link. Read once, it is in the way on
   // every later visit -- and on the Ripping page it was most of the page.
-  $$(`.f .help, .section p.help${newLayout() ? ", .switch .lbl small" : ""}`).forEach(h => {
+  $$(".f .help, .section p.help, .switch .lbl small").forEach(h => {
     if (h.classList.contains("naming-preview") || h.scrollHeight <= 42) return;
     h.classList.add("clamp");
     const more = document.createElement("button");
@@ -4669,9 +4478,6 @@ function wireContent(section, sub) {
     };
     h.after(more);
   });
-
-  const layoutPick = $("#layout-pick");
-  if (layoutPick) layoutPick.onchange = () => setLayout(layoutPick.value);
 
   const themePick = $("#theme-pick");
   if (themePick) themePick.onchange = async () => {
@@ -4894,7 +4700,7 @@ document.addEventListener("keydown", (e) => {
     $("#hamburger").setAttribute("aria-expanded", "false");
     const more = $("#tab-more");
     if (more) more.setAttribute("aria-expanded", "false");
-    (newLayout() && more ? more : $("#hamburger")).focus();
+    (more || $("#hamburger")).focus();
     return;
   }
   if (!$("#user-menu").classList.contains("hidden")) {
@@ -4954,7 +4760,7 @@ function markDirty() {
   if (!bar) return;
   const dirty = settingsDirty();
   bar.classList.toggle("dirty", dirty);
-  document.body.classList.toggle("has-savebar", !newLayout() || dirty);
+  document.body.classList.toggle("has-savebar", dirty);
   $("#save-state").textContent = dirty ? "You have unsaved changes" : "No unsaved changes";
   $("#discard-settings").hidden = !dirty;
 }
@@ -4977,10 +4783,6 @@ window.addEventListener("hashchange", () => {
 window.addEventListener("beforeunload", (e) => {
   if (settingsDirty()) { e.preventDefault(); e.returnValue = ""; }
 });
-$("#layout-toggle").onclick = (e) => {
-  e.preventDefault();
-  setLayout(newLayout() ? "classic" : "new");
-};
 $("#logout").onclick = async (e) => {
   e.preventDefault();
   await api.post("/api/auth/logout");
@@ -5019,12 +4821,6 @@ const showUnreachable = () => showWaiting(
   "Can't reach Riparr. It may still be starting; if this keeps happening, "
   + "check `docker logs riparr` on the server.",
   { retry: true, spin: false });
-
-/* ── the layout switch ──
-   "new" is a preview of a different shape for the app: the queue as one now-ripping
-   card, a tab bar on phones, History grouped by disc and settings as summary rows.
-   Everything it changes is scoped to body.ui-new, so classic is untouched. */
-const newLayout = () => (state.settings || {}).ui_layout === "new";
 
 /* Tabs at the bottom of a phone, where a thumb reaches, instead of a menu button in the
    top corner. More opens the same drawer the menu button did, with Settings and System
@@ -5067,19 +4863,6 @@ function renderTabs(section) {
     }
   };
 }
-function applyLayout() {
-  document.body.classList.toggle("ui-new", newLayout());
-  const item = $("#layout-toggle");
-  if (item) item.textContent = newLayout() ? "Back to the classic layout" : "Try the new layout";
-  renderTabs();
-}
-async function setLayout(which) {
-  try { await api.put("/api/settings", { ui_layout: which }); }
-  catch (e) { toast(e.message, "bad"); return; }
-  state.settings.ui_layout = which;
-  applyLayout();
-  route();
-}
 
 async function boot() {
   paintIcons();          // the static chrome in index.html
@@ -5113,7 +4896,8 @@ async function boot() {
   catch (e) { showGate(); return; }
   state.settings = await api.get("/api/settings");
   $("#theme").href = `/static/themes/${state.settings.theme || "servarr"}.css`;
-  applyLayout();
+  document.body.classList.add("ui-new");
+  renderTabs();
 
   $("#gate").classList.add("hidden");
   $("#wizard").classList.add("hidden");

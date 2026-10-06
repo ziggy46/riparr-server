@@ -151,9 +151,6 @@ DEFAULTS = {
     "setup_complete": False,
     "auto_rip": False,
     "theme": "servarr",
-    # "classic" (the *arr layout) or "new": the preview layout with a now-ripping queue,
-    # bottom tabs on phones, History grouped by disc and settings as summary rows.
-    "ui_layout": "classic",
     "movie_template": "{Title} ({Year})/{Title} ({Year}).mkv",
     "tv_template": "{Title} ({Year})/Season {Season:00}/"
                    "{Title} - S{Season:00}E{Episode:00} - {EpisodeTitle}.mkv",

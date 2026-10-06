@@ -16,9 +16,9 @@ doesn't display the line.
 
 ## Unreleased
 
-**A new layout, as a preview.** Turn it on from the account menu (**Try the new
-layout**) or **Settings → General → Layout**; the classic layout stays the default and
-is one click away. It's saved on the server, so it follows you between devices.
+**A new layout.** The Queue shows the disc being ripped as one large card, phones get
+tabs at the bottom, History is grouped by disc, and Settings are shorter. It replaces the
+old *arr-style layout; there's no switch back.
 - **Queue** shows the disc being ripped as one large card: poster, title, one bar, the
   finish time, and Disc info and Eject on the card. Auto Rip and the rip options move
   to a footer.
