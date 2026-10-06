@@ -27,7 +27,7 @@ const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
 /* The host is a polite live region (index.html), so confirmations are read out. An
    error is an alert and stays until it is dismissed: three seconds is not long enough
    to read one, let alone act on it. */
-function toast(msg, kind = "") {
+function toast(msg, kind = "", opts = {}) {
   const host = $("#toasts");
   const el = document.createElement("div");
   el.className = `toast ${kind}`;
@@ -35,6 +35,14 @@ function toast(msg, kind = "") {
   text.textContent = msg;
   el.append(text);
   const close = () => { el.style.opacity = "0"; setTimeout(() => el.remove(), 250); };
+  if (opts.action) {
+    const a = document.createElement("button");
+    a.className = "toast-act";
+    a.type = "button";
+    a.textContent = opts.action.label;
+    a.onclick = () => { opts.action.run(); close(); };
+    el.append(a);
+  }
   if (kind === "bad") {
     el.setAttribute("role", "alert");
     const x = document.createElement("button");
@@ -48,7 +56,7 @@ function toast(msg, kind = "") {
     const errs = $$(".toast.bad", host);
     if (errs.length >= 3) errs[0].remove();
   } else {
-    setTimeout(close, 3200);
+    setTimeout(close, opts.ms || 3200);
   }
   host.append(el);
 }
@@ -472,6 +480,10 @@ const wizard = {
   },
 
   next() { this.step++; this.render(); },
+  // Back only goes as far as step 2: the account already exists once step 1 is done.
+  back() { if (this.step > 1) { this.step--; this.render(); } },
+  backBtn() { return this.step > 1 ? `<button class="btn" id="w-back" type="button">Back</button>` : ""; },
+  wireBack() { const b = $("#w-back"); if (b) b.onclick = () => this.back(); },
 
   account() {
     $("#wz-body").innerHTML = `
@@ -480,7 +492,7 @@ const wizard = {
       <p class="muted">This protects the web interface. It is separate from any account
         on the server or container.</p>
       <div class="section"><div>
-        <label class="f"><span>Username</span><input id="w-user" value="admin"></label>
+        <label class="f"><span>Username</span><input id="w-user" autocomplete="username" autocapitalize="none"></label>
         <label class="f"><span>Password</span><input id="w-pass" type="password">
           <span class="help">At least 8 characters.</span></label>
         <label class="f"><span>Confirm password</span><input id="w-pass2" type="password"></label>
@@ -578,7 +590,10 @@ const wizard = {
 
     const save = async () => {
       const k = $("#w-key").value.trim();
-      if (k) { try { await api.post("/api/makemkv/key", { key: k }); } catch (e) {} }
+      if (k) {
+        try { await api.post("/api/makemkv/key", { key: k }); }
+        catch (e) { toast(`The key wasn't saved: ${e.message}`, "bad"); return; }
+      }
       this.next();
     };
     $("#w-go").onclick = save;
@@ -594,12 +609,14 @@ const wizard = {
         discover at 3am on your first rip.</p>
       <div id="w-finder"></div>
       <div class="wz-actions">
+        ${this.backBtn()}
         <div class="grow"></div>
         <button class="btn" id="w-skip">Set this up later</button>
         <button class="btn primary" id="w-go" disabled>Continue</button>
       </div>`;
     $("#w-skip").onclick = () => this.next();
     $("#w-go").onclick = () => this.next();
+    this.wireBack();
     shareFinder($("#w-finder"), { onSaved: () => { $("#w-go").disabled = false; } });
   },
 
@@ -632,15 +649,19 @@ const wizard = {
             straight into a library you browse.</span></label>
       </div></div>
       <div class="wz-actions">
+        ${this.backBtn()}
         <div class="grow"></div>
         <button class="btn primary" id="w-go">Continue</button>
       </div>`;
+    this.wireBack();
     $("#w-go").onclick = async () => {
-      await api.put("/api/settings", {
-        movie_folder: $("#s-movie-folder").value, tv_folder: $("#s-tv-folder").value,
-        movie_template: $("#s-movie").value, tv_template: $("#s-tv").value,
-        on_unknown_disc: $("#s-unknown").value,
-      });
+      try {
+        await api.put("/api/settings", {
+          movie_folder: $("#s-movie-folder").value, tv_folder: $("#s-tv-folder").value,
+          movie_template: $("#s-movie").value, tv_template: $("#s-tv").value,
+          on_unknown_disc: $("#s-unknown").value,
+        });
+      } catch (e) { toast(`Couldn't save that: ${e.message}`, "bad"); return; }
       this.next();
     };
   },
@@ -667,9 +688,11 @@ const wizard = {
         </div>
       </div></div>
       <div class="wz-actions">
+        ${this.backBtn()}
         <div class="grow"></div>
         <button class="btn primary" id="w-go">Open Riparr</button>
       </div>`;
+      this.wireBack();
       $("#w-go").onclick = async () => {
         await api.post("/api/setup/complete");
         location.hash = "#/queue";
@@ -693,8 +716,8 @@ const wizard = {
                     insert a disc, close the tray, walk away.`
     : building   ? `MakeMKV isn't installed, so no disc can be read yet. Rebuild the
                     image (or re-run the installer) with the MakeMKV licence accepted.`
-    :              `<b>Auto Rip</b> needs one or two more things first. The queue page lists
-                    exactly what, and each one links to where to fix it.`;
+    :              `<b>Auto Rip</b> needs one or two more things first. <b>System → Status</b>
+                    lists exactly what, and each one links to where to fix it.`;
 
     paint(lede, ar.enabled
       ? ["Insert a disc", "Riparr identifies it and starts on its own"]
@@ -770,6 +793,26 @@ async function showRenewalNotice() {
   d.showModal();
 }
 
+/* ── delete, with a moment to take it back ──
+   The item disappears at once and the request goes out a few seconds later, unless
+   Undo is pressed first. Forgetting a disc or removing a share can't be reversed on
+   the server, so the undo has to happen before it gets there. */
+function undoable(el, message, request) {
+  if (el) el.hidden = true;
+  let undone = false;
+  const ms = 6000;
+  toast(message, "", { ms, action: { label: "Undo", run: () => {
+    undone = true;
+    if (el) el.hidden = false;
+  } } });
+  setTimeout(async () => {
+    if (undone) return;
+    try { await request(); }
+    catch (e) { toast(e.message, "bad"); if (el) el.hidden = false; return; }
+    if (el && el.isConnected) route();
+  }, ms + 200);
+}
+
 /* ════════════════════ views ════════════════════ */
 const views = {};
 
@@ -815,11 +858,17 @@ views.queue = async () => {
   const drives = state.status.drives || [];
   const inTray = drives.find(d => d.present);
   setDiscArt(inTray && inTray.label);       // fire and forget; never blocks the render
-  const busy = jobs.some(j => j.state !== "needs_input");
   const loaded = drives.find(d => d.present);
+  // A rip still uploading whose disc hasn't come out yet stays the hero. Otherwise
+  // the card fell back to "you ripped this … Rip it again" for the length of the
+  // upload, as if nothing had happened.
+  const ownDisc = (j) => loaded && (j.disc_label || "") === (loaded.label || "");
+  const hero = jobs.length ? jobs : sending.filter(ownDisc);
+  const away = jobs.length ? sending : sending.filter(j => !ownDisc(j));
+  const busy = hero.some(j => j.state !== "needs_input");
   // The rip that just finished stays on the page until the next disc goes in. A
   // different disc in the tray is the next moment, so the tray takes over again.
-  const filed = !jobs.length && showFiled(q.filed, loaded) ? q.filed : null;
+  const filed = !hero.length && showFiled(q.filed, loaded) ? q.filed : null;
   if (filed) setFiledArt(filed);
   // Wrapped so a phone can put the disc and the rip first: on a small screen that is
   // what somebody opened the page to see, and it was below two panels of options.
@@ -834,12 +883,12 @@ views.queue = async () => {
     <div class="card disc-cell${artState.image ? " has-art" : ""}">
       ${artState.image ? `<div class="tray-art" role="presentation"
            style="background-image:url('${artState.image}')"></div>` : ""}
-      ${jobs.length ? `${jobs.map(jobRow).join("")}
+      ${hero.length ? `${hero.map(jobRow).join("")}
         ${trayStrip(drives, state.status.optical)}`
       : filed ? `${filedCard(filed)}${trayStrip(drives, state.status.optical)}`
       : tray(drives, state.status.optical, loaded && !busy)}
     </div>
-    ${sendingStrip(sending)}</div>`;
+    ${sendingStrip(away)}</div>`;
 };
 
 /* ── the rip that just finished ──
@@ -883,7 +932,7 @@ async function setFiledArt(j) {
   });
   if (filedArt.id !== j.id) return;
   filedArt.image = hit.image;
-  if (location.hash.replace(/^#\//, "").split("/")[0] === "queue" || !location.hash) route();
+  if ((location.hash.replace(/^#\//, "").split("/")[0] || "queue") === "queue") route({ live: true });
 }
 
 function filedCard(j) {
@@ -1609,13 +1658,10 @@ function trayStrip(drives, optical) {
 const pct = (a, b) => (b ? Math.min(100, (a / b) * 100).toFixed(1) : 0);
 
 /* The checklist is the answer to "it isn't auto ripping" -- a question asked most
-   often with the switch already ON, when something downstream broke afterwards. So
-   every prerequisite is listed whether or not it is met, and each row says what
-   currently satisfies it rather than only complaining when it doesn't.
-
-   Closed by default once everything passes: five green rows on the landing page are
-   noise until the day they aren't. `<details>` rather than a JS disclosure, so the
-   open/closed state survives the poll that re-renders this page. */
+   often with the switch already ON, when something downstream broke afterwards. Every
+   prerequisite is listed on System → Status whether or not it is met; the queue only
+   says how many need attention and links there, so the disc stays the first thing on
+   the page. */
 const CHECK_ICON = { ok: "circle-check", warn: "triangle-exclamation", fail: "circle-exclamation" };
 
 function autoRipPanel(ar) {
@@ -1636,8 +1682,11 @@ function autoRipPanel(ar) {
         <div class="ar-sub" id="ar-sub">${
           on ? "Insert a disc and walk away. Riparr does the rest and ejects when it's done."
           : ar.ready ? "Turn this on and Riparr starts ripping the moment a disc is inserted."
-          : "Not available yet \u2014 see below."}</div>
-        ${checkList(checks, fails, warns)}
+          : "Not available until setup is finished."}</div>
+        ${fails || warns ? `<a class="ar-fix ${fails ? "fail" : "warn"}" href="#/system/status">${
+          icon(CHECK_ICON[fails ? "fail" : "warn"])} ${esc(
+          fails ? `${fails} thing${fails === 1 ? "" : "s"} to fix first`
+                : `${warns} thing${warns === 1 ? "" : "s"} worth knowing about`)} \u2192 System</a>` : ""}
       </div>
     </div>
     ${ripOptions()}`;
@@ -1675,7 +1724,8 @@ function ripOptions() {
         <button class="btn sm" id="ar-speedtest"
                 title="Measures your staging disk and says which of these suits it">Test staging speed</button>
         <select id="ar-route" title="Applies to every rip, automatic or started by hand">
-          ${opt("direct", "straight to your library", s.transfer_mode)}
+          ${opt("direct", lib.mounted ? "straight to your library"
+                                       : "straight to your library (not mounted yet)", s.transfer_mode)}
           ${opt("auto", "staged first, then sent", s.transfer_mode)}
         </select>
       </div>
@@ -1701,30 +1751,9 @@ function ripOptions() {
           ${opt("off", "no check", s.verify_mode)}
         </select>
       </div>
-      <p class="ropt-why">${verifyNote(direct)}</p>
+      <p class="ropt-why">${verifyNote(direct && lib.mounted)}</p>
     </div>
   </div></details>`;
-}
-
-function checkList(checks, fails, warns) {
-  if (!checks.length) return "";
-  const summary =
-    fails && warns ? `${fails} to fix, ${warns} to watch`
-    : fails ? `${fails} thing${fails === 1 ? "" : "s"} to fix first`
-    : warns ? `${warns} thing${warns === 1 ? "" : "s"} worth knowing about`
-    : `All ${checks.length} checks pass`;
-  const worst = fails ? "fail" : warns ? "warn" : "ok";
-  return `<details class="ar-checks" ${fails || warns ? "open" : ""}>
-    <summary><span class="cl-sum ${worst}">${icon(CHECK_ICON[worst])} ${esc(summary)}</span></summary>
-    <ul>${checks.map(c => `
-      <li class="${esc(c.state)}">
-        <span class="cl-mark">${icon(CHECK_ICON[c.state] || "circle-info")}</span>
-        <span class="cl-what">${esc(c.what)}</span>
-        <span class="cl-detail">${c.where && c.state !== "ok"
-          ? `<a href="${esc(c.where)}">${esc(c.detail)}</a>` : esc(c.detail)}</span>
-        ${c.state !== "ok" && c.why ? `<span class="cl-why">${esc(c.why)}</span>` : ""}
-      </li>`).join("")}</ul>
-  </details>`;
 }
 
 /* ── History: the data page ──
@@ -1794,7 +1823,8 @@ views.history = async () => {
                              : j.state === "cancelled" ? "ban"
                              : "triangle-exclamation")}</td>
       <td class="hist-name">
-        <div class="hist-title">${esc(j.title || j.disc_label || "Unknown disc")}${
+        <div class="hist-title">${esc((j.title || j.disc_label || "Unknown disc")
+          + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : ""))}${
           familyTag(j.disc_family)}</div>
         ${j.title && j.disc_label && j.title !== j.disc_label
           ? `<div class="hist-sub">${esc(j.disc_label)}</div>` : ""}
@@ -1931,7 +1961,8 @@ views.discs = async (highlight) => {
            you meant it.</p></div></div>`;
   }
   const card = (d) => {
-    const name = d.title || pretty(d.label) || "Unknown disc";
+    const name = (d.title || pretty(d.label) || "Unknown disc")
+      + (d.title && d.year && d.kind !== "tv" ? ` (${d.year})` : "");
     const me = highlight && d.fingerprint === highlight;
     return `<figure class="rip${me ? " dupe" : ""}" id="${me ? "dupe-tile" : ""}"
                     data-art="${esc(d.title || d.label || "")}"
@@ -1950,7 +1981,7 @@ views.discs = async (highlight) => {
       <div class="rip-acts">
         <button class="btn tiny" data-rerip="${esc(d.fingerprint)}"
                 title="Put this disc back in the tray and read it again from the start.">Re-rip</button>
-        <button class="btn tiny" data-forget="${esc(d.fingerprint)}"
+        <button class="btn tiny quiet" data-forget="${esc(d.fingerprint)}"
                 title="Forget this disc, so the next time it goes in it is treated as new.">Forget</button>
       </div>
     </figure>`;
@@ -2793,23 +2824,39 @@ views.system = async (sub = "status") => {
 
 const systemPages = {};
 
+/* The key, said one way everywhere it is shown. */
+function keyPhrase(m) {
+  if (!m || !m.installed) return "MakeMKV isn't installed";
+  if (m.key_type === "purchased") return "Bought \u2014 never runs out";
+  if (!m.key_type) return "None entered";
+  if (m.key_stale) return "Beta \u2014 a newer key has been published";
+  if (m.days_left != null && m.days_left <= 0) return "Beta \u2014 expired";
+  return m.key_expires ? `Beta \u2014 works until ${m.key_expires} (${m.days_left} days)` : "Beta";
+}
+
 /* ── Status ── */
 systemPages.status = async () => {
   const st = await api.get("/api/status");
   state.status = st;
   const sys = st.system, m = st.makemkv, s = st.storage;
 
+  // The full checklist lives here now, every row whether or not it passes -- the queue
+  // only says how many need attention and links to this.
+  const checks = (st.autorip || {}).checks || [];
   const health = healthMessages(st);
-  const healthRows = health.length
-    ? health.map(h => `<tr>
+  const healthRows = checks.map(c => `<tr class="chk ${esc(c.state)}">
+        <td class="stat">${icon(CHECK_ICON[c.state] || "circle-info",
+                                c.state === "fail" ? "bad" : c.state === "warn" ? "warn" : "ok")}</td>
+        <td><b>${esc(c.what)}</b><div class="muted">${esc(c.detail)}${
+          c.state !== "ok" && c.why ? ` \u2014 ${esc(c.why)}` : ""}</div></td>
+        <td class="act">${c.state !== "ok" && c.where
+          ? `<a class="btn sm" href="${esc(c.where)}">Fix</a>` : ""}</td></tr>`).join("")
+    + health.map(h => `<tr>
         <td class="stat">${icon(h.level === "bad" ? "circle-exclamation" : "triangle-exclamation",
                                 h.level === "bad" ? "bad" : "warn")}</td>
         <td>${h.message}</td>
         <td class="act">${h.href
-          ? `<a class="icon-btn" href="${h.href}" title="${esc(h.action || "Fix")}"
-               >${icon("gears")}</a>` : ""}</td></tr>`).join("")
-    : `<tr><td class="stat">${icon("circle-check", "ok")}</td>
-         <td colspan="2">No issues. Everything Riparr can check is working.</td></tr>`;
+          ? `<a class="btn sm" href="${h.href}">${esc(h.action || "Fix")}</a>` : ""}</td></tr>`).join("");
 
   return `
     ${sys.mock ? `<div class="alert warn"><b>Development mode.</b>
@@ -2857,9 +2904,7 @@ systemPages.status = async () => {
       <span class="badge ${m.installed ? "ok" : "bad"}">${m.installed ? "Ready" : "Missing"}</span></h2>
       <div class="kv">
         <div class="k">MakeMKV</div><div class="v">${m.installed ? esc(m.version || "installed") : "not installed"}</div>
-        <div class="k">Key</div><div class="v">${m.key_expires
-          ? `expires ${esc(m.key_expires)} — ${m.days_left} days`
-          : "none"}</div>
+        <div class="k">Key</div><div class="v">${esc(keyPhrase(m))}</div>
         <div class="k">Drive</div><div class="v">${(st.drives && st.drives.length)
           ? st.drives.map(d => `${esc(driveName(d))} <span class="muted">· ${esc(d.reads || "capability unknown")}</span>`).join("<br>")
           : `<span class="muted">${esc((st.optical && st.optical.summary) || "no drive detected")}</span>`}</div>
@@ -2914,47 +2959,20 @@ function healthMessages(st) {
     out.push({ level: "bad", message: `The system clock reads ${
       new Date(clk.now * 1000).toLocaleString()}, which can't be right. Dates and key
       expiry are meaningless until it syncs — check the host's time settings.`,
-      href: "#/system/status", action: "Details" });
+      action: "Details" });
   else if (clk && clk.synced === false)
     out.push({ level: "warn", message: "The clock hasn't synchronised with a time "
-      + "server yet, so dates may be slightly out.",
-      href: "#/system/status", action: "Details" });
+      + "server yet, so dates may be slightly out." });
 
-  const m = st.makemkv;
-  if (!m.installed)
-    out.push({ level: "bad", message: "MakeMKV is not installed, so no disc can be read.",
-               href: "#/settings/makemkv", action: "Install MakeMKV" });
-  else if (m.days_left != null && st.clock && !st.clock.plausible)
-    out.push({ level: "warn", message: "Riparr can't tell whether the MakeMKV key is "
-      + "still valid, because the clock is wrong.",
-      href: "#/settings/makemkv", action: "Update the key" });
-  else if (m.days_left != null && m.days_left <= 0)
-    out.push({ level: "bad", message: "The MakeMKV key has expired. Rips will fail until it is replaced.",
-               href: "#/settings/makemkv", action: "Update the key" });
-  else if (m.key_stale)
-    out.push({ level: "warn", message: "A newer MakeMKV key has been published — the one "
-      + "in Riparr is older and may already have lapsed.",
-      href: "#/settings/makemkv", action: "Update the key" });
-  else if (m.days_left != null && m.days_left <= (state.settings?.warn_key_days ?? 7))
-    out.push({ level: "warn", message: `The MakeMKV key expires in ${m.days_left} day(s).`,
-               href: "#/settings/makemkv", action: "Update the key" });
-
-  if (!st.drives || !st.drives.length)
-    out.push({ level: "bad", message: `No optical drive detected — ${
-      esc((st.optical && st.optical.summary) || "check the device passthrough")}.`,
-      href: "#/system/status", action: "Details" });
-
-  if (!st.share)
-    out.push({ level: "warn", message: "No network share configured, so finished rips have nowhere to go.",
-               href: "#/settings/share", action: "Add a share" });
+  // MakeMKV, its key, the drive and the share are on the Auto Rip checklist, which
+  // problems() and System → Status read directly. Listing them here as well is how
+  // four screens came to give four different answers about the same key.
 
   if (st.storage.dedicated === false)
-    out.push({ level: "warn", message: "The staging folder doesn't exist, so rips are staged on the container's own filesystem. Mount a volume at the staging path.",
-               href: "#/system/status", action: "Details" });
+    out.push({ level: "warn", message: "The staging folder doesn't exist, so rips are staged on the container's own filesystem. Mount a volume at the staging path." });
 
   if (st.storage.mode === "degraded")
-    out.push({ level: "warn", message: "Not enough free space to rip safely.",
-               href: "#/system/status", action: "Details" });
+    out.push({ level: "warn", message: "Not enough free space to rip safely." });
 
   return out;
 }
@@ -3035,6 +3053,15 @@ systemPages.backup = async () => {
 };
 
 /* ── Updates ── */
+function newerVersion(a, b) {
+  const n = (v) => String(v || "").replace(/^v/, "").split(/[.-]/).map(x => parseInt(x, 10) || 0);
+  const x = n(a), y = n(b);
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  }
+  return false;
+}
+
 systemPages.updates = async () => {
   const [u, mk] = await Promise.all([api.get("/api/update"),
                                       api.get("/api/makemkv").catch(() => null)]);
@@ -3048,7 +3075,9 @@ systemPages.updates = async () => {
       <div class="kv">
         <div class="k">Installed</div><div class="v">${esc(u.current)}
           <span class="badge ok">Currently Installed</span></div>
-        <div class="k">Latest</div><div class="v">${esc(u.latest || "—")}</div>
+        <div class="k">Latest release</div><div class="v">${esc(u.latest || "—")}${
+          u.latest && newerVersion(u.current, u.latest)
+            ? ` <span class="muted">· you're on a newer build than the latest release</span>` : ""}</div>
         <div class="k">Source</div><div class="v">
           <a href="https://github.com/${esc(u.repo)}" target="_blank" rel="noopener">github.com/${esc(u.repo)}</a></div>
       </div>
@@ -3061,11 +3090,7 @@ systemPages.updates = async () => {
       <div class="kv">
         <div class="k">Installed</div><div class="v">${esc(mk.status.version || "—")}</div>
         <div class="k">Latest</div><div class="v">${esc(mk.manifest.version)}</div>
-        <div class="k">Key</div><div class="v">${esc(
-          mk.status.key_type === "purchased" ? "Bought — never runs out"
-          : mk.status.key_stale ? "Older than the published key"
-          : mk.status.key_expires ? `Beta, works until ${mk.status.key_expires}`
-          : mk.status.key_type ? "Beta" : "None entered")}</div>
+        <div class="k">Key</div><div class="v">${esc(keyPhrase(mk.status))}</div>
       </div></div>` : ""}
     ${u.notes ? `<div class="section"><h2>Release notes</h2>
       <pre class="notes">${esc(u.notes)}</pre></div>` : ""}`;
@@ -3223,17 +3248,21 @@ const NAV = [
     children: SYSTEM_TABS.map(([k, l]) => ({ key: k, label: l, href: `#/system/${k}` })) },
 ];
 
+/* One source of truth for "is something wrong": the server's Auto Rip checklist plus
+   the few health checks that aren't prerequisites. The badge, the header pills, the
+   queue's line and System → Status all count the same list, so they can't disagree. */
+function problems(st) {
+  if (!st) return [];
+  const checks = ((st.autorip || {}).checks || []).filter(c => c.state !== "ok")
+    .map(c => ({ level: c.state === "fail" ? "bad" : "warn", what: c.what,
+                 message: `${c.what}: ${c.detail}${c.why ? ` \u2014 ${c.why}` : ""}`,
+                 short: c.detail, href: c.where }));
+  return checks.concat(healthMessages(st));
+}
+
 function navBadges() {
-  const st = state.status, b = {};
-  if (!st) return b;
-  let sys = 0;
-  const m = st.makemkv;
-  if (!m.installed) sys++;
-  else if (m.days_left != null && m.days_left < 8) sys++;
-  else if (m.key_stale) sys++;
-  if (!st.share) sys++;
-  if (sys) b.system = sys;
-  return b;
+  const n = problems(state.status).length;
+  return n ? { system: n } : {};
 }
 
 function renderSidebar(section, sub) {
@@ -3272,8 +3301,10 @@ function focusKey(el) {
   return a ? `[${a.name}="${CSS.escape(a.value)}"]` : null;
 }
 
+let routeSeq = 0;
 async function route(opts) {
   const live = !!(opts && opts.live);
+  const seq = ++routeSeq;
   currentHash = location.hash;
   const hash = location.hash.replace(/^#\//, "") || "queue";
   const [section, sub] = hash.split("/");
@@ -3295,11 +3326,15 @@ async function route(opts) {
   try {
     html = await view(sub);
   } catch (e) {
+    if (seq !== routeSeq) return;
     content.innerHTML = `<div class="card"><div class="empty-state">
       <div class="big">${icon("triangle-exclamation")}</div><h2>Couldn't load that</h2><p>${esc(e.message)}</p></div></div>`;
     lastRender = { hash: null, html: null };
     return;
   }
+  // A newer navigation started while this page was loading: it owns the screen. Without
+  // this a slow page (Updates asks GitHub) finished last and covered the one clicked.
+  if (seq !== routeSeq) return;
   if (live && hash === lastRender.hash && html === lastRender.html) {
     scheduleLiveRefresh(section);
     return;
@@ -3319,6 +3354,8 @@ async function route(opts) {
     document.body.classList.remove("nav-open");
     $("#hamburger").setAttribute("aria-expanded", "false");
   }
+  document.body.classList.toggle("has-savebar", !!$("#save-bar"));
+  if (state.status) renderChrome();
   applySearch();
   scheduleLiveRefresh(section);
 }
@@ -3368,7 +3405,7 @@ async function setDiscArt(label) {
   if (artState.label !== label) return;
   artState.image = hit.image;
   artState.title = hit.title;
-  if (location.hash.replace(/^#\//, "").split("/")[0] === "queue") route();
+  if ((location.hash.replace(/^#\//, "").split("/")[0] || "queue") === "queue") route({ live: true });
 }
 
 function scheduleLiveRefresh(section) {
@@ -4012,14 +4049,15 @@ function wireContent(section, sub) {
     toast(`Theme set to ${themePick.value}`, "ok");
   };
 
-  $$("[data-forget]").forEach(b => b.onclick = async () => {
-    await api.del(`/api/discs/${encodeURIComponent(b.dataset.forget)}`);
-    toast("Disc forgotten"); route();
+  $$("[data-forget]").forEach(b => b.onclick = () => {
+    const fp = b.dataset.forget;
+    undoable(b.closest("figure"), "Disc forgotten",
+             () => api.del(`/api/discs/${encodeURIComponent(fp)}`));
   });
 
-  $$("[data-del-share]").forEach(b => b.onclick = async () => {
-    await api.del(`/api/shares/${b.dataset.delShare}`);
-    toast("Share removed"); route();
+  $$("[data-del-share]").forEach(b => b.onclick = () => {
+    const id = b.dataset.delShare;
+    undoable(b.closest(".rowitem"), "Share removed", () => api.del(`/api/shares/${id}`));
   });
 
   const pwGo = $("#pw-go");
@@ -4140,17 +4178,20 @@ function wireContent(section, sub) {
 }
 
 /* ════════════════════ chrome ════════════════════ */
+/* One pill, from the same list as everything else, linking to where it's explained.
+   Several pills used to sit side by side, and on a phone they pushed the header wider
+   than the screen -- which made the whole page scroll sideways. */
 function renderChrome() {
-  const st = state.status;
-  const pills = [];
-  const m = st.makemkv;
-  if (!m.installed) pills.push(`<span class="pill bad">MakeMKV missing</span>`);
-  else if (m.days_left != null && m.days_left < 8)
-    pills.push(`<span class="pill warn">Key expires in ${m.days_left}d</span>`);
-  else if (m.key_stale)
-    pills.push(`<span class="pill warn">Newer key published</span>`);
-  if (!st.share) pills.push(`<span class="pill warn">No share</span>`);
-  $("#health-pills").innerHTML = pills.join("");
+  const list = problems(state.status);
+  const worst = list.find(p => p.level === "bad") || list[0];
+  $("#health-pills").innerHTML = worst
+    ? `<a class="pill ${worst.level}" href="#/system/status" title="${esc(
+        list.map(p => p.what || p.message).join("\n"))}">${esc(worst.what
+        ? (worst.short || worst.what) : "Needs attention")}${
+        list.length > 1 ? ` <b>+${list.length - 1}</b>` : ""}</a>`
+    : "";
+  // On a phone the sidebar (and its badge) is hidden behind the menu button.
+  $("#hamburger").classList.toggle("has-issues", !!list.length);
 }
 
 $("#hamburger").onclick = (e) => {
@@ -4191,7 +4232,7 @@ document.addEventListener("keydown", (e) => {
    else goes to Discs, the shelf of everything Riparr has ripped, and filters it. */
 const search = $("#search");
 function applySearch() {
-  const q = search.value.trim().toLowerCase();
+  const q = onListPage() ? search.value.trim().toLowerCase() : "";
   const items = $$("[data-find]", $("#content"));
   if (!items.length) return;
   let shown = 0;
@@ -4206,21 +4247,21 @@ function applySearch() {
       none = document.createElement("p");
       none.id = "search-none";
       none.className = "muted search-none";
-      $("#content").append(none);
+      // Next to the list, not at the bottom of the page under everything else.
+      const list = $(".rips") || $(".hist-table");
+      (list ? (list.closest(".card") || list) : $("#content").lastElementChild)
+        .insertAdjacentElement("afterend", none);
     }
     none.textContent = `Nothing matches \u201c${search.value.trim()}\u201d.`;
   } else if (none) none.remove();
 }
-search.addEventListener("input", () => {
-  const section = location.hash.replace(/^#\//, "").split("/")[0];
-  if (search.value.trim() && section !== "discs" && section !== "history") {
-    location.hash = "#/discs";
-    return;
-  }
-  applySearch();
-});
+const onListPage = () => ["discs", "history"].includes(
+  location.hash.replace(/^#\//, "").split("/")[0]);
+search.addEventListener("input", () => { if (onListPage()) applySearch(); });
 search.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { search.value = ""; applySearch(); search.blur(); }
+  // Typing never takes you anywhere; Enter on another page opens Discs, filtered.
+  if (e.key === "Enter" && search.value.trim() && !onListPage()) location.hash = "#/discs";
 });
 
 /* ── unsaved settings ──
@@ -4252,6 +4293,7 @@ window.addEventListener("hashchange", () => {
   }
   settingsSnapshot = null;
   currentHash = location.hash;
+  window.scrollTo(0, 0);
   route();
 });
 window.addEventListener("beforeunload", (e) => {

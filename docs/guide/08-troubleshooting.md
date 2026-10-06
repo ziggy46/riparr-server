@@ -20,8 +20,9 @@ Riparr is at `http://<server>:9797` — your server's name or IP address, port 9
 
 ## It isn't auto ripping
 
-**Open the web UI and read the checklist under the Auto Rip switch.** It lists every
-prerequisite whether or not it's met, so the row that isn't green is your answer:
+**Open System → Status and read the Health checklist.** (The queue says how many need
+attention under the Auto Rip switch and links there.) It lists every prerequisite
+whether or not it's met, so the row that isn't green is your answer:
 
 | Row | Means |
 |---|---|
@@ -31,7 +32,7 @@ prerequisite whether or not it's met, so the row that isn't green is your answer
 | **Somewhere to put the files** | A library share is configured *and* has been tested |
 | **Room to work** | Amber only if `/srv/staging` is too full to rip safely. Rips go straight to your library when it's mounted, so this normally means rips are being staged |
 
-A red row disables the switch entirely and links to the page that fixes it. An amber row
+A red row disables the switch entirely and has a **Fix** button for the page that fixes it. An amber row
 leaves Auto Rip on but explains why a disc you just put in might not get ripped.
 
 **All green and still nothing?** Check the switch is actually on — the checklist tells you

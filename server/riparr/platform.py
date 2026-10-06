@@ -798,6 +798,13 @@ def makemkv_status():
         if mode == "expiring":
             return {"installed": True, "version": "2.0.0", "eula_accepted": True,
                     "key_type": "beta", "key_expires": "2026-08-23", "days_left": 4}
+        from . import db
+        if not (db.get("makemkv_key") or "").strip():
+            # No key saved means no key, simulated or not -- otherwise the queue said
+            # "No key entered" while Settings and Status showed a countdown.
+            return {"installed": True, "version": "2.0.0", "eula_accepted": True,
+                    "key_type": None, "key_expires": None, "days_left": None,
+                    "key_stale": False}
         return {"installed": True, "version": "2.0.0", "eula_accepted": True,
                 "key_type": "beta", "key_expires": "2026-10-14", "days_left": 56}
     binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"

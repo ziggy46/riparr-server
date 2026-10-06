@@ -72,6 +72,26 @@ until the next disc goes in. A failed rip shows why, with a link to History.
 - The Auto Rip switch, the menus and the queue's controls are named for screen readers.
 - Everything you can reach with the keyboard shows a focus outline.
 
+**A second round from the UI review.**
+- **Phones:** the page no longer scrolls sideways. A header warning ("Newer key
+  published", "No share") pushed the header wider than the screen. The header now shows
+  one warning at most, hidden on phones, where the menu button gets a dot instead. The
+  menu button is bigger, the drive line no longer covers the tray's buttons, and pages
+  open at the top.
+- **One answer to "is something wrong":** the Auto Rip checklist moved to System →
+  Status, where Health lists every check with a **Fix** button. The queue, the System
+  badge and the header warning all count the same list.
+- **Undo:** forgetting a disc or removing a share can be undone for a few seconds.
+- **The queue:** a rip stays on the card while it uploads instead of flicking back to
+  the tray, and clicking quickly between pages no longer leaves the wrong page showing.
+- **Smaller fixes:**
+  - History and Discs show the year.
+  - Search only filters Discs and History; press Enter elsewhere to open Discs.
+  - System → Updates no longer calls an older release "Latest".
+  - Error messages stay clear of the Save bar.
+  - Setup has a Back button and no longer pre-fills "admin".
+  - Setup reports a MakeMKV key it couldn't save.
+
 **Fixed:** a re-rip could lose the film's year and TMDb match, so `Dune (2021)` was saved
 again as `Dune/Dune.mkv`. A disc now remembers both.
 
