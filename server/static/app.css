@@ -2022,3 +2022,13 @@ body.has-savebar .toast-host { bottom: 78px; }
 /* Forget is the destructive one of the pair; it shouldn't look like Re-rip. */
 .btn.quiet { background: none; border-color: transparent; color: var(--fg-muted); }
 .btn.quiet:hover:not(:disabled) { color: var(--bad); background: rgba(240,80,80,.1); }
+
+/* Which build: latest, edge, local or dev. */
+.chan-tag {
+  display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 3px;
+  font-size: 11px; line-height: 1.4; white-space: nowrap; vertical-align: 1px;
+  background: rgba(255,255,255,.08); color: var(--fg);
+}
+.chan-tag.ch-latest { background: rgba(39,194,76,.16); color: var(--ok); }
+.chan-tag.ch-edge   { background: rgba(255,159,26,.16); color: var(--warn); }
+.side-ver .chan-tag { margin-left: 2px; }

@@ -92,6 +92,17 @@ until the next disc goes in. A failed rip shows why, with a link to History.
   - Setup has a Back button and no longer pre-fills "admin".
   - Setup reports a MakeMKV key it couldn't save.
 
+**Which build you're on.** The version in the sidebar, on System → Status and on System
+→ Updates now says **latest** (a release) or **edge** (the newest code on main, with the
+commit it was built from).
+
+**Better TMDb matches from disc labels.**
+- `HEAT` finds *Heat* (1995), not *The Heat*.
+- Edition words are ignored: `ALIEN_DIRECTORS_CUT` finds *Alien*.
+- A year without brackets counts as the year: `DUNE_2021` finds *Dune* (2021).
+- Titles that end in a year, like *Wonder Woman 1984* and *Blade Runner 2049*, still
+  find the right film.
+
 **Fixed:** a re-rip could lose the film's year and TMDb match, so `Dune (2021)` was saved
 again as `Dune/Dune.mkv`. A disc now remembers both.
 

@@ -16,7 +16,7 @@ from typing import Dict, List
 from pydantic import BaseModel
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 
-from . import (__version__, artwork as ART, backup as BK, db, drives as DRV,
+from . import (__version__, build, artwork as ART, backup as BK, db, drives as DRV,
                makemkv as MK,
                naming as NM, notify as NT, tmdb as TM, platform as P, rip as RIP, shares as SH, system as SY,
                tv as TV, updater)
@@ -362,6 +362,7 @@ def status(user=Depends(require_user)):
     # The user should never see a gigabyte: capacity is expressed in discs and mode.
     return {
         "version": __version__,
+        "build": build(),
         "hostname": P.hostname(),
         "system": P.system_status(),
         "storage": dict(storage, **_capacity(storage["free_bytes"])),

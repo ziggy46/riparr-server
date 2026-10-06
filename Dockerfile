@@ -41,5 +41,13 @@ WORKDIR /opt/riparr/server
 HEALTHCHECK --interval=60s --timeout=5s --start-period=15m \
   CMD python3 -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/api/setup/state' % os.environ.get('RIPARR_PORT','9797'), timeout=4)"
 
+# Which build this is, shown next to the version in the interface. Set by the publish
+# workflow: "latest" for a release, "edge" for a build of main. Last, so changing it
+# doesn't invalidate the cached layers above.
+ARG RIPARR_CHANNEL=local
+ARG RIPARR_COMMIT=
+ENV RIPARR_CHANNEL=$RIPARR_CHANNEL \
+    RIPARR_COMMIT=$RIPARR_COMMIT
+
 # tini as PID 1: the drive watcher runs alongside Riparr and someone has to reap.
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/riparr/deploy/entrypoint.sh"]

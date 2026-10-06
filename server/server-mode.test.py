@@ -163,6 +163,17 @@ with mock.patch.object(updater.urllib.request, "urlopen", release_with("Just not
     check("without one, the built-in instruction is used",
           updater.check()["how"], updater.how_to_update())
 
+print("which build this is")
+import riparr  # noqa: E402
+with env(RIPARR_CHANNEL="edge", RIPARR_COMMIT="def75c3a9b1e"):
+    check("an edge image says so, with a short commit", riparr.build(),
+          {"version": riparr.__version__, "channel": "edge", "commit": "def75c3"})
+with env(RIPARR_CHANNEL="latest", RIPARR_COMMIT=""):
+    check("a release image is latest", riparr.build()["channel"], "latest")
+with mock.patch.dict(os.environ, {}, clear=False):
+    os.environ.pop("RIPARR_CHANNEL", None)
+    check("no image at all is a source checkout", riparr.build()["channel"], "dev")
+
 print("the password reset file")
 from riparr import main  # noqa: E402  (imported late: it reads RIPARR_DB at import)
 db.create_user("admin", "a-test-password")

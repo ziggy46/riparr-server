@@ -2873,7 +2873,7 @@ systemPages.status = async () => {
 
     <div class="section"><h2>About</h2>
       <div class="kv">
-        <div class="k">Version</div><div class="v">${esc(st.version)}</div>
+        <div class="k">Version</div><div class="v">${esc(st.version)} ${channelTag(st.build)}</div>
         <div class="k">Model</div><div class="v">${esc(sys.model)}</div>
         <div class="k">Operating system</div><div class="v">${esc(sys.os)}</div>
         <div class="k">Kernel</div><div class="v">${esc(sys.kernel || "—")}</div>
@@ -3073,8 +3073,7 @@ systemPages.updates = async () => {
     <div class="section"><h2>Riparr updates<span class="grow"></span>
       <span class="badge ${kind}">${esc(u.status)}</span></h2>
       <div class="kv">
-        <div class="k">Installed</div><div class="v">${esc(u.current)}
-          <span class="badge ok">Currently Installed</span></div>
+        <div class="k">Installed</div><div class="v">${esc(u.current)} ${channelTag(u.build)}</div>
         <div class="k">Latest release</div><div class="v">${esc(u.latest || "—")}${
           u.latest && newerVersion(u.current, u.latest)
             ? ` <span class="muted">· you're on a newer build than the latest release</span>` : ""}</div>
@@ -3083,6 +3082,12 @@ systemPages.updates = async () => {
       </div>
       <div class="alert ${u.status === "update" ? "warn" : ""}">${esc(u.message || "")}</div>
       ${u.how ? `<p class="muted" style="font-size:13px">To update: <code>${esc(u.how)}</code></p>` : ""}
+      ${u.build && u.build.channel === "edge" ? `<p class="muted" style="font-size:13px">You're on
+        <b>edge</b>, built from the newest code on main${u.build.commit ? ` (commit
+        <a href="https://github.com/${esc(u.repo)}/commit/${esc(u.build.commit)}" target="_blank"
+        rel="noopener">${esc(u.build.commit)}</a>)` : ""}. Releases are checked above; edge
+        builds aren't, so <code>docker compose pull</code> picks up the newest one. To go back
+        to releases, change the image tag to <code>:latest</code>.</p>` : ""}
     </div>
     ${mk && mk.status.installed ? `<div class="section"><h2>MakeMKV<span class="grow"></span>
       <span class="badge ${mk.upgrade ? "warn" : "ok"}">${mk.upgrade ? "update" : "current"}</span></h2>
@@ -3260,6 +3265,23 @@ function problems(st) {
   return checks.concat(healthMessages(st));
 }
 
+/* Which image this is: a release (the :latest tag), an edge build of main, an image
+   built by hand, or a source checkout. Edge says which commit, since two edge builds
+   share a version number. */
+const CHANNEL = {
+  latest: ["latest", "A release build: the :latest image"],
+  edge:   ["edge",   "A build of the newest code on main: the :edge image"],
+  local:  ["local",  "An image built on this machine"],
+  dev:    ["dev",    "Running from a source checkout, not an image"],
+};
+function channelTag(b) {
+  if (!b) return "";
+  const [label, why] = CHANNEL[b.channel] || [b.channel, ""];
+  return `<span class="chan-tag ch-${esc(b.channel)}" title="${esc(why)}${
+    b.commit ? ` (commit ${esc(b.commit)})` : ""}">${esc(label)}${
+    b.channel === "edge" && b.commit ? ` \u00b7 ${esc(b.commit)}` : ""}</span>`;
+}
+
 function navBadges() {
   const n = problems(state.status).length;
   return n ? { system: n } : {};
@@ -3284,7 +3306,7 @@ function renderSidebar(section, sub) {
     <div class="cap">${
       st ? `${capacityPhrase(st.storage)}<br><span class="muted">${esc(st.hostname)}</span>` : ""
     }</div>
-    <div class="side-ver">${st && st.version ? `Riparr ${esc(st.version)}` : ""}</div>
+    <div class="side-ver">${st && st.version ? `Riparr ${esc(st.version)} ${channelTag(st.build)}` : ""}</div>
   </div>`;
 }
 
