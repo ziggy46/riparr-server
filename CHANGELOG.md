@@ -35,8 +35,23 @@ is one click away. It's saved on the server, so it follows you between devices.
   right there.
 - **Settings** keep every control visible and fold the explanations to one line, and the
   Save bar only appears once you've changed something.
-- On phones, the More drawer holds just Settings and System, takes keyboard focus, and
-  closes with Escape.
+- On phones, More opens a sheet from the bottom holding just Settings and System. It
+  takes keyboard focus, keeps it until closed, closes with Escape, and can't be reached
+  with Tab while it's closed.
+- **One progress bar for the whole rip**, from reading the disc to filed, paced by how
+  long each step usually takes on your machine, with ticks where steps change and
+  "step 3 of 5" beside it. It no longer runs to 100% and starts again for the upload.
+- The rip card is laid out like the finished card: a "Ripping" heading, the title with
+  its disc type, and the folder it will go to. The "which film is this?" question and
+  the empty tray use the same card, each with one row of buttons. Eject comes first and
+  Cancel last.
+- Screen readers hear "The Matrix (1999) is in your library" when a rip finishes, the
+  bar is a real progress bar, focus stays put after Dismiss and Discard, and each
+  "More" says what it expands.
+- **History** answers "is it in my library?" first ("In your library · last attempt
+  cancelled"), shows the path once, offers retries only for attempts since the last
+  good rip, and folds long runs of successful rips. Pressing Cancel twice no longer
+  shows an error.
 
 **TMDb for TV.** With a TMDb key, season discs look the show up on TMDb as well as films:
 the episode names, plus the show's TMDb, TVDB and IMDb IDs. Without a key, TVmaze is used

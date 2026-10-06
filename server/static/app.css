@@ -2227,3 +2227,46 @@ body.has-savebar .toast-host { bottom: 78px; }
   .ui-new .tab-dot { pointer-events: none; }
 }
 .np-acts .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; text-decoration: none; }
+
+/* ── new layout: the rip card ── */
+.np-kicker.live { color: var(--accent); }
+.np-bar {
+  position: relative; height: 8px; margin-top: 16px; border-radius: 4px;
+  background: rgba(255,255,255,.08); overflow: hidden;
+}
+.np-bar > i {
+  display: block; height: 100%; border-radius: 4px; background: var(--accent);
+  transition: transform .6s ease; transform-origin: left;
+}
+/* Where one step hands over to the next. */
+.np-tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--panel); }
+.np-bar.working > i {
+  width: 30% !important; animation: np-sweep 1.6s ease-in-out infinite;
+}
+@keyframes np-sweep { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .np-bar.working > i { animation: none; width: 100% !important; opacity: .35; } }
+.np-figs { display: flex; align-items: baseline; margin-top: 8px; }
+.np-pct { font-size: 16px; color: var(--fg-strong); font-variant-numeric: tabular-nums; }
+.np-eta { font-size: 14px; color: var(--fg); }
+.np-step { margin-top: 4px; font-size: 12.5px; color: var(--fg-muted); }
+.np-ask .np-body .job { max-width: none; padding: 0; border: 0; background: none; }
+
+/* ── new layout: History extras ── */
+.hg-path { display: flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 12.5px; color: var(--fg-muted);
+           font-family: ui-monospace, Menlo, monospace; }
+.hg-full { padding: 4px 8px 8px; font-size: 12px; font-family: ui-monospace, Menlo, monospace; overflow-wrap: anywhere; }
+.hg-body .hist-dest, .hg-body .hist-sub { display: none; }
+.hg-more { margin: 8px 8px 4px; }
+
+@media (max-width: 820px) {
+  .ui-new .row-menu > summary { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; }
+  /* The drawer rises from the bottom, next to the More tab that opened it. */
+  .ui-new .sidebar {
+    top: auto; left: 0; right: 0; width: auto; max-height: 70vh;
+    border-right: 0; border-top: 1px solid var(--line-2); border-radius: 14px 14px 0 0;
+    transform: translateY(calc(100% + 80px)); padding: 10px 0 6px;
+  }
+  .ui-new .sidebar.open { transform: none; box-shadow: 0 -12px 40px rgba(0,0,0,.5); }
+  .ui-new .sidebar .side-foot { display: none; }
+}
+.hg-body tr.hg-folded { display: none !important; }

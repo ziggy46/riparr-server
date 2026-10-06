@@ -888,6 +888,7 @@ views.queue = async () => {
   // The rip that just finished stays on the page until the next disc goes in. A
   // different disc in the tray is the next moment, so the tray takes over again.
   const filed = !hero.length && showFiled(q.filed, loaded) ? q.filed : null;
+  announceFiled(q.filed);
   if (filed) setFiledArt(filed);
   if (newLayout()) {
     return nowRipping({ q, ar, drives, loaded, hero, away, busy, filed });
@@ -922,35 +923,34 @@ function nowRipping({ q, ar, drives, loaded, hero, away, busy, filed }) {
   const poster = (img) => `<div class="np-art">${img
     ? `<img src="${esc(img)}" alt="">`
     : `<span class="np-art-none">${icon("compact-disc")}</span>`}</div>`;
-  // The drive's own actions, on every card with a disc in the tray -- right after a rip
-  // is exactly when you want Eject.
-  const discActs = loaded ? `
-      <button class="btn sm" id="t-disc">${icon("compact-disc")} Disc info</button>
-      <button class="btn sm" id="t-eject" ${busy ? "disabled" : ""}>${icon("eject")} Eject</button>` : "";
-  const acts = (extra = "") => (extra || discActs)
-    ? `<div class="np-acts">${extra}${discActs}</div>` : "";
+  // Eject leads: right after a rip it is the next thing anybody does. Disc info next,
+  // then whatever belongs to this card, with the destructive one last.
+  const acts = ({ lead = "", trail = "" } = {}) => {
+    const disc = loaded ? `
+      <button class="btn sm" id="t-eject" ${busy ? "disabled" : ""}>${icon("eject")} Eject</button>
+      <button class="btn sm" id="t-disc">${icon("compact-disc")} Disc info</button>` : "";
+    return lead || disc || trail ? `<div class="np-acts">${lead}${disc}${trail}</div>` : "";
+  };
   const shell = (img, inner, cls = "") =>
     `<div class="np${cls ? " " + cls : ""}">${poster(img)}<div class="np-body">${inner}</div></div>`;
 
   let body, strip = true;
   if (hero.length) {
     body = hero.map(j => j.state === "needs_input"
-      ? `${identifyPrompt(j)}${acts()}`
-      : shell(artState.image, `${jobRow(j)}${acts(
-          `<button class="btn sm" data-cancel="${j.id}">${icon("xmark")} Cancel</button>`)}`, "np-live"))
-      .join("");
+      ? shell(artState.image, npAsk(j, acts), "np-ask")
+      : shell(artState.image, npLive(j, acts), "np-live")).join("");
   } else if (filed) {
     body = shell(filedArt.id === filed.id ? filedArt.image : artState.image, npFiled(filed, acts),
                  filed.state === "done" ? "np-done" : "np-bad");
   } else if (loaded && loaded.known && !loaded.cannot_read) {
     body = shell(artState.image, npKnown(loaded, acts), "np-done");
+  } else if (drives.length && !(loaded && loaded.cannot_read)) {
+    body = shell(loaded ? artState.image : null, npIdle(drives, loaded, busy, acts), "np-idle");
   } else {
-    // No disc, a disc it can't read, or a new disc waiting: the tray says it best, and
-    // it already carries the drive line.
-    body = `${tray(drives, state.status.optical, loaded && !busy)}${loaded ? acts() : ""}`;
+    // No drive at all, or a disc this drive can't read: the tray explains it best.
+    body = tray(drives, state.status.optical, loaded && !busy);
     strip = false;
   }
-  // "Last filed" only while the card is busy with a rip; otherwise it would repeat it.
   const last = hero.length && q.filed && q.filed.state === "done"
     ? `<a class="np-last" href="#/history">${icon("circle-check")}
          <span>Last filed <b>${esc(filedName(q.filed))}</b> · ${esc(ago(q.filed.finished_at))}</span></a>`
@@ -962,6 +962,105 @@ function nowRipping({ q, ar, drives, loaded, hero, away, busy, filed }) {
     ${last}
     <div class="np-foot">${autoRipPanel(ar)}</div>
   </div>`;
+}
+
+/* ── one bar for the whole job ──
+   Each stage counts for what it usually costs on this machine, so the bar moves at the
+   pace the rip actually goes and never runs to 100% and starts again for the upload.
+   Ticks mark where one step hands over to the next. */
+const STAGE_GUESS = { identify: 300, decrypt: 300, save: 1500, upload: 600, verify: 60 };
+function jobProgress(j) {
+  const med = state.typicalStages || {};
+  const order = (state.stageOrder && state.stageOrder.length ? state.stageOrder
+                 : ["identify", "decrypt", "save", "upload", "verify"])
+    .filter(k => !(k === "verify" && (state.settings || {}).verify_mode === "off"));
+  // Steps with no history yet are guessed, scaled to the steps that do have one -- a
+  // five-minute guess beside medians of seconds would make one step the whole bar.
+  const known = order.filter(k => med[k] && med[k].seconds);
+  const scale = known.length
+    ? known.reduce((a, k) => a + med[k].seconds, 0) / known.reduce((a, k) => a + (STAGE_GUESS[k] || 300), 0)
+    : 1;
+  const w = order.map(k => (med[k] && med[k].seconds) || (STAGE_GUESS[k] || 300) * scale);
+  const total = w.reduce((a, b) => a + b, 0) || 1;
+  const byState = { queued: "identify", identifying: "identify", ripping: "save",
+                    transferring: "upload", verifying: "verify" };
+  let at = order.indexOf(j.stage_name || byState[j.state]);
+  if (at < 0) at = 0;
+  // How far through the current stage: its own report where there is one, bytes where not.
+  const bytes = j.state === "ripping" ? pct(j.bytes_ripped, j.bytes_total)
+              : j.state === "transferring" ? pct(j.bytes_sent, j.bytes_total)
+              : j.state === "verifying" ? pct(j.bytes_verified, j.bytes_total) : 0;
+  const frac = Math.max(0, Math.min(1, typeof j.stage_pct === "number" ? j.stage_pct
+                                         : Number(bytes) / 100));
+  const done = w.slice(0, at).reduce((a, b) => a + b, 0) + w[at] * frac;
+  let edge = 0;
+  const ticks = w.slice(0, -1).map(x => (edge += x) / total * 100);
+  return { pct: Math.min(100, (done / total) * 100), step: at + 1, steps: order.length,
+           name: stageLabel(j, order[at]), ticks };
+}
+
+function npLive(j, acts) {
+  const p = jobProgress(j);
+  const shown = Math.round(p.pct);
+  const working = shown <= 0;
+  const eta = overallEta(j);
+  const t = stageTiming(j);
+  const verb = { queued: "Waiting", identifying: "Reading the disc", ripping: "Ripping",
+                 transferring: "Sending to your library", verifying: "Checking" }[j.state] || "Ripping";
+  const planned = j.planned && j.planned.path
+    ? (j.planned.kind === "tv"
+        ? `<div class="np-facts">${j.planned.count} episode${j.planned.count === 1 ? "" : "s"}</div>`
+        : `<details class="np-path"><summary>${icon("folder-open")}<span>${
+            esc(shortPath(j.planned.path))}</span></summary><code>${esc(j.planned.path)}</code></details>`)
+    : "";
+  return `
+    <div class="np-kicker live">${icon("compact-disc")} ${esc(verb)}
+      <span class="muted">· step ${p.step} of ${p.steps}</span></div>
+    <h2 class="np-title" tabindex="-1">${esc((j.title || j.disc_label || "Unknown disc")
+      + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : ""))}${seasonTag(j)} ${familyTag(j.disc_family)}</h2>
+    <div class="np-sub">${esc(j.phase || p.name)}</div>
+    ${j.warning ? `<div class="job-warn">${icon("triangle-exclamation")}<span>${esc(j.warning)}</span></div>` : ""}
+    <div class="np-bar${working ? " working" : ""}" role="progressbar" aria-label="Progress of the whole rip"
+         aria-valuemin="0" aria-valuemax="100" aria-valuenow="${shown}"
+         aria-valuetext="${shown}%, step ${p.step} of ${p.steps}${eta ? ", " + esc(eta) : ""}">
+      <i style="width:${p.pct.toFixed(1)}%"></i>${p.ticks.map(x =>
+        `<b class="np-tick" style="left:${x.toFixed(1)}%"></b>`).join("")}</div>
+    <div class="np-figs"><span class="np-pct">${shown}%</span><span class="grow"></span>
+      <span class="np-eta">${esc(eta)}</span></div>
+    <div class="np-step">${esc(p.name)}${t && t.mine
+      ? ` · ${esc(duration(t.elapsed))} of a usual ${esc(duration(t.mine))}` : ""}</div>
+    ${planned}
+    ${acts({ trail: `<button class="btn sm" data-cancel="${j.id}">${icon("xmark")} Cancel</button>` })}`;
+}
+
+/* The one moment Riparr needs a person, in the same card as everything else: the
+   question, the poster for context, and one row of buttons. */
+function npAsk(j, acts) {
+  const html = identifyPrompt(j);
+  // The prompt's own Rip it / Skip row takes the drive buttons too, so there's one row.
+  const at = html.lastIndexOf(`<div class="btn-row">`);
+  if (at < 0) return `${html}${acts()}`;
+  const end = html.indexOf("</div>", at);
+  const disc = acts().replace(/^<div class="np-acts">|<\/div>$/g, "");
+  return html.slice(0, end) + disc + html.slice(end);
+}
+
+function npIdle(drives, loaded, busy, acts) {
+  const d = loaded || drives[0];
+  if (!loaded) {
+    return `
+      <div class="np-kicker">${icon("compact-disc")} Ready</div>
+      <h2 class="np-title" tabindex="-1">Nothing in the tray</h2>
+      <div class="np-sub">${state.autoripOn
+        ? "Insert a disc and close the tray. Riparr takes it from there."
+        : "Insert a disc and close the tray, then press Rip."}</div>`;
+  }
+  return `
+    <div class="np-kicker">${icon("compact-disc")} Disc loaded</div>
+    <h2 class="np-title" tabindex="-1">${esc(pretty(d.label) || d.label || "A disc")} ${familyTag(d.disc_family)}</h2>
+    ${d.label ? `<div class="np-sub">${esc(d.label)}${d.disc_word ? ` · ${esc(d.disc_word)}` : ""}</div>` : ""}
+    ${d.space_warning ? `<p class="np-err">${esc(d.space_warning)}</p>` : ""}
+    ${acts({ lead: busy ? "" : `<button class="btn sm primary" id="rip-now">${icon("play")} Rip this disc</button>` })}`;
 }
 
 /* The end of a path, which is the part that says where it went; the whole of it is one
@@ -986,16 +1085,16 @@ function npFiled(j, acts) {
   return `
     <div class="np-kicker ${ok ? "ok" : "bad"}">${icon(ok ? "circle-check" : "triangle-exclamation")}
       ${ok ? "In your library" : "Didn't finish"} <span class="muted">· ${esc(ago(j.finished_at))}</span></div>
-    <h2 class="np-title">${esc(filedName(j))} ${familyTag(j.disc_family)}</h2>
+    <h2 class="np-title" tabindex="-1">${esc(filedName(j))} ${familyTag(j.disc_family)}</h2>
     ${j.disc_label && j.title ? `<div class="np-sub">${esc(j.disc_label)}</div>` : ""}
     ${ok && j.dest_path ? `<details class="np-path"><summary>${icon("hard-drive")}<span>${
         esc(shortPath(j.dest_path))}</span></summary><code>${esc(j.dest_path)}</code></details>` : ""}
     ${!ok && j.error ? `<p class="np-err">${esc(j.error)}</p>` : ""}
     ${ok && facts.length ? `<div class="np-facts">${facts.map(esc).join(" · ")}</div>` : ""}
-    ${acts(`${retry ? `<button class="btn sm primary" data-hretry="${j.id}" data-haction="${esc(retry.action)}"
-                title="${esc(retry.why)}">${icon(RETRY_ICON[retry.action] || "arrows-rotate")} ${esc(retry.label)}</button>` : ""}
-      <a class="btn sm" href="#/history">History</a>
-      <button class="btn sm" id="filed-dismiss" data-job="${j.id}">Dismiss</button>`)}`;
+    ${acts({ lead: retry ? `<button class="btn sm primary" data-hretry="${j.id}" data-haction="${esc(retry.action)}"
+                title="${esc(retry.why)}">${icon(RETRY_ICON[retry.action] || "arrows-rotate")} ${esc(retry.label)}</button>` : "",
+              trail: `<a class="btn sm" href="#/history">History</a>
+      <button class="btn sm" id="filed-dismiss" data-job="${j.id}">Dismiss</button>` })}`;
 }
 
 function npKnown(d, acts) {
@@ -1004,10 +1103,31 @@ function npKnown(d, acts) {
   return `
     <div class="np-kicker ok">${icon("circle-check")} Already in your library
       <span class="muted">· ripped ${esc(ago(k.ripped_at))}</span></div>
-    <h2 class="np-title">${esc(name)} ${familyTag(d.disc_family)}</h2>
+    <h2 class="np-title" tabindex="-1">${esc(name)} ${familyTag(d.disc_family)}</h2>
     ${d.label ? `<div class="np-sub">${esc(d.label)}</div>` : ""}
-    ${acts(`<button class="btn sm" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip it again</button>
-      <a class="btn sm" href="#/discs">See it in Discs</a>`)}`;
+    ${acts({ trail: `<button class="btn sm" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip it again</button>
+      <a class="btn sm" href="#/discs">See it in Discs</a>` })}`;
+}
+
+/* A rip finishing is said out loud to screen readers -- once, when it happens, not
+   every time the page is opened afterwards. */
+let lastFiledSeen;
+function announceFiled(j) {
+  const id = j ? j.id : null;
+  if (lastFiledSeen !== undefined && id && id !== lastFiledSeen) {
+    const el = $("#announce");
+    if (el) el.textContent = j.state === "done"
+      ? `${filedName(j)} is in your library.`
+      : `${filedName(j)} didn't finish. ${j.error || ""}`;
+  }
+  lastFiledSeen = id;
+}
+
+function focusHeading() {
+  const h = $("#content .np-title") || $("#content .page-head h1");
+  if (!h) return;
+  if (!h.hasAttribute("tabindex")) h.setAttribute("tabindex", "-1");
+  h.focus({ preventScroll: false });
 }
 
 /* ── the rip that just finished ──
@@ -2038,33 +2158,64 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
     if (!groups.has(key(j))) groups.set(key(j), []);
     groups.get(key(j)).push(j);          // newest first, as the jobs come
   }
-  const head_ = head("History", "Every disc, how its latest rip went, and every attempt underneath.",
+  const head_ = head("History", "Every disc, whether it's in your library, and every attempt underneath.",
                      stageLegend(typical, h.stage_order, h.stage_labels));
   const items = [...groups.entries()].map(([k, list]) => {
-    const j = list[0];
-    const ok = j.state === "done";
+    const latest = list[0];
+    const good = list.find(x => x.state === "done");     // the newest success, if any
+    const j = good || latest;
+    // The question this line answers is "is it in my library?" -- how the last attempt
+    // went comes second.
+    const inLib = !!good;
+    const checked = good && ({ deep: "full check passed", quick: "size check passed" })[good.verified_mode];
+    const result = inLib
+      ? ["In your library", latest.state !== "done"
+          ? `last attempt ${latest.state === "cancelled" ? "cancelled" : "failed"}` : checked]
+          .filter(Boolean).join(" · ")
+      : latest.state === "cancelled" ? "Cancelled" : (latest.error || "Didn't finish");
+    const state = inLib ? "done" : latest.state;
     const name = (j.title || pretty(j.disc_label) || "Unknown disc")
       + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : "");
-    const result = ok ? (j.verified_mode === "deep" ? "In your library \u00b7 full check passed"
-                         : j.verified_mode === "quick" ? "In your library \u00b7 size check passed"
-                         : "In your library")
-      : j.state === "cancelled" ? "Cancelled" : (j.error || "Didn't finish");
     const open = histOpen.has(k);
     const find = esc([j.title, j.disc_label, j.year].filter(Boolean).join(" "));
-    return `<div class="hg ${esc(j.state)}" data-find="${find}">
-      <button class="hg-head" type="button" data-hg="${esc(k)}" aria-expanded="${open}">
-        <span class="hg-stat">${icon(ok ? "circle-check" : j.state === "cancelled" ? "ban"
+    // Retries only for attempts newer than the last success: anything older has been
+    // superseded by a rip that worked.
+    const lastGood = good ? list.indexOf(good) : list.length;
+    // The first few attempts, every failure, and the rest of the successes folded.
+    let shownDone = 0;
+    const rows = list.map((x, i) => {
+      const r = i > lastGood ? Object.assign({}, x, { retries: [] }) : x;
+      const fold = x.state === "done" && ++shownDone > 3;
+      return { html: row(r), fold };
+    });
+    const folded = rows.filter(r => r.fold).length;
+    const body = rows.map(r => r.fold
+      // A class, not the hidden attribute: search shows and hides rows by that.
+      ? r.html.replace(/<tr class="hist /g, `<tr data-hgfold="${esc(k)}" class="hg-folded hist `)
+      : r.html).join("");
+    return `<div class="hg ${esc(state)}" data-find="${find}">
+      <button class="hg-head" type="button" data-hg="${esc(k)}" aria-expanded="${open}"
+              aria-controls="hg-${esc(k).replace(/[^a-z0-9]/gi, "-")}">
+        <span class="hg-stat">${icon(state === "done" ? "circle-check" : state === "cancelled" ? "ban"
                                      : "triangle-exclamation")}</span>
         <span class="hg-name"><b>${esc(name)}</b> ${familyTag(j.disc_family)}
-          <span class="hg-result">${esc(result)}</span></span>
-        <span class="hg-meta">${list.length > 1 ? `${list.length} attempts \u00b7 ` : ""}${
-          esc(ago(j.finished_at))}</span>
+          <span class="hg-result">${esc(result)}</span>
+          ${good && good.dest_path ? `<span class="hg-path">${icon("hard-drive")} ${esc(shortPath(good.dest_path))}</span>` : ""}</span>
+        <span class="hg-meta">${(() => {
+          // Successes and the rest counted apart: twelve good rips aren't twelve attempts.
+          const ok = list.filter(x => x.state === "done").length, other = list.length - ok;
+          const parts = [];
+          if (ok > 1) parts.push(`${ok} rips`);
+          if (other) parts.push(`${other} didn't finish`);
+          return parts.length ? `${parts.join(", ")} \u00b7 ` : "";
+        })()}${esc(ago(latest.finished_at))}</span>
         <span class="hg-chev">${icon("chevron-down")}</span>
       </button>
-      <div class="hg-body"${open ? "" : " hidden"}><table class="hist-table">
-        <tbody>${list.map((x, i) => row(
-          // An old failure of a disc that has since ripped fine needs no retry button.
-          i > 0 && ok ? Object.assign({}, x, { retries: [] }) : x)).join("")}</tbody></table></div>
+      <div class="hg-body" id="hg-${esc(k).replace(/[^a-z0-9]/gi, "-")}"${open ? "" : " hidden"}>
+        ${good && good.dest_path ? `<div class="hg-full muted">${esc(good.dest_path)}</div>` : ""}
+        <table class="hist-table"><tbody>${body}</tbody></table>
+        ${folded ? `<button class="btn sm hg-more" type="button" data-hgshow="${esc(k)}">Show ${folded} more successful rip${folded === 1 ? "" : "s"}</button>` : ""}
+      </div>
     </div>`;
   }).join("");
   return `${head_}<div class="card hg-list">${items}</div>${stageNote(byKind)}`;
@@ -2161,7 +2312,7 @@ views.discs = async (highlight) => {
   const { discs } = await api.get("/api/discs");
   const hit = highlight ? discs.find(d => d.fingerprint === highlight) : null;
   if (!discs.length) {
-    return `${head("Discs", "Every disc Riparr has seen. Reinsert one and it is refused rather than re-ripped.")}
+    return `${head("Discs", "Every disc Riparr has seen. Put one back in and Riparr tells you it's already in your library, with Rip it again for when you mean it.")}
       <div class="card"><div class="empty-state"><div class="big">${icon("compact-disc")}</div>
         <h2>No discs recorded</h2>
         <p>Once Riparr rips a disc it remembers it, so reinserting it is refused
@@ -2213,7 +2364,7 @@ views.discs = async (highlight) => {
       </div>
       <button class="icon-btn" id="dupe-dismiss" title="Dismiss">${icon("xmark")}</button>
     </div>` : "";
-  return `${head("Discs", "Every disc Riparr has seen. Reinsert one and it is refused rather than re-ripped.")}
+  return `${head("Discs", "Every disc Riparr has seen. Put one back in and Riparr tells you it's already in your library, with Rip it again for when you mean it.")}
     ${banner}
     <div class="rips">${discs.map(card).join("")}</div>`;
 };
@@ -2339,7 +2490,7 @@ settingsPages.library = async (s) => {
           : lib.mounted
             ? `${icon("circle-check", "ok")} Mounted at <code>${esc(lib.mount)}</code>,
                so <b>Straight to your library</b> works for this one.`
-            : `${icon("circle-info")} Not mounted, so rips are staged and then copied over SMB.`}
+            : `${icon("circle-info")} Not mounted`}
         </div>
       </div>`;
   };
@@ -4042,6 +4193,10 @@ function wireContent(section, sub) {
   };
 
 
+  $$("[data-hgshow]").forEach(b => b.onclick = () => {
+    $$(`[data-hgfold="${CSS.escape(b.dataset.hgshow)}"]`).forEach(r => r.classList.remove("hg-folded"));
+    b.remove();
+  });
   $$("[data-hg]").forEach(b => b.onclick = () => {
     const k = b.dataset.hg, body = b.nextElementSibling;
     const open = body.hidden;
@@ -4053,7 +4208,8 @@ function wireContent(section, sub) {
   const filedX = $("#filed-dismiss");
   if (filedX) filedX.onclick = () => {
     try { localStorage.setItem(FILED_KEY, filedX.dataset.job); } catch (e) { /* fine */ }
-    route();
+    // Focus goes to what replaced the card, not to the top of the page.
+    route().then(() => focusHeading());
   };
 
   const ripOpts = $("#rip-opts");
@@ -4086,7 +4242,10 @@ function wireContent(section, sub) {
   $$("[data-cancel]").forEach(b => b.onclick = async () => {
     if (!confirm("Cancel this rip?\n\nAnything done so far is discarded.")) return;
     try { await api.post(`/api/queue/${b.dataset.cancel}/cancel`, {}); }
-    catch (e) { toast(e.message, "bad"); }
+    catch (e) {
+      // Pressed after it had already stopped: the outcome is the one asked for.
+      if (!/already (finished|stopped|cancelled)/i.test(e.message)) toast(e.message, "bad");
+    }
     route();
   });
 
@@ -4266,9 +4425,14 @@ function wireContent(section, sub) {
   });
 
   $$("[data-rerip]").forEach(b => b.onclick = async () => {
-    if (!confirm("Re-rip this disc?\n\nLeave it on the tray — Riparr will pull the "
-                 + "tray in. This reads the whole disc again and overwrites what's "
-                 + "in your library.")) return;
+    // Say the right thing about the tray: the disc is either in the drive already, or
+    // out on the tray waiting to be pulled back in.
+    const inDrive = ((state.status || {}).drives || []).some(d =>
+      d.present && d.known && d.known.fingerprint === b.dataset.rerip);
+    if (!confirm(inDrive
+        ? "Rip it again?\n\nThis reads the whole disc again and replaces what's in your library."
+        : "Rip it again?\n\nLeave the disc on the tray — Riparr will pull the tray in. This "
+          + "reads the whole disc again and replaces what's in your library.")) return;
     // Closing the tray and waiting for the drive to find the disc takes up to half a
     // minute, and a button that sits there looking clickable for half a minute is a
     // button somebody clicks twice.
@@ -4334,7 +4498,10 @@ function wireContent(section, sub) {
     } catch (e) { toast(e.message, "bad"); }
   };
   settingsSnapshot = save ? JSON.stringify(collectSettings()) : null;
-  if (save) $("#discard-settings").onclick = () => { settingsSnapshot = null; route(); };
+  if (save) $("#discard-settings").onclick = () => {
+    settingsSnapshot = null;
+    route().then(() => focusHeading());
+  };
 
   // Long help folds to one line with a "More" link. Read once, it is in the way on
   // every later visit -- and on the Ripping page it was most of the page.
@@ -4345,6 +4512,10 @@ function wireContent(section, sub) {
     more.type = "button";
     more.className = "help-more";
     more.textContent = "More";
+    const about = (h.closest(".f")?.querySelector(":scope > span:first-child")
+                   || h.closest(".switch")?.querySelector(".lbl")
+                   || h.closest(".section")?.querySelector("h2"))?.firstChild?.textContent?.trim();
+    if (about) more.setAttribute("aria-label", `More about ${about}`);
     more.setAttribute("aria-expanded", "false");
     more.onclick = (e) => {
       e.preventDefault();
@@ -4513,6 +4684,39 @@ function renderChrome() {
   $("#hamburger").classList.toggle("has-issues", !!list.length);
   $("#hamburger").classList.toggle("bad", list.some(p => p.level === "bad"));
 }
+
+/* On a phone the sidebar is a drawer: closed, it is off screen and must not be in the
+   tab order; open, it is a dialog that keeps focus until it's closed. On a desktop it is
+   simply the sidebar. */
+const drawerMode = () => matchMedia("(max-width: 820px)").matches;
+function syncDrawer() {
+  const sb = $("#sidebar");
+  if (!sb) return;
+  const open = sb.classList.contains("open");
+  const drawer = drawerMode();
+  sb.inert = drawer && !open;
+  if (drawer && open) {
+    sb.setAttribute("role", "dialog");
+    sb.setAttribute("aria-modal", "true");
+    sb.setAttribute("aria-label", "Menu");
+  } else {
+    sb.removeAttribute("role");
+    sb.removeAttribute("aria-modal");
+  }
+}
+new MutationObserver(syncDrawer).observe($("#sidebar"), { attributes: true, attributeFilter: ["class"] });
+window.addEventListener("resize", syncDrawer);
+syncDrawer();
+document.addEventListener("keydown", (e) => {
+  const sb = $("#sidebar");
+  if (e.key !== "Tab" || !drawerMode() || !sb.classList.contains("open")) return;
+  const items = $$("a, button", sb).filter(x => x.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0], last = items[items.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  else if (!sb.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+});
 
 $("#hamburger").onclick = (e) => {
   e.stopPropagation();
@@ -4709,6 +4913,7 @@ function renderTabs(section) {
     const open = $("#sidebar").classList.toggle("open");
     document.body.classList.toggle("nav-open", open);
     $("#tab-more").setAttribute("aria-expanded", String(open));
+    syncDrawer();          // not inert any more, before focus goes in
     // Into the drawer, at its first item that isn't already a tab.
     if (open) {
       const first = $$("#sidebar a").find(a => a.offsetParent !== null);
