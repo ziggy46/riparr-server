@@ -187,6 +187,69 @@ check("and {ImdbId} the IMDb one",
       R._render_template("{Title} [imdbid-{ImdbId}].mkv", "Blade Runner", media=media),
       "Blade Runner [imdbid-tt0083658].mkv")
 
+print("television")
+from riparr import tv as TV  # noqa: E402
+T._cache.clear()
+
+
+def tmdb_tv(req, timeout=None):
+    url = req.full_url
+    if "/search/tv" in url:
+        return _Resp(json.dumps({"results": [
+            {"id": 1437, "name": "Firefly", "first_air_date": "2002-09-20",
+             "vote_count": 3000}]}).encode())
+    if "/tv/1437" in url and "season%2F" in url:
+        return _Resp(json.dumps({
+            "season/0": {"episodes": [{"episode_number": 1, "name": "Here's How It Was"}]},
+            "season/1": {"episodes": [{"episode_number": n, "name": "Ep %d" % n}
+                                      for n in range(1, 12)]}}).encode())
+    if "/tv/1437" in url:
+        return _Resp(json.dumps({
+            "id": 1437, "name": "Firefly", "first_air_date": "2002-09-20",
+            "networks": [{"name": "FOX"}],
+            "seasons": [{"season_number": 0}, {"season_number": 1}],
+            "external_ids": {"tvdb_id": 78874, "imdb_id": "tt0303461"}}).encode())
+    raise AssertionError("unexpected TMDb call: %s" % url)
+
+
+db.set("tv_source", "auto")
+check("with a TMDb key, auto means TMDb", TV.source(), "tmdb")
+db.set("tv_source", "tvmaze")
+check("unless TVmaze is chosen", TV.source(), "tvmaze")
+db.set("tv_source", "auto")
+with mock.patch.object(T.urllib.request, "urlopen", tmdb_tv):
+    found = TV.search_series("Firefly")
+    check("a TMDb show is stored as its negated id", (found[0]["id"], found[0]["name"]),
+          (-1437, "Firefly"))
+    eps = TV.episodes(-1437)
+    check("its episodes come from TMDb, every season in one request",
+          (len(eps), eps[1]["season"], eps[1]["number"], eps[1]["name"]),
+          (12, 1, 1, "Ep 1"))
+    check("season 0 is specials", [e["special"] for e in eps if e["season"] == 0], [True])
+    check("and the show's IDs are there for naming", TV.ids(-1437),
+          {"tmdb_id": 1437, "tvdb_id": 78874, "imdb_id": "tt0303461"})
+check("a positive id is still TVmaze's", (TV.is_tmdb(180), TV.is_tmdb(-1437)), (False, True))
+
+plex_tv = [p["template"] for p in N.TV_PRESETS if p["id"] == "trash-plex"][0]
+check("the TRaSH Plex TV preset puts the TVDB id on the series folder",
+      R._render_template(plex_tv, "Firefly", 2002, source="dvd", season=1, episode=2,
+                         episode_title="The Train Job",
+                         media={"tvdb_id": "78874", "quality": "DVD"}),
+      "Firefly (2002) {tvdb-78874}/Season 01/Firefly (2002) - S01E02 - The Train Job "
+      "[DVD].mkv")
+check("and without one, the braces go",
+      R._render_template(plex_tv, "Firefly", 2002, season=1, episode=2,
+                         episode_title="The Train Job"),
+      "Firefly (2002)/Season 01/Firefly (2002) - S01E02 - The Train Job.mkv")
+
+# Disc 1 ripped with TVmaze's id; disc 2 found the show on TMDb. Numbering continues.
+jid = db.create_job(title="Firefly", disc_label="FIREFLY_D1", kind="tv", fingerprint="",
+                    state="done", phase=None, mode=None, bytes_total=1)
+db.update_job(jid, season=1, series_id=180, episode_plan=json.dumps(
+    {"episodes": [{"episode": n, "episode_last": n} for n in range(1, 5)]}))
+check("a box set keeps counting when the episode source changes",
+      db.next_episode(-1437, 1, series_name="Firefly"), 5)
+
 print()
 if failures:
     print("%d check(s) failed: %s" % (len(failures), ", ".join(failures)))

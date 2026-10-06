@@ -411,7 +411,8 @@ def looks_like_blob(titles, min_seconds=120):
 
 # ── what the disc calls itself ───────────────────────────────────────────────
 
-_SEASON_RE = re.compile(r"(?:^|[\s_\-])s(?:eason)?[\s_\-]*(\d{1,2})(?=$|[\s_\-]|d\d)", re.I)
+# "Series 1" is how British box sets say "Season 1".
+_SEASON_RE = re.compile(r"(?:^|[\s_\-])s(?:eason|eries)?[\s_\-]*(\d{1,2})(?=$|[\s_\-]|d\d)", re.I)
 _DISC_RE = re.compile(r"(?:^|[\s_\-])d(?:isc|isk)?[\s_\-]*(\d{1,2})(?=$|[\s_\-])", re.I)
 
 
@@ -446,6 +447,56 @@ def series_name_from_label(label):
                s, flags=re.I)
     s = re.sub(r"\s+", " ", s).strip(" -")
     return s.title() if (s.isupper() or s.islower()) else s
+
+
+# ── where episode names come from ────────────────────────────────────────────
+#
+# TVmaze needs no account; TMDb needs the key Riparr already uses for films, and gives
+# the same IDs films get plus the TVDB ID that TV naming schemes use. `tv_source` picks:
+# "auto" (TMDb when there's a key, otherwise TVmaze), "tmdb" or "tvmaze".
+#
+# A show's id is stored in the same integer column whichever service it came from, so
+# a TMDb show is stored as its id *negated*. TVmaze ids are positive, so the sign says
+# which service to ask, the two can never collide, and a box set started on TVmaze
+# keeps working after the setting changes.
+
+def source():
+    from . import db, tmdb as TM
+    want = (db.get("tv_source") or "auto").strip().lower()
+    if want == "tvmaze":
+        return "tvmaze"
+    return "tmdb" if TM.configured() else "tvmaze"
+
+
+def is_tmdb(series_id):
+    return series_id is not None and int(series_id) < 0
+
+
+def _from_tmdb(results):
+    return [{"id": -int(r["id"]), "name": r["name"],
+             "year": str(r["year"]) if r.get("year") else None,
+             "network": "", "score": r.get("votes") or 0, "source": "tmdb"}
+            for r in results]
+
+
+def ids(series_id):
+    """{"tmdb_id", "tvdb_id", "imdb_id"} for a show, for file names. Empty on failure."""
+    if not series_id:
+        return {}
+    if is_tmdb(series_id):
+        from . import tmdb as TM
+        show = TM.tv_show(-int(series_id)) or {}
+        return {k: v for k, v in (("tmdb_id", -int(series_id)),
+                                  ("tvdb_id", show.get("tvdb_id")),
+                                  ("imdb_id", show.get("imdb_id"))) if v}
+    try:
+        show = _get("%s/shows/%d" % (API, int(series_id)))
+    except Exception as e:
+        log.info("TVmaze show %s failed: %s", series_id, e)
+        return {}
+    ext = (show or {}).get("externals") or {}
+    return {k: v for k, v in (("tvdb_id", ext.get("thetvdb")),
+                              ("imdb_id", ext.get("imdb"))) if v}
 
 
 # ── TVmaze ───────────────────────────────────────────────────────────────────
@@ -484,6 +535,12 @@ def search_series(name, limit=6):
     q = (name or "").strip()
     if not q:
         return []
+    if source() == "tmdb":
+        from . import tmdb as TM
+        found = _from_tmdb(TM.search_tv(q))[:limit]
+        if found:
+            return found
+        # TMDb unreachable or nothing by that name: TVmaze is still worth asking.
     key = q.lower()
     with _cache_lock:
         hit = _show_cache.get(key)
@@ -506,6 +563,7 @@ def search_series(name, limit=6):
             "network": ((show.get("network") or show.get("webChannel") or {})
                         or {}).get("name") or "",
             "score": row.get("score") or 0,
+            "source": "tvmaze",
         })
     with _cache_lock:
         _show_cache[key] = (time.time(), out)
@@ -522,6 +580,10 @@ def episodes(series_id, include_specials=True):
     """
     if not series_id:
         return []
+    if is_tmdb(series_id):
+        from . import tmdb as TM
+        eps = TM.tv_episodes(-int(series_id))
+        return eps if include_specials else [e for e in eps if not e["special"]]
     key = (int(series_id), bool(include_specials))
     with _cache_lock:
         hit = _episode_cache.get(key)

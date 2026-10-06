@@ -290,3 +290,81 @@ def display_name(film):
     if not film:
         return ""
     return "%s (%s)" % (film["title"], film["year"]) if film.get("year") else film["title"]
+
+
+# ── television ───────────────────────────────────────────────────────────────
+#
+# For season discs, when TMDb is the episode source (tv.source()). TMDb numbers seasons
+# the way Plex and Jellyfin do -- specials are season 0 -- and gives the TVDB and IMDb
+# IDs that TV naming schemes put in folder names.
+
+def search_tv(name):
+    """Shows matching a name, best first: [{"id", "name", "year", "votes"}]. [] on failure."""
+    name = (name or "").strip()
+    if not name or not configured():
+        return []
+
+    def go():
+        data = _request("/search/tv", {"query": name, "include_adult": "false"})
+        return [{"id": r.get("id"), "name": r.get("name") or r.get("original_name") or "",
+                 "year": _year(r.get("first_air_date")),
+                 "votes": int(r.get("vote_count") or 0)}
+                for r in (data.get("results") or [])[:10] if r.get("id")]
+    try:
+        return _cached(("search-tv", name.lower()), go)
+    except TmdbError:
+        return []
+
+
+def tv_show(tmdb_id):
+    """{"id", "name", "year", "network", "seasons": [n...], "tvdb_id", "imdb_id"} or None."""
+    if not tmdb_id or not configured():
+        return None
+
+    def go():
+        r = _request("/tv/%d" % int(tmdb_id), {"append_to_response": "external_ids"})
+        ext = r.get("external_ids") or {}
+        nets = r.get("networks") or []
+        return {"id": r.get("id"), "name": r.get("name") or "",
+                "year": _year(r.get("first_air_date")),
+                "network": (nets[0] or {}).get("name", "") if nets else "",
+                "seasons": sorted(int(s["season_number"]) for s in r.get("seasons") or []
+                                  if s.get("season_number") is not None),
+                "tvdb_id": ext.get("tvdb_id") or None,
+                "imdb_id": ext.get("imdb_id") or ""}
+    try:
+        return _cached(("tv", int(tmdb_id)), go)
+    except (TmdbError, ValueError):
+        return None
+
+
+def tv_episodes(tmdb_id):
+    """Every episode of a show: [{"season", "number", "name", "runtime", "special"}].
+
+    TMDb serves episodes a season at a time, but appends up to twenty seasons to one
+    request, so even a long-running show is one or two calls. [] on failure.
+    """
+    show = tv_show(tmdb_id)
+    if not show:
+        return []
+
+    def go():
+        out = []
+        seasons = show["seasons"]
+        for i in range(0, len(seasons), 20):
+            chunk = seasons[i:i + 20]
+            r = _request("/tv/%d" % int(tmdb_id), {
+                "append_to_response": ",".join("season/%d" % n for n in chunk)})
+            for n in chunk:
+                for e in (r.get("season/%d" % n) or {}).get("episodes") or []:
+                    if e.get("episode_number") is None:
+                        continue
+                    out.append({"season": n, "number": int(e["episode_number"]),
+                                "name": e.get("name") or "",
+                                "runtime": e.get("runtime") or 0,
+                                "special": n == 0})
+        return out
+    try:
+        return _cached(("tv-episodes", int(tmdb_id)), go)
+    except (TmdbError, ValueError):
+        return []

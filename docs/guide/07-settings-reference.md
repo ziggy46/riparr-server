@@ -147,7 +147,8 @@ Bigger effect on file size than anything else here.
 |---|---|
 | **Look for season discs** | On. A disc with several titles of the same length is read as a season rather than a film with decoys. Turn it off if you only own films. |
 | **Before ripping a season** | **Show me the plan when Riparr isn't sure** *(default)* / Always show me / Never. The default stops **once per season** — on the first disc, where one correction fixes every disc after it — and on any later disc whose order Riparr couldn't read off the disc. Reading the order off the disc is reliable; what it can't settle is whether the numbering matches your episode guide, since a few shows were released on disc in production order. **A disc with no season number always asks**, whatever this is set to, because there is no answer to get on with. |
-| **Look up episode names** | On. From [TVmaze](https://www.tvmaze.com), no account needed. Off gives correctly numbered files with no names — Plex and Jellyfin match on the numbers, so they still land correctly. |
+| **Look up episode names** | On. Off gives correctly numbered files with no names — Plex and Jellyfin match on the numbers, so they still land correctly. |
+| **Episode names from** | `TMDb if there's a key, otherwise TVmaze` *(default)*, `TMDb` or `TVmaze`. TMDb uses the key from Settings → Library and also gives the show's TVDB ID, which the TRaSH TV naming presets put in the folder name. [TVmaze](https://www.tvmaze.com) needs no account. |
 | **Specials go in** | `Season 00` *(default)* / `Specials`. Both are read as season zero. Set the season to 0 on the episode plan to file a disc here. |
 
 The episode plan is a table, one row per file that will be written. Untick a row to skip

@@ -508,12 +508,16 @@ def _apply_season_answer(job, plan, season, first_episode, series_id, include,
                 row["episode_title"] = (v or "").strip()
                 typed.add(int(k))
 
-    if series_id is not None and int(series_id) != (plan.get("series_id") or -1):
+    # Compared to None, not to a sentinel: a TMDb show is stored as its negated id, so
+    # -1 is a real show.
+    if series_id is not None and (plan.get("series_id") is None
+                                  or int(series_id) != int(plan["series_id"])):
         # A different series means different episode names. Re-fetch rather than keeping
         # the old ones, which would be the previous show's titles on this show's files.
         chosen = next((c for c in plan.get("series_options") or []
                        if c["id"] == int(series_id)), None)
         plan["series_id"] = int(series_id)
+        plan["ids"] = tv.ids(int(series_id))
         if chosen:
             plan["series"] = chosen.get("name") or plan.get("series")
             plan["series_year"] = chosen.get("year")
@@ -1420,6 +1424,9 @@ def _identify_season(job, s, d, titles, remembered):
     # continue the numbering. Leaving it empty here is what put a raw volume label in
     # the library and made every disc of a box set start again at episode one.
     plan["series"] = plan.get("series") or series_name
+    # The show's TMDb, TVDB and IMDb IDs, for naming schemes that put them in the
+    # folder name. Kept on the plan, since that's what every episode is filed from.
+    plan["ids"] = tv.ids(series["id"]) if series else {}
     plan["warnings"] = tv.plan_warnings(plan, found, episode_list or None)
     if first_of_season and any(e["episode_title"] for e in plan["episodes"]):
         # The one thing no amount of reading the disc can settle. TVmaze and TVDB both
@@ -2287,7 +2294,8 @@ def _episode_name(job, s, plan, row):
         plan.get("series_year"), source=job.get("disc_family"),
         season=row.get("season"), episode=row.get("episode"),
         episode_last=row.get("episode_last"), episode_title=row.get("episode_title"),
-        media=_media_for(job, row.get("title_index")))
+        media=dict(_media_for(job, row.get("title_index")),
+                   **{k: str(v) for k, v in (plan.get("ids") or {}).items() if v}))
     # Season zero is where both Plex and Jellyfin file a special, but the folder they
     # show it under is a matter of taste and Jellyfin's own documentation uses
     # "Specials". The template has already rendered "Season 00"; swap that one segment

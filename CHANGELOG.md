@@ -14,6 +14,21 @@ doesn't display the line.
 
 ---
 
+## Unreleased
+
+**TMDb for TV.** With a TMDb key, season discs look the show up on TMDb as well as films:
+the episode names, plus the show's TMDb, TVDB and IMDb IDs. Without a key, TVmaze is used
+as before. **Settings → Ripping → Episode names from** can pin it to one. A box set
+started under one keeps its episode numbering under the other.
+
+**TRaSH Guides presets for TV.** The episode template has TRaSH's Sonarr schemes for
+Standard, Plex, Emby and Jellyfin. The Plex, Emby and Jellyfin ones put the TVDB ID on
+the series folder, for example `Breaking Bad (2008) {tvdb-81189}/Season 01/…`. There's
+a new `{TvdbId}` token.
+
+**"Series 1" labels.** British box sets label seasons "Series 1"; that's now read as
+season 1, so `SHERLOCK_SERIES_1` is *Sherlock*, season 1.
+
 ## 0.7.1
 
 **A calmer rip.**

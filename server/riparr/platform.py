@@ -238,6 +238,7 @@ def optical_drives():
 #
 #   RIPARR_MOCK_DRIVE = uhd | bluray | dvd | none
 #   RIPARR_MOCK_DISC  = uhd | bluray | dvd | none
+#   RIPARR_MOCK_LABEL = a volume label to report instead of the default
 _MOCK_DRIVES = {
     "uhd": {"vendor": "HL-DT-ST", "model": "BD-RE BU40N",
             "reads_dvd": True, "reads_bluray": True},
@@ -278,6 +279,10 @@ def _mock_drives():
         # is what the hardware does, and pretending otherwise would hide the exact
         # mismatch this knob exists to exercise.
         d.update(_MOCK_DISCS[disc], present=True, tray="loaded")
+        # RIPARR_MOCK_LABEL renames the simulated disc, e.g. BREAKING_BAD_S1_D1 with
+        # RIPARR_MOCK_CONTENT=tv to walk a season disc through.
+        if os.environ.get("RIPARR_MOCK_LABEL"):
+            d["label"] = os.environ["RIPARR_MOCK_LABEL"]
         # The volume label is what the identify stage reasons from -- a film name, or a
         # season and disc number on a box set. Overridable so that behaviour can be
         # exercised off-hardware without a drawer of real discs.

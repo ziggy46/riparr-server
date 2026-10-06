@@ -70,7 +70,7 @@ ALIASES = {
     "edition tags": "edition",
     "custom formats": "custom_formats",
     "release group": "release_group",
-    "imdbid": "imdb_id", "tmdbid": "tmdb_id",
+    "imdbid": "imdb_id", "tmdbid": "tmdb_id", "tvdbid": "tvdb_id",
 }
 PADDED = {"season": "season", "episode": "episode"}
 
@@ -82,7 +82,7 @@ TOKENS = ["{Title}", "{Year}", "{Source}", "{Season:00}", "{Episode:00}",
           "{EpisodeTitle}", "{Movie CleanTitle}", "{Release Year}", "{Quality Full}",
           "{MediaInfo VideoCodec}", "{MediaInfo AudioCodec}",
           "{MediaInfo AudioChannels}", "{MediaInfo AudioLanguages}",
-          "{MediaInfo VideoBitDepth}", "{ImdbId}", "{TmdbId}"]
+          "{MediaInfo VideoBitDepth}", "{ImdbId}", "{TmdbId}", "{TvdbId}"]
 
 
 def _norm(text):
@@ -348,21 +348,43 @@ MOVIE_PRESETS = [
      "template": _trash(" [tmdbid-{TmdbId}]")},
 ]
 
+# TRaSH Guides' recommended Sonarr naming, trimmed the same way as the film presets:
+# https://trash-guides.info/Sonarr/Sonarr-recommended-naming-scheme/
+# The ID goes on the series folder, which is where Plex, Emby and Jellyfin look for it.
+# {TvdbId} is filled when the show was found on TMDb or TVmaze; without one the
+# brackets disappear.
+_SERIES = "{Series CleanTitle} {(Year)}"
+
+
+def _sonarr(ids):
+    return ("%s%s/Season {Season:00}/%s - S{Season:00}E{Episode:00} - "
+            "{Episode CleanTitle} %s.mkv" % (_SERIES, ids, _SERIES, _MEDIA))
+
+
 TV_PRESETS = [
     {"id": "riparr", "label": "Riparr default",
      "template": "{Title} ({Year})/Season {Season:00}/"
                  "{Title} - S{Season:00}E{Episode:00} - {EpisodeTitle}.mkv"},
+    {"id": "trash", "label": "TRaSH Guides: Standard", "template": _sonarr("")},
+    {"id": "trash-plex", "label": "TRaSH Guides: Plex",
+     "template": _sonarr(" {tvdb-{TvdbId}}")},
+    {"id": "trash-emby", "label": "TRaSH Guides: Emby",
+     "template": _sonarr(" [tvdbid-{TvdbId}]")},
+    {"id": "trash-jellyfin", "label": "TRaSH Guides: Jellyfin",
+     "template": _sonarr(" [tvdbid-{TvdbId}]")},
 ]
 
 # A made-up film, described the way MakeMKV would describe a UHD disc, so a preview
 # shows every field filled in.
 SAMPLE_MEDIA = {"video_codec": "HEVC", "bit_depth": "10", "quality": "Remux-2160p",
                 "dynamic_range": "DV HDR10", "three_d": "", "audio_codec": "TrueHD Atmos",
-                "audio_channels": "7.1", "audio_languages": "", "tmdb_id": "345691"}
+                "audio_channels": "7.1", "audio_languages": "", "tmdb_id": "345691",
+                "tvdb_id": "81189"}
 
 
 def preview(template, kind="movie"):
-    values = values_for("The Movie Title", 2010, source="uhd", media=SAMPLE_MEDIA,
+    values = values_for("The Show Title" if kind == "tv" else "The Movie Title", 2010,
+                        source="uhd", media=SAMPLE_MEDIA,
                         season=1 if kind == "tv" else None,
                         episode=1 if kind == "tv" else None,
                         episode_title="Pilot" if kind == "tv" else None)

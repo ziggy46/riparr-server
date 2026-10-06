@@ -207,6 +207,9 @@ DEFAULTS = {
     # Plex and Jellyfin still match perfectly -- the names are for humans reading a
     # folder. See tv.py for why this is TVmaze and not TMDB.
     "tv_metadata": True,
+    # Where episode names come from: "auto" is TMDb when there's a TMDb key, otherwise
+    # TVmaze. See tv.source().
+    "tv_source": "auto",
     # Where a special goes. Plex accepts either; Jellyfin documents "Season 00" and
     # prefers a descriptive name over S00E01 when the metadata does not know the
     # special. Both read this folder as season zero.
@@ -741,7 +744,12 @@ def next_episode(series_id, season, series_name=None):
     """
     if season is None or (not series_id and not series_name):
         return None
-    if series_id:
+    # By id, or by name. The name also catches a box set started under one episode
+    # source and continued under the other (TVmaze and TMDb ids differ), which would
+    # otherwise start disc 2 back at episode one.
+    if series_id and series_name:
+        where, args = "(series_id=? OR title=?)", [series_id, series_name]
+    elif series_id:
         where, args = "series_id=?", [series_id]
     else:
         where, args = "series_id IS NULL AND title=?", [series_name]

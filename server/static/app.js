@@ -1402,7 +1402,7 @@ function duration(sec) {
    The table is the answer to a problem that has no clean automatic solution: the disc
    knows its own episode order and the metadata knows the episode names, and on a
    handful of famous shows the two disagree because the broadcast order was not the
-   production order. Riparr takes the sequence from the disc and the names from TVmaze
+   production order. Riparr takes the sequence from the disc and the names from the guide
    and shows both together, so the disagreement is visible in one glance instead of
    being discovered a year later mid-rewatch. Shifting the first episode number
    renumbers and renames in one move, which fixes the whole disc in one control. */
@@ -1452,7 +1452,7 @@ function seasonPrompt(j) {
         <label class="f"><span>First episode</span>
           <input id="ep-first" type="number" min="1" max="999" style="width:80px"
                  value="${rows.length ? rows[0].episode : 1}">
-          <span class="help">Shift this if the disc doesn't start where TVmaze does.</span>
+          <span class="help">Shift this if the disc doesn't start where the episode guide does.</span>
         </label>
       </div>
 
@@ -1474,8 +1474,12 @@ function seasonPrompt(j) {
           Rip ${rows.length} episode${rows.length === 1 ? "" : "s"}</button>
         <button class="btn" data-skip="${j.id}">Skip this disc</button>
       </div>
-      <div class="ep-credit muted">Episode names from
-        <a href="https://www.tvmaze.com" target="_blank" rel="noopener">TVmaze</a>.</div>
+      ${plan.series_id == null ? "" : plan.series_id < 0
+        ? `<div class="ep-credit muted">Episode names from
+            <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDb</a>.
+            This product uses the TMDB API but is not endorsed or certified by TMDB.</div>`
+        : `<div class="ep-credit muted">Episode names from
+            <a href="https://www.tvmaze.com" target="_blank" rel="noopener">TVmaze</a>.</div>`}
     </div>`;
 }
 
@@ -2369,9 +2373,18 @@ settingsPages.ripping = async (s) => {
         <br><br>A disc with no season number always asks, whatever this says, because
         there is no answer to get on with.</span></label>
     ${sw("tv_metadata", "Look up episode names", s.tv_metadata,
-        "From TVmaze, which needs no account. Off gives you correctly numbered files "
-        + "with no names — Plex and Jellyfin still match those perfectly, because they "
-        + "match on the numbers.")}
+        "Off gives you correctly numbered files with no names — Plex and Jellyfin "
+        + "still match those perfectly, because they match on the numbers.")}
+    <label class="f"><span>Episode names from</span>
+      <select data-set="tv_source">
+        ${opt("auto", "TMDb if there's a key, otherwise TVmaze (default)", s.tv_source)}
+        ${opt("tmdb", "TMDb", s.tv_source)}
+        ${opt("tvmaze", "TVmaze", s.tv_source)}
+      </select>
+      <span class="help">${state.status && state.status.tmdb
+        ? "You have a TMDb key, so the default uses TMDb: the same IDs as your films, plus the TVDB ID that the TRaSH TV presets put in folder names."
+        : "TVmaze needs no account. Add a TMDb key on Settings → Library and TMDb is used instead, with the TVDB ID that the TRaSH TV presets put in folder names."}
+        A box set started under one keeps numbering correctly under the other.</span></label>
     <label class="f"><span>Specials go in</span>
       <select data-set="tv_specials_folder">
         ${opt("Season 00", "Season 00 (default)", s.tv_specials_folder)}

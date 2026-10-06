@@ -50,8 +50,9 @@ A backup never goes into a folder that already has something in it. If you alrea
 
 The templates are editable on **Settings → Library**, and understand Radarr and Sonarr's
 naming syntax. The dropdown above each one has presets, including the schemes from
-[TRaSH Guides](https://trash-guides.info/Radarr/Radarr-recommended-naming-scheme/), and
-a preview under it shows what the template makes of a sample 4K disc.
+TRaSH Guides for [films](https://trash-guides.info/Radarr/Radarr-recommended-naming-scheme/)
+and [TV](https://trash-guides.info/Sonarr/Sonarr-recommended-naming-scheme/), and a
+preview under it shows what the template makes of a sample 4K disc.
 
 | Token | Becomes |
 |---|---|
@@ -66,7 +67,8 @@ a preview under it shows what the template makes of a sample 4K disc.
 | `{MediaInfo AudioCodec}` | `TrueHD Atmos`, `DTS-HD MA`, `AC3` |
 | `{MediaInfo AudioChannels}` | `7.1` |
 | `{MediaInfo AudioLanguages}` | `[DE+FR]`: audio languages other than English |
-| `{TmdbId}`, `{ImdbId}` | `603`, `tt0133093`, with a [TMDb key](#film-lookup-tmdb) |
+| `{TmdbId}`, `{ImdbId}` | `603`, `tt0133093`, with a [TMDb key](#film-lookup-tmdb); for a season disc, the show's |
+| `{TvdbId}` | `81189`: a show's TVDB ID, from TMDb or TVmaze. The TRaSH TV presets put it on the series folder |
 
 Some of TRaSH's tokens aren't in the presets. `{Edition Tags}`, `{Custom Formats}` and
 `{Release Group}` have no value for a disc rip, so a template that has them leaves them
@@ -171,7 +173,11 @@ all of them.
 fixes every disc after it — and again on any later disc whose order it couldn't read off
 the disc itself.
 
-The names come from [TVmaze](https://www.tvmaze.com), which needs no account.
+The names come from [TMDb](https://www.themoviedb.org) when you've added a TMDb key, and
+otherwise from [TVmaze](https://www.tvmaze.com), which needs no account. **Settings →
+Ripping → Episode names from** can pin it to one. A box set started under one keeps
+numbering correctly under the other. Labels that say "Series 1", as British box sets do,
+are read as season 1.
 
 **Disc order and broadcast order don't always agree.** Firefly is the famous one: the
 disc opens with "Serenity", but it aired second, so every episode guide numbers "The
