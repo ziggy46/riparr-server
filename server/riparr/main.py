@@ -1092,6 +1092,10 @@ def queue(user=Depends(require_user)):
             "typical_seconds": typical, "typical_samples": samples,
             "typical_stages": stages, "typical_kind": kind,
             "stage_labels": db.stage_labels(db.get("transfer_mode") == "direct"),
+            # Both sets, so each job's stage is named for how *it* is travelling: a
+            # staged rip isn't "writing to your library", whatever the setting says.
+            "stage_label_sets": {"direct": db.stage_labels(True),
+                                 "staged": db.stage_labels(False)},
             "stage_order": db.STAGE_ORDER}
 
 
@@ -1307,7 +1311,7 @@ def _retries_for(j):
       back in. Always available on a job that did not finish; it needs the disc.
     * **Retry upload** -- the file is still staged on the card, so the expensive half
       is already paid for and this is a re-copy, not a re-rip.
-    * **Retry fast verification** / **Retry deep verification** -- the file reached
+    * **Size check again** / **Full check** -- the file reached
       the share, so it can be checked again without touching the disc. Deep needs the
       staged copy to compare against; fast only needs the size, so it needs the staged
       copy too (that is what the size is compared *to*).
@@ -1325,10 +1329,10 @@ def _retries_for(j):
                            "again from the start."})
     if landed and local:
         done_mode = j.get("verified_mode")
-        out.append({"action": "verify-quick", "label": "Retry fast verification",
+        out.append({"action": "verify-quick", "label": "Size check again",
                     "why": "Compares the size on your library against the rip. "
                            "Seconds, and it catches a truncated transfer."})
-        out.append({"action": "verify-deep", "label": "Retry deep verification",
+        out.append({"action": "verify-deep", "label": "Full check",
                     "why": ("Reads the whole file back and hashes it. Slow, and it "
                             "needs as much free space again as the film."
                             + (" This one has only ever been size-checked."

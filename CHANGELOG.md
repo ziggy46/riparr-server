@@ -14,6 +14,45 @@ doesn't display the line.
 
 ---
 
+## 0.7.1
+
+**A calmer rip.**
+- The card shows one progress bar and one percentage. Its finish time and the stage
+  line underneath always agree: both say "finishing up" for the last minute, and
+  "taking longer than usual" when a stage runs well over.
+- Stages are named for how the rip is travelling: a staged rip says "Saving to
+  staging", not "Writing to your library".
+- The raw "burst" badge is gone.
+- The finished card shows Rip, Upload and Check ticked off.
+
+**Clearer status.**
+- Auto Rip says what it needs ("Needs a working MakeMKV key and a tested share first").
+- The header warning names the key ("MakeMKV key: No key entered"), and its tooltip
+  lists the actual problems.
+- The phone menu dot turns red for a blocking problem.
+
+**The queue leads with the disc on desktop too**, with Auto Rip and the rip options
+below it.
+
+**Less to read.**
+- Settings help shows one line, with **More** for the rest.
+- On History, a rip that worked keeps its checks under a **⋯** button instead of two
+  buttons on every row.
+- Release notes on System → Updates are formatted instead of raw text.
+- Library explains the mount once instead of twice.
+
+**One name for each thing.** The checks after a rip are the **size check** and the
+**full check** everywhere. The old "always burst" and "always stream" transfer modes are
+gone from Settings, since both meant "staged first, then sent". A setup already using
+one keeps it.
+
+**Smaller fixes.**
+- Undo says what it undoes ("Forgot The Matrix (1999)"), and doesn't run out while
+  you're pointing at it.
+- History calls a repeat of a disc that already worked a "re-rip".
+- The setup wizard's last step says what you skipped.
+- Header buttons fit on one line.
+
 ## 0.7.0
 
 **Films are looked up on TMDb.** Add a free key from themoviedb.org on Settings → Library

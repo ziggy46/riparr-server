@@ -1946,7 +1946,7 @@ def _mock_rip(job, out_dir, cancel_ev):
             frac = written / total
             db.update_job(job["id"], bytes_ripped=written, bytes_total=total,
                           stage_pct=round(frac, 4),
-                          phase="Reading title %d" % job["_title"]["index"],
+                          phase="Saving the film",
                           eta_seconds=int(elapsed / frac - elapsed) if frac > 0.05 else None)
             _mock_pause(0.25)
     db.stage_end(job["id"])

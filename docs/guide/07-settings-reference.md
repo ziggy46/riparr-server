@@ -162,13 +162,13 @@ people notice.
 
 | Setting | Notes |
 |---|---|
-| **Mode** | `Straight to your library` *(default)* — MakeMKV writes onto your share as the disc is read, and nothing is staged. No size ceiling and the film is written once. It needs the library bind-mounted at `/srv/library`; if nothing is mounted there, each rip stages in `/srv/staging` by itself and is copied over SMB afterwards — so it is safe to leave on. `Staged first, then sent` is the answer if your NAS sleeps, your network is unreliable, or you want deep verification. `Always burst` and `always stream` force one staged behaviour or the other. |
-| **Verify after transfer** | `Quick` *(default)* — asks your library how big the file is and compares it with what was sent. Nearly free, and it catches what actually goes wrong: a truncated transfer, a share that filled up, a write that was refused. `Deep` also reads every byte back and hashes it, so it catches silent corruption too. `Don't verify` trusts the upload. Applies to automatic and manual rips alike. |
+| **Mode** | `Straight to your library` *(default)* — MakeMKV writes onto your share as the disc is read, and nothing is staged. No size ceiling and the film is written once. It needs the library bind-mounted at `/srv/library`; if nothing is mounted there, each rip stages in `/srv/staging` by itself and is copied over SMB afterwards — so it is safe to leave on. `Staged first, then sent` is the answer if your NAS sleeps, your network is unreliable, or you want the full check. (Older setups may show `Staged first, then sent (older setting)`, from the retired "always burst" and "always stream" choices; it behaves the same as `Staged first, then sent`.) |
+| **Verify after transfer** | `Size check` *(default)* — asks your library how big the file is and compares it with what was sent. Nearly free, and it catches what actually goes wrong: a truncated transfer, a share that filled up, a write that was refused. `Full check` also reads every byte back and hashes it, so it catches silent corruption too. `Don't verify` trusts the upload. Applies to automatic and manual rips alike. |
 | **Keep local copy** | On. Riparr retains the staged copy in `/srv/staging` until it needs the room, so a downstream problem is a re-copy instead of a re-rip. |
 | **Space remaining** | Staging space, shown in discs, not gigabytes |
 | **Test staging speed** | Measures how fast the staging disk behind `/srv/staging` writes |
 
-**Deep verification is only offered when rips are staged.** It works by reading the
+**The full check is only offered when rips are staged.** It works by reading the
 file back off the share and comparing it with the original, so it needs two copies.
 Going straight to your library leaves one — hashing it against itself would pass every
 time and prove nothing. Switch **Mode** to *Staged first, then sent* if you want it, and
@@ -270,8 +270,8 @@ Each one appears only when Riparr can actually do it.
 | Button | When it shows | What it costs |
 |---|---|---|
 | **Retry upload** | The rip is still in staging | A re-copy. Minutes, and the disc stays on the shelf |
-| **Retry fast verification** | The file is on your library | Seconds. Compares the size — catches a truncated transfer |
-| **Retry deep verification** | The file is on your library | As long as the upload took, plus as much free space again as the film. Reads it all back and hashes it |
+| **Size check again** | The file is on your library | Seconds. Compares the size — catches a truncated transfer |
+| **Full check** | The file is on your library | As long as the upload took, plus as much free space again as the film. Reads it all back and hashes it |
 | **Retry rip** | The rip is gone or never finished | The whole thing. Put the disc back in the tray first |
 
 ## Discs

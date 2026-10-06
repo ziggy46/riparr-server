@@ -169,8 +169,9 @@ and each row offers only the retries that would actually help:
 
 - **Retry upload** — the rip is still in staging, so this skips the disc entirely.
   Minutes, not half an hour. This is the one you want after a network hiccup.
-- **Retry fast verification** / **Retry deep verification** — the file reached your
-  library but the check did not finish. Neither touches the disc.
+- **Size check again** / **Full check** — the file reached your library but the check
+  did not finish. Neither touches the disc. On a rip that worked, these are under the
+  **⋯** button at the end of its row.
 - **Retry rip** — the rip is gone. Put the disc back in the tray first.
 
 If only *Retry rip* is offered, the staged copy has been cleaned up and the disc is the

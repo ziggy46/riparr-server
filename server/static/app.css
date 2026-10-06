@@ -1824,10 +1824,6 @@ a.tool { text-decoration: none; }
 
 @media (max-width: 700px) {
   /* The queue: the disc and the rip first, then Auto Rip and the options. */
-  .queue-page { display: flex; flex-direction: column; }
-  .queue-page > .page-head { order: -3; }
-  .queue-page > .disc-cell { order: -2; }
-  .queue-page > .sending { order: -1; }
   /* A job's title gets its own line; the badges and the cancel button wrap under it. */
   .job-head { flex-wrap: wrap; }
   .job-head > .grow { flex: 1 0 100%; }
@@ -1902,7 +1898,7 @@ a.tool { text-decoration: none; }
 
 /* ── help that folds ── */
 .help.clamp:not(.open) {
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1;
   overflow: hidden;
 }
 .help-more {
@@ -2032,3 +2028,43 @@ body.has-savebar .toast-host { bottom: 78px; }
 .chan-tag.ch-latest { background: rgba(39,194,76,.16); color: var(--ok); }
 .chan-tag.ch-edge   { background: rgba(255,159,26,.16); color: var(--warn); }
 .side-ver .chan-tag { margin-left: 2px; }
+
+/* The disc and the rip lead at every width: Auto Rip and the rip options follow. */
+.queue-page { display: flex; flex-direction: column; }
+.queue-page > .page-head { order: -3; }
+.queue-page > .disc-cell { order: -2; }
+.queue-page > .sending { order: -1; }
+.queue-page > .disc-cell { margin-bottom: 20px; }
+
+.hamburger.has-issues.bad::after { background: var(--bad); }
+
+/* History: a passed row's checks, one click away. */
+.row-menu { position: relative; display: inline-block; }
+.row-menu > summary { list-style: none; cursor: pointer; }
+.row-menu > summary::-webkit-details-marker { display: none; }
+.row-menu-pop {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20;
+  display: flex; flex-direction: column; gap: 6px; padding: 8px;
+  background: var(--dropdown); border: 1px solid var(--line-2); border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgba(0,0,0,.45);
+}
+.row-menu-pop .btn { text-align: left; }
+
+/* The finished card shows the steps it went through, all done. */
+.filed-steps { margin-top: 12px; }
+
+.dests-note { margin: 10px 0 0; font-size: 13px; }
+
+/* Release notes, formatted. */
+.notes.md {
+  white-space: normal; font-family: inherit; font-size: 13.5px; line-height: 1.6;
+  max-width: none; background: none; border: 0; padding: 0; max-height: none;
+}
+.notes.md > * { max-width: 72ch; }
+.notes.md h3, .notes.md h4, .notes.md h5 { margin: 18px 0 6px; font-size: 15px; color: var(--fg-strong); }
+.notes.md h3:first-child { margin-top: 0; }
+.notes.md p { margin: 0 0 10px; }
+.notes.md ul, .notes.md ol { margin: 0 0 10px; padding-left: 20px; }
+.notes.md li { margin-bottom: 4px; }
+.notes.md pre { margin: 0 0 10px; padding: 10px 12px; overflow-x: auto;
+                background: rgba(0,0,0,.25); border-radius: var(--radius); }

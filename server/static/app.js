@@ -35,12 +35,19 @@ function toast(msg, kind = "", opts = {}) {
   text.textContent = msg;
   el.append(text);
   const close = () => { el.style.opacity = "0"; setTimeout(() => el.remove(), 250); };
+  // The countdown stops while a pointer or keyboard focus is on the toast: an Undo
+  // that runs out while you're reaching for it isn't an undo.
+  let left = opts.ms || 3200, started = 0, timer = null;
+  const expire = () => { close(); if (opts.onTimeout) opts.onTimeout(); };
+  const run = () => { started = Date.now(); timer = setTimeout(expire, left); };
+  const hold = () => { if (timer) { clearTimeout(timer); timer = null; left -= Date.now() - started; } };
+  const resume = () => { if (!timer && !el.matches(":hover, :focus-within")) run(); };
   if (opts.action) {
     const a = document.createElement("button");
     a.className = "toast-act";
     a.type = "button";
     a.textContent = opts.action.label;
-    a.onclick = () => { opts.action.run(); close(); };
+    a.onclick = () => { clearTimeout(timer); timer = null; opts.action.run(); close(); };
     el.append(a);
   }
   if (kind === "bad") {
@@ -56,7 +63,11 @@ function toast(msg, kind = "", opts = {}) {
     const errs = $$(".toast.bad", host);
     if (errs.length >= 3) errs[0].remove();
   } else {
-    setTimeout(close, opts.ms || 3200);
+    el.addEventListener("mouseenter", hold);
+    el.addEventListener("focusin", hold);
+    el.addEventListener("mouseleave", resume);
+    el.addEventListener("focusout", () => setTimeout(resume, 0));
+    run();
   }
   host.append(el);
 }
@@ -445,6 +456,7 @@ function shareFinder(root, opts = {}) {
 const wizard = {
   step: 0,
   data: { username: "", password: "", host: "", share: "", path: "", user: "", pass: "" },
+  skipped: new Set(),
   steps: ["account", "makemkv", "share", "layout", "done"],
 
   render() {
@@ -596,8 +608,11 @@ const wizard = {
       }
       this.next();
     };
-    $("#w-go").onclick = save;
-    $("#w-skip").onclick = () => this.next();
+    $("#w-go").onclick = async () => {
+      if ($("#w-key").value.trim()) this.skipped.delete("key"); else this.skipped.add("key");
+      await save();
+    };
+    $("#w-skip").onclick = () => { this.skipped.add("key"); this.next(); };
   },
 
   share() {
@@ -614,8 +629,8 @@ const wizard = {
         <button class="btn" id="w-skip">Set this up later</button>
         <button class="btn primary" id="w-go" disabled>Continue</button>
       </div>`;
-    $("#w-skip").onclick = () => this.next();
-    $("#w-go").onclick = () => this.next();
+    $("#w-skip").onclick = () => { this.skipped.add("share"); this.next(); };
+    $("#w-go").onclick = () => { this.skipped.delete("share"); this.next(); };
     this.wireBack();
     shareFinder($("#w-finder"), { onSaved: () => { $("#w-go").disabled = false; } });
   },
@@ -700,7 +715,10 @@ const wizard = {
       };
     };
 
-    paint(`Everything is configured. One moment — checking what Riparr can already do.`,
+    const skipped = [...this.skipped].map(k => ({ key: "the MakeMKV key", share: "a share" }[k]));
+    paint(skipped.length
+      ? `You skipped ${andList(skipped)} — Settings is where to add ${skipped.length > 1 ? "them" : "it"}. One moment — checking what Riparr can already do.`
+      : `Everything is configured. One moment — checking what Riparr can already do.`,
           ["Insert a disc", "Riparr identifies it and gets to work"]);
 
     let st = null;
@@ -719,7 +737,8 @@ const wizard = {
     :              `<b>Auto Rip</b> needs one or two more things first. <b>System → Status</b>
                     lists exactly what, and each one links to where to fix it.`;
 
-    paint(lede, ar.enabled
+    paint((skipped.length ? `You skipped ${andList(skipped)}; you can add ${
+             skipped.length > 1 ? "them" : "it"} in Settings. ` : "") + lede, ar.enabled
       ? ["Insert a disc", "Riparr identifies it and starts on its own"]
       : building
       ? ["First", "Install MakeMKV — Settings → General says how"]
@@ -799,18 +818,16 @@ async function showRenewalNotice() {
    the server, so the undo has to happen before it gets there. */
 function undoable(el, message, request) {
   if (el) el.hidden = true;
-  let undone = false;
-  const ms = 6000;
-  toast(message, "", { ms, action: { label: "Undo", run: () => {
-    undone = true;
-    if (el) el.hidden = false;
-  } } });
-  setTimeout(async () => {
-    if (undone) return;
-    try { await request(); }
-    catch (e) { toast(e.message, "bad"); if (el) el.hidden = false; return; }
-    if (el && el.isConnected) route();
-  }, ms + 200);
+  toast(message, "", {
+    ms: 6000,
+    action: { label: "Undo", run: () => { if (el) el.hidden = false; } },
+    // The request goes when the toast runs out, which pauses while it's hovered.
+    onTimeout: async () => {
+      try { await request(); }
+      catch (e) { toast(e.message, "bad"); if (el) el.hidden = false; return; }
+      if (el && el.isConnected) route();
+    },
+  });
 }
 
 /* ════════════════════ views ════════════════════ */
@@ -853,6 +870,7 @@ views.queue = async () => {
   state.typicalN = q.typical_samples;
   state.typicalStages = q.typical_stages || {};
   state.stageLabels = q.stage_labels || {};
+  state.stageLabelSets = q.stage_label_sets || {};
   state.stageOrder = q.stage_order || [];
   state.status = st;
   const drives = state.status.drives || [];
@@ -939,7 +957,7 @@ function filedCard(j) {
   const ok = j.state === "done";
   const size = j.bytes_sent || j.bytes_ripped || j.bytes_total;
   const worked = (j.stages || []).reduce((a, st) => a + st.seconds, 0);
-  const checked = { quick: "size check passed", deep: "every byte checked" }[j.verified_mode];
+  const checked = { quick: "size check passed", deep: "full check passed" }[j.verified_mode];
   const facts = ok ? [size ? filesize(size) : "", worked ? `took ${duration(worked)}` : "",
                       checked || ""].filter(Boolean) : [];
   const art = filedArt.id === j.id && filedArt.image;
@@ -954,6 +972,10 @@ function filedCard(j) {
       ${ok && j.dest_path ? `<div class="filed-path">${icon("hard-drive")}<span>${esc(j.dest_path)}</span></div>` : ""}
       ${!ok && j.error ? `<p class="filed-err">${esc(j.error)}</p>` : ""}
       ${facts.length ? `<div class="filed-facts">${facts.map(esc).join(" · ")}</div>` : ""}
+      ${ok ? `<div class="job-steps filed-steps">${["Rip", j.mode === "direct" ? "To library" : "Upload",
+          j.verified_mode && j.verified_mode !== "off" ? "Check" : null].filter(Boolean)
+          .map(l => `<div class="step done">${icon("circle-check")}<span class="step-l">${l}</span></div>`)
+          .join("")}</div>` : ""}
       <div class="btn-row filed-acts">
         <a class="btn sm" href="#/history">${ok ? "See it in History" : "Retry from History"}</a>
         <button class="btn sm" id="filed-dismiss" data-job="${j.id}">Dismiss</button>
@@ -1037,6 +1059,27 @@ function seasonTag(j) {
     done && done < kept.length ? ` · ${done}/${kept.length} done` : ""}</span>`;
 }
 
+/* What's left, said once. The stage clock below the bar answers "is this stage slow";
+   this answers "when can I come back". They used to disagree near the end -- "11s so
+   far" beside "about 0s left in this stage" -- because each guessed on its own. Both
+   now come from stageTiming(), and both say "finishing up" for the last minute. */
+function overallEta(j) {
+  const now = Date.now() / 1000;
+  const t = stageTiming(j);
+  if (t && t.mine && !t.over) {
+    const total = t.left + t.restSecs;
+    return total < 60 ? "finishing up" : `done around ${clockAt(now + total)}`;
+  }
+  // A stage just past its usual time is still finishing, not late.
+  if (t && t.mine && t.over && -t.left < 60) return "finishing up";
+  if (j.eta_seconds) return j.eta_seconds < 60 ? "finishing up" : `${duration(j.eta_seconds)} left`;
+  if (t && t.over) return "taking longer than usual";
+  if (j.started_at && state.typical && j.started_at + state.typical > now + 60)
+    return `usually done by ${clockAt(j.started_at + state.typical)}`;
+  if (j.started_at) return `${duration(Math.max(0, now - j.started_at))} so far`;
+  return "";
+}
+
 function jobRow(j) {
   if (j.state === "needs_input") return identifyPrompt(j);
   const ripPct = pct(j.bytes_ripped, j.bytes_total);
@@ -1096,10 +1139,7 @@ function jobRow(j) {
                                                      : `<span class="pip hollow"></span>`;
     // The live pill shows the stage's own number, which during identification is the
     // only number there is.
-    const live = isNow && stage !== null ? stage : st.pct;
-    const val = isNow && live > 0 ? `${Math.round(live)}%` : "";
-    return `<div class="step ${cls.join(" ")}">${mark}<span class="step-l">${st.label}</span>
-      ${val ? `<span class="step-v">${val}</span>` : ""}</div>`;
+    return `<div class="step ${cls.join(" ")}">${mark}<span class="step-l">${st.label}</span></div>`;
   }).join("");
 
   return `
@@ -1111,7 +1151,6 @@ function jobRow(j) {
           <div class="job-phase">${esc(j.phase || STATE_LABEL[j.state] || j.state)}</div>
         </div>
         ${familyTag(j.disc_family)}
-        ${j.mode ? `<span class="badge ${j.mode === "burst" ? "burst" : ""}">${esc(j.mode)}</span>` : ""}
         <span class="badge state">${esc(STATE_LABEL[j.state] || j.state)}</span>
         <button class="icon-btn" data-cancel="${j.id}" title="Cancel"
                 aria-label="Cancel ripping ${esc(j.title || j.disc_label || "this disc")}">${icon("xmark")}</button>
@@ -1124,18 +1163,7 @@ function jobRow(j) {
         <div class="job-figs">
           <span class="job-pct">${active > 0 ? `${Math.round(active)}%` : ""}</span>
           <span class="grow"></span>
-          ${j.eta_seconds
-            ? `<span class="job-eta">${esc(duration(j.eta_seconds))} left</span>`
-            // No percentage to show means a stage that cannot report one -- reading an
-            // encrypted disc is minutes of CPU and MakeMKV emits no progress at all
-            // during it. Elapsed time is not progress, but it is true, it moves every
-            // second, and it is the difference between "working" and "hung".
-            : j.started_at
-            ? `<span class="job-eta">${esc(duration(Math.max(0, (Date.now() / 1000) - j.started_at)))} so far${
-                state.typical
-                  ? ` · <span class="job-guess">usually done by ${esc(clockAt(j.started_at + state.typical))}</span>`
-                  : ""}</span>`
-            : ""}
+          ${(() => { const e = overallEta(j); return e ? `<span class="job-eta">${esc(e)}</span>` : ""; })()}
         </div>
       </div>
       <div class="job-steps${together ? " paired" : ""}">${stepHtml}${
@@ -1263,15 +1291,20 @@ async function goToDuplicate(dupe) {
    So the slow stages get a clock instead of a bar. It counts up (which is always true)
    against the median (which is a guess, and says so), and the remaining stages are
    added on to answer the question actually being asked -- when can I come back. */
-function stageClock(j) {
+function stageLabel(j, name) {
+  // The job's own mode decides the words: a staged rip isn't "writing to your library".
+  const sets = state.stageLabelSets || {};
+  const set = (j.mode && j.mode !== "direct" ? sets.staged : sets.direct) || state.stageLabels || {};
+  return set[name] || name;
+}
+
+function stageTiming(j) {
   const med = state.typicalStages || {};
   const order = state.stageOrder || [];
   const name = j.stage_name;
-  if (!name || !j.stage_started) return "";
-  const label = (state.stageLabels || {})[name] || name;
+  if (!name || !j.stage_started) return null;
   const elapsed = Math.max(0, Date.now() / 1000 - j.stage_started);
   const mine = med[name] && med[name].seconds;
-
   // Everything after this stage, at its usual cost. Verification is skipped when it
   // is off, because promising a stage that will not run is worse than a vaguer number.
   const at = order.indexOf(name);
@@ -1279,6 +1312,15 @@ function stageClock(j) {
     .filter(k => med[k] && !(k === "verify" && state.settings
                              && state.settings.verify_mode === "off"));
   const restSecs = rest.reduce((a, k) => a + med[k].seconds, 0);
+  const left = mine ? mine - elapsed : null;
+  return { name, elapsed, mine, left, over: mine ? left < 0 : false, restSecs };
+}
+
+function stageClock(j) {
+  const t = stageTiming(j);
+  if (!t) return "";
+  const { name, elapsed, mine, left, over } = t;
+  const label = stageLabel(j, name);
 
   if (!mine) {
     return `<div class="clock">
@@ -1287,23 +1329,19 @@ function stageClock(j) {
       <span class="grow"></span>
       <span class="muted">no history for this stage yet</span></div>`;
   }
-  const left = mine - elapsed;
-  const over = left < 0;
   // A stage that has run long is not a stage that has failed, and saying "0 min left"
   // for six minutes is how an interface loses the user's trust. Say the true thing.
-  const rem = over ? `${duration(-left)} over the usual ${duration(mine)}`
-                   : `about ${duration(left)} left in this stage`;
-  const total = over ? null : left + restSecs;
-  return `<div class="clock${over ? " over" : ""}">
+  const rem = over && -left >= 60 ? `${duration(-left)} over the usual ${duration(mine)}`
+            : left < 60 ? "finishing this stage"
+            : `about ${duration(left)} left in this stage`;
+  // No bar of its own and no overall estimate: the bar above is the one bar, and the
+  // estimate above is the one "when". This line is only about the stage.
+  return `<div class="clock${over && -left >= 60 ? " over" : ""}">
     <span class="clock-stage"><i class="sg-${esc(name)}"></i>${esc(label)}</span>
     <span class="clock-el">${esc(duration(elapsed))} of ~${esc(duration(mine))}</span>
     <span class="grow"></span>
-    <span class="clock-est">${esc(rem)}${
-      total != null && restSecs > 0
-        ? ` · <b>done around ${esc(clockAt(Date.now() / 1000 + total))}</b>` : ""}</span>
-  </div>
-  <div class="clock-bar"><i class="sg-${esc(name)}"
-       style="width:${Math.min(100, (elapsed / mine) * 100).toFixed(1)}%"></i></div>`;
+    <span class="clock-est">${esc(rem)}</span>
+  </div>`;
 }
 
 /* The server is allowed to change a setting you did not send -- see db.reconcile,
@@ -1664,6 +1702,9 @@ const pct = (a, b) => (b ? Math.min(100, (a / b) * 100).toFixed(1) : 0);
    the page. */
 const CHECK_ICON = { ok: "circle-check", warn: "triangle-exclamation", fail: "circle-exclamation" };
 
+const andList = (xs) => xs.length < 2 ? (xs[0] || "")
+  : `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+
 function autoRipPanel(ar) {
   const on = ar.enabled;
   const checks = ar.checks || [];
@@ -1682,7 +1723,8 @@ function autoRipPanel(ar) {
         <div class="ar-sub" id="ar-sub">${
           on ? "Insert a disc and walk away. Riparr does the rest and ejects when it's done."
           : ar.ready ? "Turn this on and Riparr starts ripping the moment a disc is inserted."
-          : "Not available until setup is finished."}</div>
+          : `Needs ${andList(checks.filter(c => c.state === "fail")
+                .map(c => (CHECK_NEED[c.what] || [c.what.toLowerCase()])[0]))} first.`}</div>
         ${fails || warns ? `<a class="ar-fix ${fails ? "fail" : "warn"}" href="#/system/status">${
           icon(CHECK_ICON[fails ? "fail" : "warn"])} ${esc(
           fails ? `${fails} thing${fails === 1 ? "" : "s"} to fix first`
@@ -1710,8 +1752,8 @@ function ripOptions() {
   const route = direct && !lib.mounted ? "staged, then copied (library not mounted)"
               : direct ? "straight to your library"
               : "staged, then sent";
-  const check = { quick: "quick check", deep: "deep check", off: "no check" }[s.verify_mode]
-                || "quick check";
+  const check = { quick: "size check", deep: "full check", off: "no check" }[s.verify_mode]
+                || "size check";
   return `
   <details class="rip-opts-d" id="rip-opts" ${state.ripOptsOpen ? "open" : ""}>
   <summary><span class="ropt-k">${icon("gears")} Rip options</span>
@@ -1746,8 +1788,8 @@ function ripOptions() {
       <div class="ropt-head">
         <label class="ropt-k" for="ar-verify">${icon("circle-check")} After each rip</label>
         <select id="ar-verify" title="Applies to every rip, automatic or started by hand">
-          ${opt("quick", "quick check", s.verify_mode)}
-          ${direct ? "" : opt("deep", "deep check (slow)", s.verify_mode)}
+          ${opt("quick", "size check", s.verify_mode)}
+          ${direct ? "" : opt("deep", "full check (slow)", s.verify_mode)}
           ${opt("off", "no check", s.verify_mode)}
         </select>
       </div>
@@ -1799,6 +1841,10 @@ views.history = async () => {
     j._try = tally.get(k) - n + 1;
     j._tries = tally.get(k);
   }
+  // A re-rip of a disc that already worked isn't a failed attempt; say which it is.
+  for (const j of jobs) {
+    j._earlierDone = jobs.some(o => key(o) === key(j) && o._try < j._try && o.state === "done");
+  }
 
   // Per family. A Blu-ray is four times the data of a DVD, so one blended median
   // describes neither -- each row is compared against its own kind.
@@ -1831,22 +1877,32 @@ views.history = async () => {
         ${j.error ? `<div class="hist-err">${esc(j.error)}</div>` : ""}
       </td>
       <td class="num" data-label="Attempt">${j._tries > 1
-        ? `<span title="This film has been attempted ${j._tries} times. Every attempt is a row here.">try ${j._try} of ${j._tries}</span>`
+        ? `<span title="This disc has been ripped ${j._tries} times. Every attempt is a row here.">${
+            j._earlierDone ? "re-rip" : "attempt"} ${j._try} of ${j._tries}</span>`
         : `<span class="muted">1</span>`}</td>
       <td class="num" data-label="Size">${size ? esc(filesize(size)) : `<span class="muted">—</span>`}</td>
       <td class="num" data-label="Took">${took != null ? esc(duration(took)) : `<span class="muted">—</span>`}</td>
       <td class="hist-stages" data-label="Where the time went">${
         stageBar(j.stages, typicalFor(j))}</td>
       <td class="num" data-label="When"><span title="${esc(when(j.finished_at))}">${esc(ago(j.finished_at))}</span></td>
-      <td class="act">${(j.retries || []).map(r =>
-        `<button class="btn tiny" data-hretry="${j.id}" data-haction="${esc(r.action)}"
-                 title="${esc(r.why)}">${icon(RETRY_ICON[r.action] || "arrows-rotate")
-                 } ${esc(r.label)}</button>`).join("")}</td>
+      <td class="act">${(() => {
+        const btns = (j.retries || []).map(r =>
+          `<button class="btn tiny" data-hretry="${j.id}" data-haction="${esc(r.action)}"
+                   title="${esc(r.why)}">${icon(RETRY_ICON[r.action] || "arrows-rotate")
+                   } ${esc(r.label)}</button>`).join("");
+        // A row that worked doesn't need its checks offered at full size, ten times
+        // down the page. They're one click away instead.
+        return btns && j.state === "done"
+          ? `<details class="row-menu"><summary class="icon-btn" aria-label="More for this rip"
+               title="More">${icon("ellipsis")}</summary><div class="row-menu-pop">${btns}</div></details>`
+          : btns;
+      })()}</td>
     </tr>
     ${j.dest_path ? `<tr class="hist-dest ${j.state}" data-find="${find}"><td></td>
       <td colspan="7"><span class="muted">${icon("hard-drive")} ${esc(j.dest_path)}</span>${
         j.verified_mode && j.verified_mode !== "off"
-          ? ` <span class="badge ok">${esc(j.verified_mode)} verified</span>` : ""}</td></tr>` : ""}`;
+          ? ` <span class="badge ok">${j.verified_mode === "deep" ? "full check passed"
+                                                         : "size check passed"}</span>` : ""}</td></tr>` : ""}`;
   };
 
   return `${head("History", "Every attempt, what each stage cost, and what can be retried.",
@@ -2131,10 +2187,7 @@ settingsPages.library = async (s) => {
           : lib.mounted
             ? `${icon("circle-check", "ok")} Mounted at <code>${esc(lib.mount)}</code>,
                so <b>Straight to your library</b> works for this one.`
-            : `${icon("circle-info")} Nothing is mounted at <code>${esc(lib.mount)}</code>,
-               so rips are staged and then copied over SMB. That works as it is. To write
-               straight into your library instead, mount this share on the host and
-               bind-mount it into Riparr at that path.`}
+            : `${icon("circle-info")} Not mounted, so rips are staged and then copied over SMB.`}
         </div>
       </div>`;
   };
@@ -2147,7 +2200,11 @@ settingsPages.library = async (s) => {
       ${shares.length ? `<div class="dests">
           ${row("movie", "Films", "movie_folder", "movie_share_id")}
           ${row("tv", "Television", "tv_folder", "tv_share_id")}
-        </div>`
+        </div>
+        ${Object.values(library || {}).some(l => l && !l.mounted) ? `<p class="muted dests-note">That
+          works as it is. To write straight into your library instead, mount the share on the
+          host and bind-mount it into Riparr at <code>${esc(
+            (Object.values(library).find(l => l && !l.mounted) || {}).mount || "/srv/library")}</code>.</p>` : ""}`
       : `<div class="empty-state"><div class="big">${icon("hard-drive")}</div>
           <h2>No share configured</h2>
           <p>Finished rips have nowhere to go until you add one below.</p></div>`}
@@ -2343,8 +2400,11 @@ settingsPages.ripping = async (s) => {
       <select data-set="transfer_mode">
         ${opt("direct", "Straight to your library (recommended)", s.transfer_mode)}
         ${opt("auto", "Staged first, then sent", s.transfer_mode)}
-        ${opt("burst", "Always burst", s.transfer_mode)}
-        ${opt("stream", "Always stream", s.transfer_mode)}
+        ${["burst", "stream"].includes(s.transfer_mode)
+          // Older settings. Both stage the whole rip and then send it -- sending while
+          // ripping needs a transport Riparr doesn't have yet -- so they're shown only
+          // when one is already chosen, and named for what they do.
+          ? opt(s.transfer_mode, "Staged first, then sent (older setting)", s.transfer_mode) : ""}
       </select>
       <span class="help"><b>Straight to your library</b> writes the film into your
         library as it comes off the disc, so nothing is staged. It needs the library
@@ -2356,9 +2416,9 @@ settingsPages.ripping = async (s) => {
         sleeps, or you want deep verification.</span></label>
     <label class="f"><span>Verify after transfer</span>
       <select data-set="verify_mode">
-        ${opt("quick", "Quick — check the size", s.verify_mode)}
+        ${opt("quick", "Size check — compare the size", s.verify_mode)}
         ${s.transfer_mode === "direct" ? ""
-          : opt("deep", "Deep — read every byte back", s.verify_mode)}
+          : opt("deep", "Full check — read every byte back", s.verify_mode)}
         ${opt("off", "Don't verify", s.verify_mode)}
       </select>
       <span class="help">Quick asks the share how big the file is and compares it with
@@ -3035,8 +3095,8 @@ systemPages.backup = async () => {
 
   return `
     <div class="toolbar">
-      <button class="tool" id="bk-now"><span class="ti">${icon("file-zipper")}</span>Backup<br>Now</button>
-      <button class="tool" id="bk-upload"><span class="ti">${icon("upload")}</span>Restore<br>Backup</button>
+      <button class="tool" id="bk-now"><span class="ti">${icon("file-zipper")}</span>Back up</button>
+      <button class="tool" id="bk-upload"><span class="ti">${icon("upload")}</span>Restore</button>
       <input type="file" id="bk-file" accept=".zip,application/zip,.json,application/json" class="hidden">
     </div>
     <div class="alert">Backups are written to <code>${esc(b.path)}</code> and hold your
@@ -3053,6 +3113,49 @@ systemPages.backup = async () => {
 };
 
 /* ── Updates ── */
+/* Just enough Markdown for release notes: headings, paragraphs, lists, fenced code,
+   inline code, bold and links. Escaped first, so nothing in the notes becomes markup
+   it didn't ask for. */
+function markdown(src) {
+  const inline = (t) => esc(t)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+             (m, text, url) => `<a href="${url}" target="_blank" rel="noopener">${text}</a>`);
+  const out = [];
+  let para = [], list = null, code = null;
+  const flush = () => {
+    if (para.length) { out.push(`<p>${inline(para.join(" "))}</p>`); para = []; }
+    if (list) { out.push(`<${list.tag}>${list.items.map(i => `<li>${inline(i)}</li>`).join("")}</${list.tag}>`); list = null; }
+  };
+  for (const raw of String(src || "").replace(/<!--[\s\S]*?-->/g, "").split("\n")) {
+    const line = raw.replace(/\s+$/, "");
+    if (code !== null) {
+      if (/^\s*```/.test(line)) { out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); code = null; }
+      else code.push(line.replace(/^ {0,3}/, ""));
+      continue;
+    }
+    if (/^\s*```/.test(line)) { flush(); code = []; continue; }
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) { flush(); out.push(`<h${Math.min(6, h[1].length + 2)}>${inline(h[2])}</h${Math.min(6, h[1].length + 2)}>`); continue; }
+    const li = line.match(/^\s*(?:[-*]|(\d+)\.)\s+(.*)$/);
+    if (li) {
+      if (para.length) flush();
+      const tag = li[1] ? "ol" : "ul";
+      if (!list || list.tag !== tag) { flush(); list = { tag, items: [] }; }
+      list.items.push(li[2]);
+      continue;
+    }
+    if (!line.trim()) { flush(); continue; }
+    if (list && /^\s+/.test(raw)) { list.items[list.items.length - 1] += " " + line.trim(); continue; }
+    if (list) flush();
+    para.push(line.trim());
+  }
+  if (code !== null) out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`);
+  flush();
+  return out.join("");
+}
+
 function newerVersion(a, b) {
   const n = (v) => String(v || "").replace(/^v/, "").split(/[.-]/).map(x => parseInt(x, 10) || 0);
   const x = n(a), y = n(b);
@@ -3068,7 +3171,7 @@ systemPages.updates = async () => {
   const kind = u.status === "update" ? "warn" : u.status === "current" ? "ok" : "";
   return `
     <div class="toolbar">
-      <button class="tool" id="upd-check"><span class="ti">${icon("arrows-rotate")}</span>Check<br>Again</button>
+      <button class="tool" id="upd-check"><span class="ti">${icon("arrows-rotate")}</span>Check</button>
     </div>
     <div class="section"><h2>Riparr updates<span class="grow"></span>
       <span class="badge ${kind}">${esc(u.status)}</span></h2>
@@ -3098,7 +3201,7 @@ systemPages.updates = async () => {
         <div class="k">Key</div><div class="v">${esc(keyPhrase(mk.status))}</div>
       </div></div>` : ""}
     ${u.notes ? `<div class="section"><h2>Release notes</h2>
-      <pre class="notes">${esc(u.notes)}</pre></div>` : ""}`;
+      <div class="notes md">${markdown(u.notes)}</div></div>` : ""}`;
 };
 
 /* ── Events ── */
@@ -3253,6 +3356,15 @@ const NAV = [
     children: SYSTEM_TABS.map(([k, l]) => ({ key: k, label: l, href: `#/system/${k}` })) },
 ];
 
+/* What each prerequisite is called when it's missing, and in the header pill. */
+const CHECK_NEED = {
+  "Riparr can read discs": ["MakeMKV installed", "MakeMKV"],
+  "The MakeMKV key is current": ["a working MakeMKV key", "MakeMKV key"],
+  "A drive to read them in": ["an optical drive", "Drive"],
+  "Somewhere to put the files": ["a tested share", "Share"],
+  "Room to work": ["room in staging", "Staging"],
+};
+
 /* One source of truth for "is something wrong": the server's Auto Rip checklist plus
    the few health checks that aren't prerequisites. The badge, the header pills, the
    queue's line and System → Status all count the same list, so they can't disagree. */
@@ -3261,7 +3373,8 @@ function problems(st) {
   const checks = ((st.autorip || {}).checks || []).filter(c => c.state !== "ok")
     .map(c => ({ level: c.state === "fail" ? "bad" : "warn", what: c.what,
                  message: `${c.what}: ${c.detail}${c.why ? ` \u2014 ${c.why}` : ""}`,
-                 short: c.detail, href: c.where }));
+                 short: `${(CHECK_NEED[c.what] || [0, c.what])[1]}: ${c.detail}`,
+                 href: c.where }));
   return checks.concat(healthMessages(st));
 }
 
@@ -4045,10 +4158,10 @@ function wireContent(section, sub) {
   settingsSnapshot = save ? JSON.stringify(collectSettings()) : null;
   if (save) $("#discard-settings").onclick = () => { settingsSnapshot = null; route(); };
 
-  // Long help folds to two lines with a "More" link. Read once, it is in the way on
+  // Long help folds to one line with a "More" link. Read once, it is in the way on
   // every later visit -- and on the Ripping page it was most of the page.
   $$(".f .help, .section p.help").forEach(h => {
-    if (h.classList.contains("naming-preview") || h.scrollHeight <= 62) return;
+    if (h.classList.contains("naming-preview") || h.scrollHeight <= 42) return;
     h.classList.add("clamp");
     const more = document.createElement("button");
     more.type = "button";
@@ -4073,13 +4186,17 @@ function wireContent(section, sub) {
 
   $$("[data-forget]").forEach(b => b.onclick = () => {
     const fp = b.dataset.forget;
-    undoable(b.closest("figure"), "Disc forgotten",
+    const fig = b.closest("figure");
+    const what = (fig && $(".rip-title", fig)?.textContent.trim()) || "the disc";
+    undoable(fig, `Forgot ${what}`,
              () => api.del(`/api/discs/${encodeURIComponent(fp)}`));
   });
 
   $$("[data-del-share]").forEach(b => b.onclick = () => {
     const id = b.dataset.delShare;
-    undoable(b.closest(".rowitem"), "Share removed", () => api.del(`/api/shares/${id}`));
+    const row = b.closest(".rowitem");
+    const what = (row && $(".t", row)?.childNodes[0]?.textContent.trim()) || "the share";
+    undoable(row, `Removed ${what}`, () => api.del(`/api/shares/${id}`));
   });
 
   const pwGo = $("#pw-go");
@@ -4208,12 +4325,12 @@ function renderChrome() {
   const worst = list.find(p => p.level === "bad") || list[0];
   $("#health-pills").innerHTML = worst
     ? `<a class="pill ${worst.level}" href="#/system/status" title="${esc(
-        list.map(p => p.what || p.message).join("\n"))}">${esc(worst.what
-        ? (worst.short || worst.what) : "Needs attention")}${
+        list.map(p => p.short || p.message).join("\n"))}">${esc(worst.short || "Needs attention")}${
         list.length > 1 ? ` <b>+${list.length - 1}</b>` : ""}</a>`
     : "";
   // On a phone the sidebar (and its badge) is hidden behind the menu button.
   $("#hamburger").classList.toggle("has-issues", !!list.length);
+  $("#hamburger").classList.toggle("bad", list.some(p => p.level === "bad"));
 }
 
 $("#hamburger").onclick = (e) => {
