@@ -2270,3 +2270,26 @@ body.has-savebar .toast-host { bottom: 78px; }
   .ui-new .sidebar .side-foot { display: none; }
 }
 .hg-body tr.hg-folded { display: none !important; }
+
+/* ── new layout, round 4 ── */
+.np-kicker.ask { color: var(--warn); }
+.np-q { margin: 10px 0 4px; font-size: 14px; line-height: 1.5; color: var(--fg); max-width: 62ch; }
+.np-ask .np-body .job.needs { margin-top: 10px; padding: 0; border: 0; background: none; }
+.ni-label .muted { display: block; font-weight: 400; font-size: 12.5px; margin-top: 2px; }
+.disc-drive { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; font-size: 13px; }
+/* Cancelled is a choice, not a failure: muted, not red. */
+.hg.cancelled .hg-stat, .hg.cancelled .hg-result,
+.hg-body .hist.cancelled .hist-err { color: var(--fg-muted); }
+.stage-why { margin-top: 10px; font-size: 13px; }
+.stage-why > summary { cursor: pointer; color: var(--link); }
+.stage-why > p { margin: 6px 0 0; }
+
+@media (max-width: 820px) {
+  /* Every control a thumb uses is at least 44px tall. */
+  .ui-new .save-bar .btn,
+  .ui-new .hg-more,
+  .ui-new .np-acts .btn { min-height: 44px; }
+  .ui-new .help-more { min-height: 44px; padding: 10px 0; }
+  .ui-new .np-path > summary, .ui-new .ar-fix,
+  .ui-new .stage-why > summary { min-height: 44px; display: inline-flex; align-items: center; }
+}

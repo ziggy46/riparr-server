@@ -889,6 +889,7 @@ views.queue = async () => {
   // different disc in the tray is the next moment, so the tray takes over again.
   const filed = !hero.length && showFiled(q.filed, loaded) ? q.filed : null;
   announceFiled(q.filed);
+  announceAsk(hero.filter(j => j.state === "needs_input"));
   if (filed) setFiledArt(filed);
   if (newLayout()) {
     return nowRipping({ q, ar, drives, loaded, hero, away, busy, filed });
@@ -925,16 +926,19 @@ function nowRipping({ q, ar, drives, loaded, hero, away, busy, filed }) {
     : `<span class="np-art-none">${icon("compact-disc")}</span>`}</div>`;
   // Eject leads: right after a rip it is the next thing anybody does. Disc info next,
   // then whatever belongs to this card, with the destructive one last.
-  const acts = ({ lead = "", trail = "" } = {}) => {
+  const acts = ({ lead = "", trail = "", ejectDisabled = false } = {}) => {
     const disc = loaded ? `
-      <button class="btn sm" id="t-eject" ${busy ? "disabled" : ""}>${icon("eject")} Eject</button>
+      <button class="btn sm" id="t-eject" ${busy || ejectDisabled ? "disabled" : ""}
+              ${ejectDisabled ? `title="Answer or skip first"` : ""}>${icon("eject")} Eject</button>
       <button class="btn sm" id="t-disc">${icon("compact-disc")} Disc info</button>` : "";
     return lead || disc || trail ? `<div class="np-acts">${lead}${disc}${trail}</div>` : "";
   };
   const shell = (img, inner, cls = "") =>
     `<div class="np${cls ? " " + cls : ""}">${poster(img)}<div class="np-body">${inner}</div></div>`;
 
-  let body, strip = true;
+  // The drive's own line -- model, device, what it reads -- is the System page's and Disc
+  // info's business. On the card it's only worth room when there's no disc to show.
+  let body, strip = !loaded;
   if (hero.length) {
     body = hero.map(j => j.state === "needs_input"
       ? shell(artState.image, npAsk(j, acts), "np-ask")
@@ -949,9 +953,11 @@ function nowRipping({ q, ar, drives, loaded, hero, away, busy, filed }) {
   } else {
     // No drive at all, or a disc this drive can't read: the tray explains it best.
     body = tray(drives, state.status.optical, loaded && !busy);
-    strip = false;
+    strip = false;           // the tray carries its own drive line
   }
+  // Not while the same film is being ripped again -- that reads as a duplicate.
   const last = hero.length && q.filed && q.filed.state === "done"
+    && (q.filed.disc_label || "") !== (hero[0].disc_label || "")
     ? `<a class="np-last" href="#/history">${icon("circle-check")}
          <span>Last filed <b>${esc(filedName(q.filed))}</b> · ${esc(ago(q.filed.finished_at))}</span></a>`
     : "";
@@ -1018,17 +1024,17 @@ function npLive(j, acts) {
       <span class="muted">· step ${p.step} of ${p.steps}</span></div>
     <h2 class="np-title" tabindex="-1">${esc((j.title || j.disc_label || "Unknown disc")
       + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : ""))}${seasonTag(j)} ${familyTag(j.disc_family)}</h2>
-    <div class="np-sub">${esc(j.phase || p.name)}</div>
+    <div class="np-sub">${esc(j.phase && j.phase !== verb ? j.phase : p.name)}</div>
     ${j.warning ? `<div class="job-warn">${icon("triangle-exclamation")}<span>${esc(j.warning)}</span></div>` : ""}
     <div class="np-bar${working ? " working" : ""}" role="progressbar" aria-label="Progress of the whole rip"
-         aria-valuemin="0" aria-valuemax="100" aria-valuenow="${shown}"
-         aria-valuetext="${shown}%, step ${p.step} of ${p.steps}${eta ? ", " + esc(eta) : ""}">
+         aria-valuemin="0" aria-valuemax="100"${working ? "" : ` aria-valuenow="${shown}"
+         aria-valuetext="${shown}%, step ${p.step} of ${p.steps}${eta ? ", " + esc(eta) : ""}"`}>
       <i style="width:${p.pct.toFixed(1)}%"></i>${p.ticks.map(x =>
         `<b class="np-tick" style="left:${x.toFixed(1)}%"></b>`).join("")}</div>
     <div class="np-figs"><span class="np-pct">${shown}%</span><span class="grow"></span>
       <span class="np-eta">${esc(eta)}</span></div>
-    <div class="np-step">${esc(p.name)}${t && t.mine
-      ? ` · ${esc(duration(t.elapsed))} of a usual ${esc(duration(t.mine))}` : ""}</div>
+    ${t && t.mine ? `<div class="np-step">This step: ${esc(duration(t.elapsed))} of a usual ${
+      esc(duration(t.mine))}</div>` : ""}
     ${planned}
     ${acts({ trail: `<button class="btn sm" data-cancel="${j.id}">${icon("xmark")} Cancel</button>` })}`;
 }
@@ -1036,13 +1042,31 @@ function npLive(j, acts) {
 /* The one moment Riparr needs a person, in the same card as everything else: the
    question, the poster for context, and one row of buttons. */
 function npAsk(j, acts) {
-  const html = identifyPrompt(j);
-  // The prompt's own Rip it / Skip row takes the drive buttons too, so there's one row.
-  const at = html.lastIndexOf(`<div class="btn-row">`);
-  if (at < 0) return `${html}${acts()}`;
-  const end = html.indexOf("</div>", at);
-  const disc = acts().replace(/^<div class="np-acts">|<\/div>$/g, "");
-  return html.slice(0, end) + disc + html.slice(end);
+  // The prompt's form, under the same heading as every other card: what's happening,
+  // the disc's name, and the question. The old header (label + badge) goes.
+  const holder = document.createElement("div");
+  holder.innerHTML = identifyPrompt(j);
+  const form = holder.firstElementChild;
+  const q = form.querySelector(".job-phase")?.textContent.trim();
+  form.querySelector(".job-head")?.remove();
+  // One full-size primary, everything else the same small size, Eject held back while
+  // the question is open -- the answer is about the disc that's in there.
+  const row = form.querySelector(".btn-row");
+  if (row) {
+    row.className = "np-acts";
+    row.querySelectorAll(".btn").forEach(b => b.classList.add("sm"));
+    row.insertAdjacentHTML("beforeend",
+      acts({ ejectDisabled: true }).replace(/^<div class="np-acts">|<\/div>$/g, ""));
+  }
+  const name = j.title || pretty(j.disc_label) || "A disc";
+  const tv = !!(j.episode_plan || {}).episodes;
+  return `
+    <div class="np-kicker ask">${icon("triangle-exclamation")} Needs you
+      <span class="muted">\u00b7 ${tv ? "check the episodes" : "which film is this?"}</span></div>
+    <h2 class="np-title" tabindex="-1">${esc(name)} ${familyTag(j.disc_family)}</h2>
+    ${j.disc_label && j.disc_label !== name ? `<div class="np-sub">${esc(j.disc_label)}</div>` : ""}
+    ${q ? `<p class="np-q">${esc(q)}</p>` : ""}
+    ${form.outerHTML}`;
 }
 
 function npIdle(drives, loaded, busy, acts) {
@@ -1115,12 +1139,30 @@ let lastFiledSeen;
 function announceFiled(j) {
   const id = j ? j.id : null;
   if (lastFiledSeen !== undefined && id && id !== lastFiledSeen) {
-    const el = $("#announce");
-    if (el) el.textContent = j.state === "done"
+    say(j.state === "done"
       ? `${filedName(j)} is in your library.`
-      : `${filedName(j)} didn't finish. ${j.error || ""}`;
+      : `${filedName(j)} didn't finish. ${j.error || ""}`);
   }
   lastFiledSeen = id;
+}
+
+let askSeen = new Set();
+function announceAsk(asking) {
+  const ids = new Set(asking.map(j => j.id));
+  const fresh = asking.filter(j => !askSeen.has(j.id));
+  if (fresh.length) say(`${fresh[0].title || pretty(fresh[0].disc_label) || "A disc"} needs you.`);
+  askSeen = ids;
+  // In the tab title too, so it's seen from another tab.
+  document.title = asking.length ? `(${asking.length}) Needs you \u00b7 Riparr` : "Riparr";
+}
+
+/* Clear, then set: a live region only speaks when its text changes, and the same film
+   finishing twice would otherwise be silent the second time. */
+function say(text) {
+  const el = $("#announce");
+  if (!el) return;
+  el.textContent = "";
+  setTimeout(() => { el.textContent = text; }, 60);
 }
 
 function focusHeading() {
@@ -1434,6 +1476,8 @@ async function showDiscDetails() {
       <div class="dlg-head"><h3>${esc((d.drive && d.drive.label) || "Disc")}</h3>
         <span class="grow"></span>${familyTag(d.family)}
         <button class="icon-btn" data-close title="Close">${icon("xmark")}</button></div>
+      ${(state.status && state.status.drives || []).map(x => `<p class="disc-drive">${icon("compact-disc")}
+          ${esc(driveName(x))} <span class="muted">${esc(x.device || "")}</span> ${driveTags(x)}</p>`).join("")}
       <p class="muted">${d.drive ? esc([d.drive.vendor, d.drive.model].filter(Boolean).join(" ")) + " · " : ""}${
         d.source === "job" ? "From the rip in progress."
         : d.source === "scan" ? "From the last scan of this disc."
@@ -1762,7 +1806,8 @@ function identifyPrompt(j) {
         </div>` : ""}
       ${titles.length > 1 ? `
         <div class="ni-titles">
-          <div class="ni-label">Which title is the film?</div>
+          <div class="ni-label">Which title is the film?
+            <span class="muted">The film is usually the longest. Riparr remembers your pick for this disc.</span></div>
           ${titles.map(t => `
             <label class="ni-title">
               <input type="radio" name="ni-title" value="${t.index}"
@@ -2203,10 +2248,13 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
           ${good && good.dest_path ? `<span class="hg-path">${icon("hard-drive")} ${esc(shortPath(good.dest_path))}</span>` : ""}</span>
         <span class="hg-meta">${(() => {
           // Successes and the rest counted apart: twelve good rips aren't twelve attempts.
-          const ok = list.filter(x => x.state === "done").length, other = list.length - ok;
+          const ok = list.filter(x => x.state === "done").length;
+          const failed = list.filter(x => x.state === "failed").length;
+          const cancelled = list.filter(x => x.state === "cancelled").length;
           const parts = [];
           if (ok > 1) parts.push(`${ok} rips`);
-          if (other) parts.push(`${other} didn't finish`);
+          if (failed) parts.push(`${failed} failed`);
+          if (cancelled) parts.push(`${cancelled} cancelled`);
           return parts.length ? `${parts.join(", ")} \u00b7 ` : "";
         })()}${esc(ago(latest.finished_at))}</span>
         <span class="hg-chev">${icon("chevron-down")}</span>
@@ -2287,9 +2335,10 @@ function stageNote(byKind) {
          wrong about both.`
       : `Riparr needs two finished rips <b>of the same kind of disc</b> before it can say
          what is normal. Until then the queue counts up rather than down.`}
-      MakeMKV cannot report progress during the disc scan at all — the reads go through
-      <code>/dev/sg0</code>, where neither the file accounting nor the block layer can see
-      them — so what this machine did last time is the only honest estimate there is.</p>`;
+      </p>
+    <details class="stage-why"><summary>Why the estimate starts late</summary>
+      <p class="muted">MakeMKV can't report progress while it scans the disc, so Riparr uses
+      how long this machine took last time.</p></details>`;
 }
 
 function when(ts) {
@@ -4194,7 +4243,10 @@ function wireContent(section, sub) {
 
 
   $$("[data-hgshow]").forEach(b => b.onclick = () => {
-    $$(`[data-hgfold="${CSS.escape(b.dataset.hgshow)}"]`).forEach(r => r.classList.remove("hg-folded"));
+    const rows = $$(`[data-hgfold="${CSS.escape(b.dataset.hgshow)}"]`);
+    rows.forEach(r => r.classList.remove("hg-folded"));
+    // Focus to the first row that just appeared, not back to the top of the page.
+    if (rows[0]) { rows[0].setAttribute("tabindex", "-1"); rows[0].focus(); }
     b.remove();
   });
   $$("[data-hg]").forEach(b => b.onclick = () => {

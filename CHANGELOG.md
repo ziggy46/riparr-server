@@ -48,10 +48,18 @@ is one click away. It's saved on the server, so it follows you between devices.
 - Screen readers hear "The Matrix (1999) is in your library" when a rip finishes, the
   bar is a real progress bar, focus stays put after Dismiss and Discard, and each
   "More" says what it expands.
+- **When Riparr needs you**, the "which film is this?" question uses the same card:
+  "Needs you", the film's name, the question, and one row of buttons with Rip it as the
+  main one. Eject waits until you've answered. The browser tab says "(1) Needs you" and
+  screen readers hear it too.
+- The drive's details (model, device, what it reads) moved into **Disc info**; the card
+  shows them only when there's no disc.
+- On phones every button, toggle and "More" link is at least 44px tall.
 - **History** answers "is it in my library?" first ("In your library · last attempt
   cancelled"), shows the path once, offers retries only for attempts since the last
-  good rip, and folds long runs of successful rips. Pressing Cancel twice no longer
-  shows an error.
+  good rip, and folds long runs of successful rips. Cancelled rips are counted
+  apart from failed ones and aren't shown in red. Pressing Cancel twice no longer shows
+  an error.
 
 **TMDb for TV.** With a TMDb key, season discs look the show up on TMDb as well as films:
 the episode names, plus the show's TMDb, TVDB and IMDb IDs. Without a key, TVmaze is used
