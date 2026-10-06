@@ -866,6 +866,7 @@ views.queue = async () => {
   }
   const jobs = q.jobs;
   const sending = q.sending || [];
+  state.autoripOn = !!ar.enabled;
   state.typical = q.typical_seconds;
   state.typicalN = q.typical_samples;
   state.typicalStages = q.typical_stages || {};
@@ -918,32 +919,95 @@ views.queue = async () => {
    uploading and what was filed last sit in a short strip under it, and Auto Rip and
    the rip options -- set once, rarely touched -- fold into a footer. */
 function nowRipping({ q, ar, drives, loaded, hero, away, busy, filed }) {
-  const art = artState.image;
   const poster = (img) => `<div class="np-art">${img
     ? `<img src="${esc(img)}" alt="">`
     : `<span class="np-art-none">${icon("compact-disc")}</span>`}</div>`;
-  const acts = `<div class="np-acts">
-      <button class="btn sm" id="t-disc" ${drives.some(d => d.present) ? "" : "disabled"}>${
-        icon("compact-disc")} Disc info</button>
-      <button class="btn sm" id="t-eject" ${drives.length && !busy ? "" : "disabled"}>${
-        icon("eject")} Eject</button></div>`;
-  const body = hero.length
-    ? hero.map(j => j.state === "needs_input" ? identifyPrompt(j)
-        : `<div class="np">${poster(art)}<div class="np-body">${jobRow(j)}${acts}</div></div>`).join("")
-    : filed ? filedCard(filed)
-    : `${tray(drives, state.status.optical, loaded && !busy)}${loaded ? acts : ""}`;
-  // "Last filed" only when the card is busy with something else; otherwise the card is it.
-  const last = q.filed && (hero.length || !filed) && q.filed.state === "done"
+  // The drive's own actions, on every card with a disc in the tray -- right after a rip
+  // is exactly when you want Eject.
+  const discActs = loaded ? `
+      <button class="btn sm" id="t-disc">${icon("compact-disc")} Disc info</button>
+      <button class="btn sm" id="t-eject" ${busy ? "disabled" : ""}>${icon("eject")} Eject</button>` : "";
+  const acts = (extra = "") => (extra || discActs)
+    ? `<div class="np-acts">${extra}${discActs}</div>` : "";
+  const shell = (img, inner, cls = "") =>
+    `<div class="np${cls ? " " + cls : ""}">${poster(img)}<div class="np-body">${inner}</div></div>`;
+
+  let body, strip = true;
+  if (hero.length) {
+    body = hero.map(j => j.state === "needs_input"
+      ? `${identifyPrompt(j)}${acts()}`
+      : shell(artState.image, `${jobRow(j)}${acts(
+          `<button class="btn sm" data-cancel="${j.id}">${icon("xmark")} Cancel</button>`)}`, "np-live"))
+      .join("");
+  } else if (filed) {
+    body = shell(filedArt.id === filed.id ? filedArt.image : artState.image, npFiled(filed, acts),
+                 filed.state === "done" ? "np-done" : "np-bad");
+  } else if (loaded && loaded.known && !loaded.cannot_read) {
+    body = shell(artState.image, npKnown(loaded, acts), "np-done");
+  } else {
+    // No disc, a disc it can't read, or a new disc waiting: the tray says it best, and
+    // it already carries the drive line.
+    body = `${tray(drives, state.status.optical, loaded && !busy)}${loaded ? acts() : ""}`;
+    strip = false;
+  }
+  // "Last filed" only while the card is busy with a rip; otherwise it would repeat it.
+  const last = hero.length && q.filed && q.filed.state === "done"
     ? `<a class="np-last" href="#/history">${icon("circle-check")}
-         <span>Last filed <b>${esc(filedName(q.filed))}</b> \u00b7 ${esc(ago(q.filed.finished_at))}</span></a>`
+         <span>Last filed <b>${esc(filedName(q.filed))}</b> · ${esc(ago(q.filed.finished_at))}</span></a>`
     : "";
   return `<div class="np-page">
     ${head("Queue", "")}
-    <div class="card np-card">${body}${trayStrip(drives, state.status.optical)}</div>
+    <div class="card np-card">${body}${strip ? trayStrip(drives, state.status.optical) : ""}</div>
     ${sendingStrip(away)}
     ${last}
     <div class="np-foot">${autoRipPanel(ar)}</div>
   </div>`;
+}
+
+/* The end of a path, which is the part that says where it went; the whole of it is one
+   tap away. */
+function shortPath(p) {
+  const parts = String(p || "").split("/").filter(Boolean);
+  // The folder it's in -- "Movies/The Matrix (1999)" -- not the file name, which on a
+  // TRaSH template is most of a line by itself.
+  return parts.length > 2 ? parts.slice(-3, -1).join("/") : String(p || "");
+}
+
+function npFiled(j, acts) {
+  const ok = j.state === "done";
+  const size = j.bytes_sent || j.bytes_ripped || j.bytes_total;
+  const worked = (j.stages || []).reduce((a, st) => a + st.seconds, 0);
+  const checked = { quick: "size check passed", deep: "full check passed" }[j.verified_mode];
+  const facts = [size ? filesize(size) : "", worked ? `took ${duration(worked)}` : "",
+                 checked || ""].filter(Boolean);
+  // A failed rip is retried here, with the same verbs History offers -- not by sending
+  // somebody off to History to find the button.
+  const retry = !ok && (j.retries || [])[0];
+  return `
+    <div class="np-kicker ${ok ? "ok" : "bad"}">${icon(ok ? "circle-check" : "triangle-exclamation")}
+      ${ok ? "In your library" : "Didn't finish"} <span class="muted">· ${esc(ago(j.finished_at))}</span></div>
+    <h2 class="np-title">${esc(filedName(j))} ${familyTag(j.disc_family)}</h2>
+    ${j.disc_label && j.title ? `<div class="np-sub">${esc(j.disc_label)}</div>` : ""}
+    ${ok && j.dest_path ? `<details class="np-path"><summary>${icon("hard-drive")}<span>${
+        esc(shortPath(j.dest_path))}</span></summary><code>${esc(j.dest_path)}</code></details>` : ""}
+    ${!ok && j.error ? `<p class="np-err">${esc(j.error)}</p>` : ""}
+    ${ok && facts.length ? `<div class="np-facts">${facts.map(esc).join(" · ")}</div>` : ""}
+    ${acts(`${retry ? `<button class="btn sm primary" data-hretry="${j.id}" data-haction="${esc(retry.action)}"
+                title="${esc(retry.why)}">${icon(RETRY_ICON[retry.action] || "arrows-rotate")} ${esc(retry.label)}</button>` : ""}
+      <a class="btn sm" href="#/history">History</a>
+      <button class="btn sm" id="filed-dismiss" data-job="${j.id}">Dismiss</button>`)}`;
+}
+
+function npKnown(d, acts) {
+  const k = d.known;
+  const name = k.title ? (k.year ? `${k.title} (${k.year})` : k.title) : (d.label || "This disc");
+  return `
+    <div class="np-kicker ok">${icon("circle-check")} Already in your library
+      <span class="muted">· ripped ${esc(ago(k.ripped_at))}</span></div>
+    <h2 class="np-title">${esc(name)} ${familyTag(d.disc_family)}</h2>
+    ${d.label ? `<div class="np-sub">${esc(d.label)}</div>` : ""}
+    ${acts(`<button class="btn sm" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip it again</button>
+      <a class="btn sm" href="#/discs">See it in Discs</a>`)}`;
 }
 
 /* ── the rip that just finished ──
@@ -1673,7 +1737,8 @@ function tray(drives, optical, canRip) {
     return `<div class="empty-state">
       <div class="big">${icon("compact-disc")}</div>
       <h2>Nothing in the queue</h2>
-      <p>Insert a disc and close the tray. Riparr takes it from there.</p>
+      <p>${state.autoripOn ? "Insert a disc and close the tray. Riparr takes it from there."
+           : "Insert a disc and close the tray, then press Rip."}</p>
       ${driveLine(d)}
     </div>`;
   }
@@ -1983,7 +2048,7 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
     const result = ok ? (j.verified_mode === "deep" ? "In your library \u00b7 full check passed"
                          : j.verified_mode === "quick" ? "In your library \u00b7 size check passed"
                          : "In your library")
-      : j.state === "cancelled" ? "Cancelled" : (j.error || "Didn't finish").split(/[.:]\s/)[0];
+      : j.state === "cancelled" ? "Cancelled" : (j.error || "Didn't finish");
     const open = histOpen.has(k);
     const find = esc([j.title, j.disc_label, j.year].filter(Boolean).join(" "));
     return `<div class="hg ${esc(j.state)}" data-find="${find}">
@@ -1997,7 +2062,9 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
         <span class="hg-chev">${icon("chevron-down")}</span>
       </button>
       <div class="hg-body"${open ? "" : " hidden"}><table class="hist-table">
-        <tbody>${list.map(row).join("")}</tbody></table></div>
+        <tbody>${list.map((x, i) => row(
+          // An old failure of a disc that has since ripped fine needs no retry button.
+          i > 0 && ok ? Object.assign({}, x, { retries: [] }) : x)).join("")}</tbody></table></div>
     </div>`;
   }).join("");
   return `${head_}<div class="card hg-list">${items}</div>${stageNote(byKind)}`;
@@ -3592,7 +3659,7 @@ async function route(opts) {
     document.body.classList.remove("nav-open");
     $("#hamburger").setAttribute("aria-expanded", "false");
   }
-  document.body.classList.toggle("has-savebar", !!$("#save-bar"));
+  document.body.classList.toggle("has-savebar", !!$("#save-bar") && !newLayout());
   if (state.status) renderChrome();
   applySearch();
   scheduleLiveRefresh(section);
@@ -4269,13 +4336,10 @@ function wireContent(section, sub) {
   settingsSnapshot = save ? JSON.stringify(collectSettings()) : null;
   if (save) $("#discard-settings").onclick = () => { settingsSnapshot = null; route(); };
 
-  if (newLayout() && section === "settings") summaryRows();
-
   // Long help folds to one line with a "More" link. Read once, it is in the way on
   // every later visit -- and on the Ripping page it was most of the page.
   $$(`.f .help, .section p.help${newLayout() ? ", .switch .lbl small" : ""}`).forEach(h => {
     if (h.classList.contains("naming-preview") || h.scrollHeight <= 42) return;
-    if (h.closest(".sr-row")) return;      // a summary row shows its help in full
     h.classList.add("clamp");
     const more = document.createElement("button");
     more.type = "button";
@@ -4476,6 +4540,15 @@ document.addEventListener("click", () => {
 });
 document.addEventListener("keydown", (e) => {
   if (e.key !== "Escape") return;
+  if ($("#sidebar").classList.contains("open")) {
+    $("#sidebar").classList.remove("open");
+    document.body.classList.remove("nav-open");
+    $("#hamburger").setAttribute("aria-expanded", "false");
+    const more = $("#tab-more");
+    if (more) more.setAttribute("aria-expanded", "false");
+    (newLayout() && more ? more : $("#hamburger")).focus();
+    return;
+  }
   if (!$("#user-menu").classList.contains("hidden")) {
     $("#user-menu").classList.add("hidden");
     $("#user-btn").setAttribute("aria-expanded", "false");
@@ -4520,51 +4593,6 @@ search.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && search.value.trim() && !onListPage()) location.hash = "#/discs";
 });
 
-/* ── settings as summary rows (new layout) ──
-   Each simple setting -- one label, one control -- becomes a line with its current
-   value; tapping it opens the control and its explanation underneath. The controls are
-   the same elements, only folded, so saving, Discard and the unsaved-changes guard work
-   exactly as before. Anything more involved (naming templates, the share finder) is
-   left as it is. */
-function rowValue(ctl) {
-  if (ctl.tagName === "SELECT") return ctl.selectedOptions[0]?.textContent.replace(/\s*\(default\)\s*$/, "") || "";
-  if (ctl.type === "password") return ctl.value ? "Set" : "Not set";
-  return ctl.value.trim() || "Not set";
-}
-function summaryRows() {
-  $$("#content .f").forEach(f => {
-    const ctls = $$("input, select, textarea", f);
-    if (ctls.length !== 1 || !ctls[0].matches("[data-set]") || ctls[0].type === "checkbox") return;
-    if (f.closest(".grid2, .dests, [data-naming], .sf, #share-add")) return;
-    const ctl = ctls[0];
-    const label = f.querySelector(":scope > span:first-child")?.textContent.trim();
-    if (!label) return;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "sr-head";
-    btn.setAttribute("aria-expanded", "false");
-    btn.innerHTML = `<span class="sr-k"></span><span class="sr-v"></span>${icon("chevron-down")}`;
-    btn.querySelector(".sr-k").textContent = label;
-    const paint = () => { btn.querySelector(".sr-v").textContent = rowValue(ctl); };
-    paint();
-    ctl.addEventListener("change", paint);
-    ctl.addEventListener("input", paint);
-    const row = document.createElement("div");
-    row.className = "sr-row";
-    f.before(row);
-    row.append(btn, f);
-    f.classList.add("sr-body");
-    f.hidden = true;
-    btn.onclick = () => {
-      const open = f.hidden;
-      f.hidden = !open;
-      btn.setAttribute("aria-expanded", String(open));
-      if (open) ctl.focus({ preventScroll: true });
-    };
-  });
-  paintIcons($("#content"));
-}
-
 /* ── unsaved settings ──
    Settings pages save with one button, so a change can be left behind by clicking
    away. The snapshot is taken when the page is wired; anything different from it
@@ -4578,6 +4606,7 @@ function markDirty() {
   if (!bar) return;
   const dirty = settingsDirty();
   bar.classList.toggle("dirty", dirty);
+  document.body.classList.toggle("has-savebar", !newLayout() || dirty);
   $("#save-state").textContent = dirty ? "You have unsaved changes" : "No unsaved changes";
   $("#discard-settings").hidden = !dirty;
 }
@@ -4653,7 +4682,7 @@ const newLayout = () => (state.settings || {}).ui_layout === "new";
    top corner. More opens the same drawer the menu button did, with Settings and System
    in it, and carries the dot when something needs attention. Shown by CSS only in the
    new layout and only on narrow screens. */
-const TABS = [["queue", "Queue", "table"], ["history", "History", "clock-rotate-left"],
+const TABS = [["queue", "Queue", "play"], ["history", "History", "clock-rotate-left"],
               ["discs", "Discs", "compact-disc"]];
 function renderTabs(section) {
   let bar = $("#tabs");
@@ -4670,14 +4699,21 @@ function renderTabs(section) {
     `<a href="#/${id}" class="tab${section === id ? " on" : ""}"${
       section === id ? ` aria-current="page"` : ""}>${icon(ic)}<span>${label}</span></a>`).join("")
     + `<button type="button" class="tab${["settings", "system"].includes(section) ? " on" : ""}"
-         id="tab-more" aria-controls="sidebar" aria-expanded="false">${icon("bars")}<span>More</span>${
-         issues ? `<i class="tab-dot" aria-label="${issues} need attention"></i>` : ""}</button>`;
+         id="tab-more" aria-controls="sidebar" aria-expanded="false" aria-haspopup="true"${
+         ["settings", "system"].includes(section) ? ` aria-current="page"` : ""}>${icon("bars")}<span>More${
+         issues ? `<span class="sr-only">, ${issues} need${issues === 1 ? "s" : ""} attention</span>` : ""}</span>${
+         issues ? `<i class="tab-dot" aria-hidden="true"></i>` : ""}</button>`;
   paintIcons(bar);
   $("#tab-more").onclick = (e) => {
     e.stopPropagation();
     const open = $("#sidebar").classList.toggle("open");
     document.body.classList.toggle("nav-open", open);
     $("#tab-more").setAttribute("aria-expanded", String(open));
+    // Into the drawer, at its first item that isn't already a tab.
+    if (open) {
+      const first = $$("#sidebar a").find(a => a.offsetParent !== null);
+      if (first) first.focus();
+    }
   };
 }
 function applyLayout() {

@@ -1087,7 +1087,7 @@ def queue(user=Depends(require_user)):
     filed = db.last_finished(time.time() - 12 * 3600)
     return {"jobs": [j for j in jobs if j.get("state") not in db.SENDING_STATES],
             "sending": sending,
-            "filed": dict(_job_out(filed), titles=None) if filed else None,
+            "filed": _filed_out(filed) if filed else None,
             "drive_busy": bool(db.drive_busy()),
             "typical_seconds": typical, "typical_samples": samples,
             "typical_stages": stages, "typical_kind": kind,
@@ -1097,6 +1097,16 @@ def queue(user=Depends(require_user)):
             "stage_label_sets": {"direct": db.stage_labels(True),
                                  "staged": db.stage_labels(False)},
             "stage_order": db.STAGE_ORDER}
+
+
+def _filed_out(job):
+    """The last finished rip, with the retries History would offer for it."""
+    j = _job_out(job)
+    local = j.get("local_path")
+    j["local_exists"] = bool(local and os.path.exists(local))
+    j["retries"] = _retries_for(j)
+    j["titles"] = None
+    return j
 
 
 def _tray_family():

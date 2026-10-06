@@ -26,9 +26,17 @@ is one click away. It's saved on the server, so it follows you between devices.
   button in the top corner. More opens Settings and System, and shows a dot when
   something needs attention.
 - **History** shows one line per disc, with how its latest rip went, and every attempt
-  underneath when you open it.
-- **Settings** show each simple setting as one line with its current value; tap it to
-  change it and read the explanation.
+  underneath when you open it. Old failures of a disc that has since ripped fine no
+  longer offer a retry.
+- **The disc keeps one shape.** Ripping, finished and already-ripped all use the same
+  big card with the poster, with Disc info and Eject on every one. The rip card shows one
+  phase line, one bar and one finish time, with a Cancel button. A finished rip shows the
+  folder it went to, with the full path a tap away. A failed one has its Retry button
+  right there.
+- **Settings** keep every control visible and fold the explanations to one line, and the
+  Save bar only appears once you've changed something.
+- On phones, the More drawer holds just Settings and System, takes keyboard focus, and
+  closes with Escape.
 
 **TMDb for TV.** With a TMDb key, season discs look the show up on TMDb as well as films:
 the episode names, plus the show's TMDb, TVDB and IMDb IDs. Without a key, TVmaze is used
