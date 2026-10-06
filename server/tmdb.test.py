@@ -109,6 +109,12 @@ check("no year and only one film of that name", T.pick("Heat", None,
                                                       [film(949, "Heat", 1995)])["id"], 949)
 check("two films of that name in the same year: ask",
       T.pick("Crash", 1996, [film(1, "Crash", 1996), film(2, "Crash", 1996)]), None)
+heat = [film(949, "Heat", 1995, 7500), film(136795, "The Heat", 2013, 5000)]
+check("HEAT is Heat, not The Heat", T.pick("Heat", None, heat)["id"], 949)
+check("and THE_HEAT is The Heat", T.pick("The Heat", None, heat)["id"], 136795)
+check("a label without 'The' doesn't pick an obscure exact title",
+      T.pick("Matrix", None, [film(603, "The Matrix", 1999, 26000),
+                              film(5, "Matrix", 1998, 20)])["id"], 603)
 
 print("names")
 check("a stored name splits into title and year", T.split("Blade Runner (1982)"),
@@ -148,6 +154,26 @@ with mock.patch.object(T.urllib.request, "urlopen", tmdb_api):
           (r["match"] or {}).get("id"), 78)
     check("and the candidates are kept for asking", len(r["candidates"]), 2)
     check("a poster URL", T.poster_url("/br.jpg"), "https://image.tmdb.org/t/p/w780/br.jpg")
+
+
+def searched_as(name):
+    """The (query, year) pairs identify() tries for a name, in order."""
+    seen = []
+
+    def fake_search(t, y=None):
+        seen.append((t, y))
+        return []
+    with mock.patch.object(T, "search", fake_search):
+        T.identify(name)
+    return seen
+
+
+check("edition words are dropped only after the full name fails",
+      searched_as("ALIEN_DIRECTORS_CUT"), [("alien directors cut", None), ("alien", None)])
+check("a bare year is tried as the year, after the whole name",
+      searched_as("DUNE_2021"), [("dune 2021", None), ("dune", 2021)])
+check("so a film called Wonder Woman 1984 is searched as itself first",
+      searched_as("WONDER_WOMAN_1984")[0], ("wonder woman 1984", None))
 
 print("the IDs reach the file name")
 job = {"disc_family": "bluray", "tmdb_id": 78, "imdb_id": "tt0083658",

@@ -179,6 +179,13 @@ def _key(title):
     return t
 
 
+def _strict(title):
+    """_key, but keeping a leading article: "Heat" and "The Heat" are different films."""
+    t = unicodedata.normalize("NFKD", title or "")
+    t = "".join(c for c in t if not unicodedata.combining(c)).lower()
+    return re.sub(r"[^a-z0-9]+", " ", t.replace("&", " and ")).strip()
+
+
 def pick(title, year, results):
     """The one film these results confidently mean, or None. See the module docstring."""
     want = _key(title)
@@ -186,6 +193,22 @@ def pick(title, year, results):
         return None
     same = [r for r in results
             if _key(r["title"]) == want or _key(r["original_title"]) == want]
+    # Titles that match with the article as written come first. Ignoring "The" is
+    # right for MATRIX -> The Matrix, but it made HEAT ambiguous with The Heat (2013).
+    strict = [r for r in same if _strict(title) in (_strict(r["title"]),
+                                                    _strict(r["original_title"]))]
+    if strict and len(strict) < len(same):
+        found = pick_from(strict, year)
+        # Unless it's obscure next to the others: a label that dropped "The" (MATRIX)
+        # must not pick a 20-vote film called "Matrix" over The Matrix.
+        others = max((r["votes"] for r in same if r not in strict), default=0)
+        if found and found["votes"] >= MIN_VOTES and found["votes"] * DOMINANCE >= others:
+            return found
+    return pick_from(same, year)
+
+
+def pick_from(same, year):
+    """The confident choice among results whose titles all match."""
     if year:
         exact = [r for r in same if r["year"] == year]
         if len(exact) == 1:
@@ -203,6 +226,17 @@ def pick(title, year, results):
 
 
 _YEAR = re.compile(r"^(.*?)\s*\((\d{4})\)\s*$")
+# A year with no brackets at the end of a label: DUNE_2021. Only tried after the whole
+# name has failed, because for Wonder Woman 1984 or Blade Runner 2049 it's the title.
+_BARE_YEAR = re.compile(r"^(.+?)\s+((?:19|20)\d{2})$")
+# Words on the box rather than in the title. Dropped only after the full name failed,
+# so a film actually called "The Final Cut" is still found by its name.
+_EDITION = re.compile(
+    r"\s+(?:(?:the\s+)?(?:directors?|director s|final|theatrical|extended|ultimate|"
+    r"special|collectors?|collector s|anniversary|definitive|unrated|uncut|remastered|"
+    r"limited|criterion)(?:\s+(?:cut|edition|version|collection))?|"
+    r"(?:\d+(?:th)?\s+)?anniversary(?:\s+edition)?|imax(?:\s+edition)?|"
+    r"4k|uhd|blu\s*ray|dvd)(?:\s+.*)?$", re.I)
 
 
 def split(name):
@@ -224,10 +258,27 @@ def identify(name):
     confident match.
     """
     title, year = split(name)
-    results = search(title, year)
-    chosen = pick(title, year, results)
-    match = details(chosen["id"]) if chosen else None
-    return {"match": match, "candidates": results[:6], "query": title, "year": year}
+    tries = [(title, year)]
+    if not year:
+        bare = _EDITION.sub("", title).strip()
+        if bare and bare != title:
+            tries.append((bare, None))
+        for t in (title, bare):
+            m = _BARE_YEAR.match(t or "")
+            if m and (m.group(1).strip(), int(m.group(2))) not in tries:
+                tries.append((m.group(1).strip(), int(m.group(2))))
+    # The suggestions shown when nothing is certain come from the last reading that
+    # found anything -- the most cleaned-up one, which is the best list to pick from.
+    shown = ([], title, year)
+    for t, y in tries:
+        results = search(t, y)
+        if results:
+            shown = (results, t, y)
+        chosen = pick(t, y, results)
+        if chosen:
+            return {"match": details(chosen["id"]), "candidates": results[:6],
+                    "query": t, "year": y}
+    return {"match": None, "candidates": shown[0][:6], "query": shown[1], "year": shown[2]}
 
 
 def poster_url(path):
