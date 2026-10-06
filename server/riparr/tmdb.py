@@ -308,6 +308,7 @@ def search_tv(name):
         data = _request("/search/tv", {"query": name, "include_adult": "false"})
         return [{"id": r.get("id"), "name": r.get("name") or r.get("original_name") or "",
                  "year": _year(r.get("first_air_date")),
+                 "country": "/".join(r.get("origin_country") or []),
                  "votes": int(r.get("vote_count") or 0)}
                 for r in (data.get("results") or [])[:10] if r.get("id")]
     try:

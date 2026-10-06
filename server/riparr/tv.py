@@ -475,7 +475,10 @@ def is_tmdb(series_id):
 def _from_tmdb(results):
     return [{"id": -int(r["id"]), "name": r["name"],
              "year": str(r["year"]) if r.get("year") else None,
-             "network": "", "score": r.get("votes") or 0, "source": "tmdb"}
+             # Where it's from, in the picker's network slot: "The Office (2001) — GB"
+             # is the difference that matters between two shows of the same name.
+             "network": r.get("country") or "", "score": r.get("votes") or 0,
+             "source": "tmdb"}
             for r in results]
 
 
@@ -497,6 +500,37 @@ def ids(series_id):
     ext = (show or {}).get("externals") or {}
     return {k: v for k, v in (("tvdb_id", ext.get("thetvdb")),
                               ("imdb_id", ext.get("imdb"))) if v}
+
+
+def describe(series):
+    """'The Office (2005)', for sentences."""
+    s = series or {}
+    return "%s%s" % (s.get("name") or "a show", " (%s)" % s["year"] if s.get("year") else "")
+
+
+def pick_series(name, options):
+    """The show `name` confidently means, from search results, or None.
+
+    The film rule, applied to shows: a wrong show is worse than a question, because
+    every disc after this one follows it. Confident means exactly one result whose name
+    matches the label's, or -- when several share the name, as The Office (US) and The
+    Office (UK) do -- one with ten times the TMDb votes of the next. TVmaze's search
+    score measures how well the name matched, not how well known the show is, so two
+    TVmaze shows of the same name are always a question.
+    """
+    from .tmdb import _key, DOMINANCE, MIN_VOTES
+    want = _key(name)
+    if not want:
+        return None
+    same = [o for o in options or [] if _key(o.get("name")) == want]
+    if len(same) == 1:
+        return same[0]
+    if len(same) > 1 and all(o.get("source") == "tmdb" for o in same):
+        ranked = sorted(same, key=lambda o: o.get("score") or 0, reverse=True)
+        top, second = ranked[0].get("score") or 0, ranked[1].get("score") or 0
+        if top >= MIN_VOTES and top >= DOMINANCE * max(second, 1):
+            return ranked[0]
+    return None
 
 
 # ── TVmaze ───────────────────────────────────────────────────────────────────

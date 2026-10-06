@@ -1385,14 +1385,21 @@ def _identify_season(job, s, d, titles, remembered):
                    or pretty_label(label) or "")
 
     series, episode_list, options = None, [], []
+    unsure_series = False
     if s.get("tv_metadata", True) and series_name:
         options = tv.search_series(series_name)
-        if remembered.get("series_id"):
-            series = (next((c for c in options
-                            if c["id"] == remembered["series_id"]), None)
-                      or {"id": remembered["series_id"], "name": series_name})
-        elif options:
-            series = options[0]
+        # Which show, in order of how sure we are: chosen for this disc before; chosen
+        # for an earlier disc of the same box set; the one search result that clearly
+        # is it. Anything less is a guess -- the top result is still used to fill in a
+        # plan, but the disc stops and asks, whatever disc of the set it is.
+        known = remembered.get("series_id") or db.last_series_id(series_name)
+        if known:
+            series = (next((c for c in options if c["id"] == known), None)
+                      or {"id": known, "name": series_name})
+        else:
+            series = tv.pick_series(series_name, options)
+            if not series and options:
+                series, unsure_series = options[0], True
         if series:
             episode_list = tv.episodes(series["id"])
 
@@ -1469,7 +1476,13 @@ def _identify_season(job, s, d, titles, remembered):
     ask = (season is None
            or behaviour == "ask"
            or (behaviour == "unsure"
-               and (found["confidence"] != "high" or first_of_season)))
+               and (found["confidence"] != "high" or first_of_season or unsure_series)))
+    if unsure_series and not ask:
+        # "Never ask" is honoured, but the guess is said out loud on the job.
+        plan["series_warning"] = (
+            "Riparr wasn't sure which show \u201c%s\u201d is and used %s. If that's "
+            "wrong, re-rip the disc and pick the right one."
+            % (series_name, tv.describe(series)))
 
     db.update_job(job["id"], kind="tv", titles=titles, episode_plan=plan,
                   season=season, series_id=(series or {}).get("id"),
@@ -1480,7 +1493,11 @@ def _identify_season(job, s, d, titles, remembered):
 
     if ask:
         n = len(plan["episodes"])
-        if season is None:
+        if unsure_series:
+            question = ("Riparr isn't sure which show “%s” is — it picked "
+                        "%s. Check the series and the order before it rips."
+                        % (series_name, tv.describe(series)))
+        elif season is None:
             question = ("This looks like a season disc — %d episode%s — but nothing "
                         "says which season. Set it and check the order."
                         % (n, "" if n == 1 else "s"))
@@ -1507,6 +1524,7 @@ def _commit_season(job, s, d, titles, plan):
     warning = uhd_warning(d, P.libredrive_status(d, block=True))
     if warning:
         log.warning("Job %d: %s", job["id"], warning)
+    warning = " ".join(w for w in (plan.get("series_warning"), warning) if w) or None
     db.stage_end(job["id"])
     db.update_job(job["id"], kind="tv", titles=titles, episode_plan=plan,
                   season=plan.get("season"), series_id=plan.get("series_id"),

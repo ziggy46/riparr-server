@@ -724,6 +724,21 @@ def episode_plan(job):
         return {}
 
 
+def last_series_id(series_name):
+    """The show picked for this name on the last finished disc, or None.
+
+    So disc 2 of The Office (UK) follows the answer given on disc 1 instead of asking
+    which Office again -- or worse, quietly taking the American one.
+    """
+    if not series_name:
+        return None
+    row = conn().execute(
+        "SELECT series_id FROM jobs WHERE kind='tv' AND state='done' AND title=? "
+        "AND series_id IS NOT NULL ORDER BY COALESCE(finished_at,0) DESC LIMIT 1",
+        (series_name,)).fetchone()
+    return row["series_id"] if row else None
+
+
 def next_episode(series_id, season, series_name=None):
     """Where the next disc of this season should start numbering, or None.
 

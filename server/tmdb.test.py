@@ -250,6 +250,36 @@ db.update_job(jid, season=1, series_id=180, episode_plan=json.dumps(
 check("a box set keeps counting when the episode source changes",
       db.next_episode(-1437, 1, series_name="Firefly"), 5)
 
+print("which show, confidently")
+office = [{"id": -2316, "name": "The Office", "year": "2005", "score": 5540, "source": "tmdb"},
+          {"id": -2996, "name": "The Office", "year": "2001", "score": 1010, "source": "tmdb"},
+          {"id": -9, "name": "The Office Mixer", "year": "2019", "score": 4, "source": "tmdb"}]
+check("two well-known shows of that name: ask", TV.pick_series("The Office", office), None)
+check("one show of that name: use it",
+      TV.pick_series("Breaking Bad", [{"id": -1396, "name": "Breaking Bad", "score": 15000,
+                                       "source": "tmdb"},
+                                      {"id": -5, "name": "Breaking Bad: Original Minisodes",
+                                       "score": 30, "source": "tmdb"}])["id"], -1396)
+check("punctuation doesn't matter",
+      TV.pick_series("Star Trek The Next Generation",
+                     [{"id": -655, "name": "Star Trek: The Next Generation", "score": 2000,
+                       "source": "tmdb"}])["id"], -655)
+check("one far better known than the rest: use it",
+      TV.pick_series("Lost", [{"id": -4607, "name": "Lost", "score": 4600, "source": "tmdb"},
+                              {"id": -7, "name": "Lost", "score": 12, "source": "tmdb"}])["id"],
+      -4607)
+check("TVmaze scores are about the name, so two of the same name ask",
+      TV.pick_series("Lost", [{"id": 123, "name": "Lost", "score": 0.89, "source": "tvmaze"},
+                              {"id": 456, "name": "Lost", "score": 0.88, "source": "tvmaze"}]),
+      None)
+check("no result with that name at all: ask",
+      TV.pick_series("Lotr", [{"id": -1, "name": "Lot", "score": 9, "source": "tmdb"}]), None)
+uk = db.create_job(title="The Office", disc_label="THE_OFFICE_S1D1", kind="tv",
+                   fingerprint="", state="done", phase=None, mode=None, bytes_total=1)
+db.update_job(uk, series_id=-2996, finished_at=1)
+check("disc 2 follows the show picked on disc 1", db.last_series_id("The Office"), -2996)
+check("and a show never ripped has no previous pick", db.last_series_id("Lost"), None)
+
 print()
 if failures:
     print("%d check(s) failed: %s" % (len(failures), ", ".join(failures)))

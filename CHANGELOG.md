@@ -26,6 +26,13 @@ Standard, Plex, Emby and Jellyfin. The Plex, Emby and Jellyfin ones put the TVDB
 the series folder, for example `Breaking Bad (2008) {tvdb-81189}/Season 01/…`. There's
 a new `{TvdbId}` token.
 
+**Riparr asks when it isn't sure which show.** A label like `THE_OFFICE_S2D1` matches
+the US (2005), UK (2001) and other versions. Riparr now only picks a show by itself when
+one clearly matches: your earlier pick for that box set, the only show with that name,
+or one far better known than the rest. Otherwise the disc stops and asks, even if it
+isn't the first disc of the season, and the list shows each show's year and country.
+Under "Never — just rip it" it carries on with its best guess and says so on the job.
+
 **"Series 1" labels.** British box sets label seasons "Series 1"; that's now read as
 season 1, so `SHERLOCK_SERIES_1` is *Sherlock*, season 1.
 
