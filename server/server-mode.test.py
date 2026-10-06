@@ -174,6 +174,18 @@ with mock.patch.dict(os.environ, {}, clear=False):
     os.environ.pop("RIPARR_CHANNEL", None)
     check("no image at all is a source checkout", riparr.build()["channel"], "dev")
 
+print("why the library can't be written to")
+_lib = tempfile.mkdtemp(prefix="riparr-lib-")
+with mock.patch.object(P, "MOCK", False), mock.patch.object(P, "LIBRARY_MOUNT", _lib):
+    check("a plain folder is not a mount", "Nothing is mounted" in (P.library_problem() or ""), True)
+    with mock.patch.object(P.os.path, "ismount", return_value=True), \
+            mock.patch.object(P.os, "access", return_value=False):
+        msg = P.library_problem() or ""
+        check("a mount Riparr can't write to says so, with the fix",
+              ("can't write" in msg, "PUID/PGID" in msg), (True, True))
+    with mock.patch.object(P.os.path, "ismount", return_value=True):
+        check("a writable mount has no problem", P.library_problem(), None)
+
 print("the password reset file")
 from riparr import main  # noqa: E402  (imported late: it reads RIPARR_DB at import)
 db.create_user("admin", "a-test-password")

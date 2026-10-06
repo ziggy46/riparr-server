@@ -484,6 +484,37 @@ def library_mounted(share=None):
     return os.access(mount, os.W_OK)
 
 
+def library_problem(share=None):
+    """Why rips can't go straight into the library, in a sentence, or None.
+
+    "Not mounted" covered two different faults that need different fixes: nothing is
+    bind-mounted at the path, or something is but Riparr's user can't write to it -- a
+    network share mounted on the host as root is the usual one.
+    """
+    mount = library_mount(share)
+    if MOCK:
+        if not os.path.isdir(mount):
+            return "Nothing is mounted at %s." % mount
+        return None if os.access(mount, os.W_OK) else (
+            "%s is mounted, but Riparr can't write to it." % mount)
+    try:
+        if not os.path.ismount(mount):
+            return ("Nothing is mounted at %s. Add it to the container's volumes and "
+                    "recreate the container." % mount)
+    except OSError as e:
+        return "Riparr can't look at %s: %s." % (mount, e.strerror or e)
+    if not os.access(mount, os.W_OK):
+        try:
+            st = os.stat(mount)
+            owner = " (owned by %d:%d, mode %o)" % (st.st_uid, st.st_gid, st.st_mode & 0o777)
+        except OSError:
+            owner = ""
+        return ("%s is mounted, but Riparr runs as %d:%d and can't write to it%s. "
+                "Set PUID/PGID to the owner, or mount the share with uid=%d,gid=%d."
+                % (mount, os.getuid(), os.getgid(), owner, os.getuid(), os.getgid()))
+    return None
+
+
 def library_status(share=None):
     """What the interface needs to say about direct-to-library writing."""
     mount = library_mount(share)
@@ -495,7 +526,8 @@ def library_status(share=None):
             free = st.f_bavail * st.f_frsize
         except OSError:
             free = None
-    return {"mount": mount, "mounted": mounted, "free_bytes": free}
+    return {"mount": mount, "mounted": mounted, "free_bytes": free,
+            "problem": None if mounted else library_problem(share)}
 
 
 # ─────────────────────── how fast is this card, really? ───────────────────────

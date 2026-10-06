@@ -2075,7 +2075,7 @@ function ripOptions() {
   const lib = (state.status && state.status.library) || {};
   const direct = s.transfer_mode === "direct";
   const card = s.card_speed || {};
-  const route = direct && !lib.mounted ? "staged, then copied (library not mounted)"
+  const route = direct && !lib.mounted ? "staged, then copied (library not usable yet)"
               : direct ? "straight to your library"
               : "staged, then sent";
   const check = { quick: "size check", deep: "full check", off: "no check" }[s.verify_mode]
@@ -2093,7 +2093,7 @@ function ripOptions() {
                 title="Measures your staging disk and says which of these suits it">Test staging speed</button>
         <select id="ar-route" title="Applies to every rip, automatic or started by hand">
           ${opt("direct", lib.mounted ? "straight to your library"
-                                       : "straight to your library (not mounted yet)", s.transfer_mode)}
+                                       : "straight to your library (not usable yet)", s.transfer_mode)}
           ${opt("auto", "staged first, then sent", s.transfer_mode)}
         </select>
       </div>
@@ -2105,8 +2105,8 @@ function ripOptions() {
           : `The rip is safe in staging before anything is sent, so a network that drops
              mid-disc costs a re-send rather than a re-rip.`}</p>
       ${!lib.mounted && direct ? `<p class="ropt-warn">${icon("triangle-exclamation")}
-        <span>Your library isn't mounted at ${esc(lib.mount || "/srv/library")}, so rips
-        are staged and copied over SMB instead.</span></p>` : ""}
+        <span>${esc(lib.problem || `Your library isn't mounted at ${lib.mount || "/srv/library"}.`)}
+        Until then, rips are staged and copied over SMB.</span></p>` : ""}
       <span class="test-out ropt-out" id="ar-speed-out"></span>
     </div>
 
@@ -2593,7 +2593,7 @@ settingsPages.library = async (s) => {
           : lib.mounted
             ? `${icon("circle-check", "ok")} Mounted at <code>${esc(lib.mount)}</code>,
                so <b>Straight to your library</b> works for this one.`
-            : `${icon("circle-info")} Not mounted`}
+            : `${icon("circle-info")} ${esc(lib.problem || "Not mounted")}`}
         </div>
       </div>`;
   };
