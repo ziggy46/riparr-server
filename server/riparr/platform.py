@@ -239,6 +239,8 @@ def optical_drives():
 #   RIPARR_MOCK_DRIVE = uhd | bluray | dvd | none
 #   RIPARR_MOCK_DISC  = uhd | bluray | dvd | none
 #   RIPARR_MOCK_LABEL = a volume label to report instead of the default
+#   RIPARR_MOCK_DRIVES = 2 adds a second drive, a DVD writer at /dev/sr1, to rip two
+#                        discs at once; RIPARR_MOCK_DISC2 / RIPARR_MOCK_LABEL2 set its disc
 _MOCK_DRIVES = {
     "uhd": {"vendor": "HL-DT-ST", "model": "BD-RE BU40N",
             "reads_dvd": True, "reads_bluray": True},
@@ -262,34 +264,43 @@ def _mock_drives():
     which = os.environ.get("RIPARR_MOCK_DRIVE", "bluray")
     if which == "none":
         return []
+    out = [_mock_drive("/dev/sr0", which, os.environ.get("RIPARR_MOCK_DISC", "bluray"),
+                       os.environ.get("RIPARR_MOCK_LABEL"))]
+    try:
+        extra = int(os.environ.get("RIPARR_MOCK_DRIVES") or 1) - 1
+    except ValueError:
+        extra = 0
+    for i in range(1, 1 + max(0, extra)):
+        out.append(_mock_drive("/dev/sr%d" % i, "dvd",
+                               os.environ.get("RIPARR_MOCK_DISC2", "dvd"),
+                               os.environ.get("RIPARR_MOCK_LABEL2") or "ARRIVAL"))
+    return out
+
+
+def _mock_drive(device, which, disc, label):
     spec = _MOCK_DRIVES.get(which, _MOCK_DRIVES["bluray"])
     caps = {"dvd": spec["reads_dvd"], "bluray": spec["reads_bluray"]}
     uhd, known = DRV.expectation(spec["vendor"], spec["model"],
                                  can_read_bluray=caps["bluray"])
-    d = {"device": "/dev/sr0", "vendor": spec["vendor"], "model": spec["model"],
+    d = {"device": device, "vendor": spec["vendor"], "model": spec["model"],
          "present": False, "tray": "empty",
          "media": None, "media_kind": None, "label": None, "size_bytes": 0,
          "reads_dvd": caps["dvd"], "reads_bluray": caps["bluray"],
          "uhd": uhd, "known_as": known["name"] if known else None,
          "form": known["form"] if known else None}
 
-    disc = os.environ.get("RIPARR_MOCK_DISC", "bluray")
     if disc != "none" and disc in _MOCK_DISCS:
         # A drive that cannot read the medium still reports the tray as loaded -- that
         # is what the hardware does, and pretending otherwise would hide the exact
         # mismatch this knob exists to exercise.
         d.update(_MOCK_DISCS[disc], present=True, tray="loaded")
-        # RIPARR_MOCK_LABEL renames the simulated disc, e.g. BREAKING_BAD_S1_D1 with
-        # RIPARR_MOCK_CONTENT=tv to walk a season disc through.
-        if os.environ.get("RIPARR_MOCK_LABEL"):
-            d["label"] = os.environ["RIPARR_MOCK_LABEL"]
         # The volume label is what the identify stage reasons from -- a film name, or a
-        # season and disc number on a box set. Overridable so that behaviour can be
-        # exercised off-hardware without a drawer of real discs.
-        label = os.environ.get("RIPARR_MOCK_LABEL")
+        # season and disc number on a box set (BREAKING_BAD_S1_D1 with
+        # RIPARR_MOCK_CONTENT=tv). Overridable so that behaviour can be exercised
+        # off-hardware without a drawer of real discs.
         if label:
             d["label"] = label
-    return [d]
+    return d
 
 
 # ─────────────────────── UHD: the question only MakeMKV can answer ───────────────────────

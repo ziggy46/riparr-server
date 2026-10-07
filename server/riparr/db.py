@@ -122,6 +122,10 @@ ADDED_COLUMNS = {
         ("tmdb_id", "INTEGER"),
         ("imdb_id", "TEXT"),
         ("candidates", "TEXT"),
+        # The drive the disc is in (/dev/sr1). Each drive rips its own disc, so a job
+        # has to know which tray to read from and which to open when it's done. NULL on
+        # jobs from before there could be more than one, which mean "the drive".
+        ("device", "TEXT"),
     ],
     "discs": [
         ("title_index", "INTEGER"),    # the remembered title choice (R5: fix once, ever)
@@ -604,15 +608,19 @@ def list_jobs(states=None, limit=50):
     return [dict(r) for r in conn().execute(q, args)]
 
 
-def last_finished(since):
-    """The most recent rip that ended in a file or a failure after `since`, or None.
+def last_finished(since, device=None):
+    """The most recent rip that ended in a file or a failure after `since`, or None --
+    from `device`'s tray when that's given.
 
     Cancelled jobs are left out: a skipped disc or a refused duplicate is not an
     outcome anybody waits by the drive for.
     """
-    r = conn().execute(
-        "SELECT * FROM jobs WHERE state IN ('done','failed') AND finished_at >= ? "
-        "ORDER BY finished_at DESC LIMIT 1", (int(since),)).fetchone()
+    q = "SELECT * FROM jobs WHERE state IN ('done','failed') AND finished_at >= ?"
+    args = [int(since)]
+    if device:
+        q += " AND (device=? OR device IS NULL)"
+        args.append(device)
+    r = conn().execute(q + " ORDER BY finished_at DESC LIMIT 1", args).fetchone()
     return dict(r) if r else None
 
 
@@ -817,10 +825,16 @@ def update_job(job_id, **fields):
 
 
 def next_queued_job():
-    """The oldest job waiting to start. One at a time -- there is one drive."""
+    """The oldest job waiting to start."""
     row = conn().execute(
         "SELECT * FROM jobs WHERE state='queued' ORDER BY id LIMIT 1").fetchone()
     return dict(row) if row else None
+
+
+def queued_jobs():
+    """Every job waiting to start, oldest first. Each is on its own drive."""
+    return [dict(r) for r in conn().execute(
+        "SELECT * FROM jobs WHERE state='queued' ORDER BY id").fetchall()]
 
 
 def active_job():
@@ -830,18 +844,33 @@ def active_job():
     return dict(row) if row else None
 
 
-def drive_busy():
-    """A job that still needs the disc in the tray, if there is one.
+def drive_busy(device=None):
+    """A job that still needs the disc in a tray, if there is one -- in `device`'s
+    tray when that's given, in any tray when it isn't.
 
     `active_job()` answers "is anything in flight", which used to be the same question.
     It is not any more: a rip that has finished reading the disc has given the disc
     back, and what it is doing now -- pushing bytes at a NAS -- has no claim on the
     drive at all.
+
+    A job with no drive recorded is from before there could be two, and holds them
+    all: it can't be told apart from a job on this one.
     """
-    row = conn().execute(
-        "SELECT * FROM jobs WHERE state IN (%s) ORDER BY id LIMIT 1"
-        % ",".join("?" * len(DRIVE_STATES)), DRIVE_STATES).fetchone()
+    q = "SELECT * FROM jobs WHERE state IN (%s)" % ",".join("?" * len(DRIVE_STATES))
+    args = list(DRIVE_STATES)
+    if device:
+        q += " AND (device=? OR device IS NULL)"
+        args.append(device)
+    row = conn().execute(q + " ORDER BY id LIMIT 1", args).fetchone()
     return dict(row) if row else None
+
+
+def busy_devices():
+    """The drives a job is holding right now. None in the list is a job with no drive
+    recorded, from before there could be two."""
+    return sorted({r["device"] for r in conn().execute(
+        "SELECT device FROM jobs WHERE state IN (%s)"
+        % ",".join("?" * len(DRIVE_STATES)), DRIVE_STATES)}, key=lambda d: d or "")
 
 
 def next_sending_job():

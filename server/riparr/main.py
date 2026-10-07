@@ -407,14 +407,29 @@ def _share_out(share):
             "path": share["path"], "verified_at": share["verified_at"]}
 
 
+class DriveRequest(BaseModel):
+    device: str = ""                     # /dev/srN; empty means the first drive
+
+
+def _device(device):
+    """A drive Riparr can see, by its /dev path -- never an arbitrary path handed to
+    `eject`. Empty means the first drive."""
+    drives = P.optical_drives()
+    if not device:
+        return drives[0]["device"] if drives else "/dev/sr0"
+    if not any(d.get("device") == device for d in drives):
+        raise HTTPException(status_code=404, detail="There's no drive at %s." % device)
+    return device
+
+
 @app.post("/api/drive/eject")
-def drive_eject(user=Depends(require_user)):
-    return P.eject()
+def drive_eject(body: DriveRequest = DriveRequest(), user=Depends(require_user)):
+    return P.eject(_device(body.device))
 
 
 @app.post("/api/drive/close")
-def drive_close(user=Depends(require_user)):
-    ok, message = P.close_tray()
+def drive_close(body: DriveRequest = DriveRequest(), user=Depends(require_user)):
+    ok, message = P.close_tray(_device(body.device))
     if not ok:
         raise HTTPException(status_code=400, detail=message)
     return {"ok": True, "message": message}
@@ -507,24 +522,24 @@ def drive_signal_test(body: SignalTest = SignalTest(), user=Depends(require_user
 
 
 @app.get("/api/disc/details")
-def disc_details(user=Depends(require_user)):
+def disc_details(device: str = "", user=Depends(require_user)):
     """Every title MakeMKV found on the disc, with its streams and what Riparr makes of
     them -- for checking a name before the rip, or reporting one that came out wrong."""
-    return RIP.disc_details()
+    return RIP.disc_details(_device(device) if device else None)
 
 
 @app.post("/api/disc/scan")
-def disc_scan(user=Depends(require_user)):
-    ok, message = RIP.scan_disc()
+def disc_scan(body: DriveRequest = DriveRequest(), user=Depends(require_user)):
+    ok, message = RIP.scan_disc(_device(body.device) if body.device else None)
     if not ok:
         raise HTTPException(status_code=400, detail=message)
     return {"ok": True, "message": message}
 
 
 @app.get("/api/disc/raw")
-def disc_raw(user=Depends(require_user)):
+def disc_raw(device: str = "", user=Depends(require_user)):
     """MakeMKV's own output from the last scan, exactly as it printed it."""
-    raw = RIP.last_scan_raw()
+    raw = RIP.last_scan_raw(_device(device) if device else None)
     if not raw:
         raise HTTPException(status_code=404, detail="No disc has been scanned yet.")
     return Response(content=raw, media_type="text/plain",
@@ -571,9 +586,9 @@ def _drive_report():
     on the status request a human made.
     """
     out = []
-    busy = db.active_job() is not None
     for d in P.optical_drives():
         d = dict(d)
+        busy = db.drive_busy(d.get("device")) is not None
         # Ask MakeMKV about LibreDrive only when it cannot get in the way. The probe is
         # a two-minute `makemkvcon` run that holds the drive, and rip.py:136 already
         # states the rule -- "LibreDrive is asked only for a 4K disc" -- which this
@@ -717,10 +732,12 @@ def _autorip_state():
     #    shelf" are the same prerequisite asked one level deeper, and the second is
     #    the one that ruins an evening.
     if drives:
-        d = drives[0]
-        name = " ".join(x for x in (d.get("vendor"), d.get("model")) if x)
-        check("A drive to read them in", "ok",
-              "%s · %s" % (name or "Optical drive", _reads_phrase(d)))
+        said = []
+        for d in drives:
+            name = " ".join(x for x in (d.get("vendor"), d.get("model")) if x)
+            said.append("%s · %s" % (name or "Optical drive", _reads_phrase(d)))
+        check("A drive to read them in" if len(drives) == 1
+              else "Drives to read them in", "ok", "; ".join(said))
     else:
         check("A drive to read them in", "fail", "No optical drive detected",
               "A working USB bridge appears here even with no disc in the tray.",
@@ -1109,14 +1126,25 @@ def queue(user=Depends(require_user)):
     # The rip that just finished, so the page can show where it went once the job has
     # left the queue. A toast was the only trace before, and it was gone in three
     # seconds. Twelve hours: long enough to come back to, short enough that it is news.
-    filed = db.last_finished(time.time() - 12 * 3600)
+    since = time.time() - 12 * 3600
+    filed = db.last_finished(since)
+    devices = [d.get("device") for d in P.optical_drives()]
+    # With more than one drive, each card shows what *its* drive last filed and what
+    # MakeMKV is saying about *its* disc.
+    by_device = {}
+    for dev in devices if len(devices) > 1 else []:
+        f = db.last_finished(since, device=dev)
+        by_device[dev] = {"filed": _filed_out(f) if f else None,
+                          "makemkv": RIP.makemkv_recent(device=dev) if jobs else []}
     return {"jobs": [j for j in jobs if j.get("state") not in db.SENDING_STATES],
             "sending": sending,
             "filed": _filed_out(filed) if filed else None,
             # What MakeMKV has been saying, newest last -- only while something is
             # happening, for the rip card's "What MakeMKV is doing".
             "makemkv": RIP.makemkv_recent() if jobs else [],
+            "by_device": by_device,
             "drive_busy": bool(db.drive_busy()),
+            "busy_devices": db.busy_devices(),
             "typical_seconds": typical, "typical_samples": samples,
             "typical_stages": stages, "typical_kind": kind,
             "stage_labels": db.stage_labels(db.get("transfer_mode") == "direct"),
@@ -1148,6 +1176,7 @@ def _tray_family():
 
 class RipRequest(BaseModel):
     force: bool = False
+    device: str = ""                     # which drive's disc; empty means the first one
 
 
 @app.post("/api/rip")
@@ -1159,7 +1188,8 @@ def rip_now(body: RipRequest = RipRequest(), user=Depends(require_user)):
     disc it can see and offers no way to act on it is the worst kind of broken,
     because everything on it looks like it is working.
     """
-    job_id, why = RIP.enqueue(force=body.force)
+    job_id, why = RIP.enqueue(force=body.force,
+                              device=_device(body.device) if body.device else None)
     if not job_id:
         raise HTTPException(status_code=400, detail=why)
     return {"ok": True, "job_id": job_id}
@@ -1361,10 +1391,10 @@ def rip_rerip(job_id: int, user=Depends(require_user)):
     if not job:
         raise HTTPException(status_code=404, detail="No such job.")
     return _start_rerip(job.get("fingerprint") or None,
-                        what=job.get("title") or job.get("disc_label"))
+                        what=job.get("title") or job.get("disc_label"), job=job)
 
 
-def _start_rerip(fingerprint, what=None):
+def _start_rerip(fingerprint, what=None, job=None):
     """Pull the tray in if it is open, then queue this disc past the duplicate check.
 
     Two things have to be true at once and they fight each other. The duplicate check
@@ -1375,24 +1405,43 @@ def _start_rerip(fingerprint, what=None):
     already-working-on-a-disc guard rather than by ejecting the disc.
     """
     RIP.arm_force(fingerprint)
-    d = next((x for x in P.optical_drives() if x.get("present")), None)
+    device = _rerip_drive(fingerprint, job)
+    d = RIP.drive_for(device)
     if not d:
-        ok, message = P.close_tray()
+        ok, message = P.close_tray(device)
         if not ok:
             raise HTTPException(
                 status_code=400,
                 detail="Put %s in the tray and press Re-rip again. (%s)"
                        % (what or "the disc", message))
-    job_id, why = RIP.enqueue(force=True, expect=fingerprint)
+    job_id, why = RIP.enqueue(force=True, expect=fingerprint, device=device)
     if not job_id:
         # The watcher beat us to it. That is a success wearing an error's clothes:
         # the disc it picked up is the one that was armed, so it is already being
         # ripped and the only correct answer is to point at that job.
-        active = db.active_job()
+        active = db.drive_busy(device)
         if active and (not fingerprint or active.get("fingerprint") in (fingerprint, "")):
             return {"ok": True, "job_id": active["id"]}
         raise HTTPException(status_code=400, detail=why)
     return {"ok": True, "job_id": job_id}
+
+
+def _rerip_drive(fingerprint, job=None):
+    """Which drive the disc to re-rip is in: the one holding a disc with its label and
+    size, else the drive it was ripped from, else the first that isn't busy."""
+    drives = P.optical_drives()
+    known = db.get_disc(fingerprint) if fingerprint else None
+    if known:
+        for d in drives:
+            if (d.get("present") and (d.get("label") or "") == (known.get("label") or "")
+                    and (not known.get("size_bytes")
+                         or d.get("size_bytes") == known.get("size_bytes"))):
+                return d["device"]
+    if job and job.get("device") and any(d["device"] == job["device"] for d in drives):
+        return job["device"]
+    free = [d for d in drives if not db.drive_busy(d["device"])]
+    pick = next((d for d in free if d.get("present")), None) or (free or drives or [{}])[0]
+    return pick.get("device") or "/dev/sr0"
 
 
 @app.get("/api/history")

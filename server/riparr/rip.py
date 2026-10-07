@@ -1,7 +1,7 @@
 """
 The rip engine: disc in the tray to verified file on the share.
 
-One worker thread, one job at a time, because there is one drive. State lives in
+One worker thread per drive, each ripping its own disc. State lives in
 SQLite and every transition is written before it is acted on, so pulling the cable
 mid-rip -- the expected operating condition (D4) -- leaves a job that can be read on
 the next boot and honestly resolved rather than a process that vanished.
@@ -120,48 +120,86 @@ def _consume_arm(fingerprint):
 
 # ─────────────────────────────── the disc watcher ───────────────────────────────
 
-def _disc_signature(drives):
-    """What "a different disc is in the tray" means, cheaply.
+def _disc_signature(drive):
+    """What "a different disc is in this tray" means, cheaply.
 
     Polling rather than udev: udev would be a rules file, a privilege bridge and a
     dependency on the board's kernel, to learn something a 3-second poll of /dev/sr0
     answers just as well on a box doing nothing else.
     """
-    d = next((x for x in drives if x.get("present")), None)
-    if not d:
+    if not drive or not drive.get("present"):
         return None
-    return "%s|%s" % (d.get("device"), d.get("label") or "?")
+    return "%s|%s" % (drive.get("device"), drive.get("label") or "?")
 
 
 def _watch_discs():
-    seen = None
+    """Each drive is watched on its own: a disc going into one tray says nothing about
+    the other, and each gets its own rip."""
+    seen = {}
     while not _stop.wait(3):
         try:
-            drives = P.optical_drives()
             # Auto Rip's own state is part of what "changed" means. Otherwise the
             # obvious sequence -- put the disc in, notice nothing happens, go and turn
             # Auto Rip on -- does nothing, because the disc has not changed since the
             # switch flipped. Somebody doing exactly the right thing would be met with
             # silence and no way to tell which of the two steps had failed.
-            sig = (_disc_signature(drives), bool(db.get("auto_rip")))
-            if sig == seen:
-                continue
-            seen = sig
-            if sig[0] is None:
-                continue
-            if not sig[1]:
-                log.info("Disc inserted (%s), but Auto Rip is off.", sig[0])
-                continue
-            st = _autorip_ready()
-            if not st:
-                continue
-            job_id, why = enqueue()
-            if job_id:
-                log.info("Auto Rip queued job %d for %s", job_id, sig[0])
-            else:
-                log.info("Auto Rip did not queue this disc: %s", why)
+            auto = bool(db.get("auto_rip"))
+            for d in P.optical_drives():
+                dev = d.get("device")
+                sig = (_disc_signature(d), auto)
+                if seen.get(dev) == sig:
+                    continue
+                seen[dev] = sig
+                if sig[0] is None:
+                    continue
+                if not auto:
+                    log.info("Disc inserted (%s), but Auto Rip is off.", sig[0])
+                    continue
+                if not _autorip_ready():
+                    continue
+                # Its own thread: a scan is minutes, and the other drive's disc
+                # shouldn't wait behind it to be noticed.
+                threading.Thread(target=_auto_enqueue, args=(dev, sig[0]),
+                                 name="riparr-auto-%s" % os.path.basename(dev or "sr"),
+                                 daemon=True).start()
         except Exception as e:
             log.error("Disc watch failed: %s", e)
+
+
+def _auto_enqueue(device, what):
+    try:
+        job_id, why = enqueue(device=device)
+        if job_id:
+            log.info("Auto Rip queued job %d for %s", job_id, what)
+        else:
+            log.info("Auto Rip did not queue this disc: %s", why)
+    except Exception as e:
+        log.error("Auto Rip couldn't queue %s: %s", what, e)
+
+
+def drive_for(device=None, present=True):
+    """The drive at `device` (or, without one, the first with a disc in it)."""
+    drives = P.optical_drives()
+    if device:
+        d = next((x for x in drives if x.get("device") == device), None)
+        return d if d and (d.get("present") or not present) else None
+    return next((x for x in drives if x.get("present")), None)
+
+
+def device_of(job):
+    """Which drive a job's disc is in. Jobs from before there could be two have none
+    recorded, and mean the only drive there was."""
+    job = job or {}
+    dev = job.get("device") or job.get("_device")
+    if dev:
+        return dev
+    drives = P.optical_drives()
+    return (drives[0].get("device") if drives else None) or "/dev/sr0"
+
+
+def eject(job=None, device=None):
+    """Open the tray this job's disc is in."""
+    return P.eject(device or device_of(job))
 
 
 def _autorip_ready():
@@ -177,24 +215,58 @@ def _autorip_ready():
 
 # ─────────────────────────────── queueing ───────────────────────────────
 
-def enqueue(force=False, expect=None):
-    """Queue the disc currently in the tray. Returns (job_id, reason_if_not).
+_enqueue_lock = threading.Lock()
 
+
+def enqueue(force=False, expect=None, device=None):
+    """Queue the disc in `device`'s tray. Returns (job_id, reason_if_not).
+
+    Without a device, the first drive with a disc that isn't already ripping one.
     `force` is the "Re-rip" path: it skips the duplicate check, which is the only
     thing standing between a user and forty minutes they have already spent. `expect`
     is a fingerprint the caller believes is in the tray -- Re-rip supplies it so that
     asking to re-rip one film cannot start a rip of whatever disc actually went in.
     """
-    drives = P.optical_drives()
-    d = next((x for x in drives if x.get("present")), None)
-    if not d:
-        return None, "There's no disc in the tray."
+    # Claiming a drive is one step, from the check to the job row that holds it: the
+    # Rip button and Auto Rip can both reach here for the same disc within a second of
+    # each other. Held only that long -- not through the scan, which is minutes, and
+    # which the other drive's disc shouldn't wait behind.
+    lock = _OnceLock(_enqueue_lock)
+    try:
+        if device:
+            d = drive_for(device)
+            if not d:
+                return None, "There's no disc in that drive."
+        else:
+            loaded = [x for x in P.optical_drives() if x.get("present")]
+            if not loaded:
+                return None, "There's no disc in the tray."
+            d = next((x for x in loaded if not db.drive_busy(x.get("device"))), loaded[0])
+        dev = d.get("device")
 
-    # The *drive*, not "anything in flight". A previous rip that is still uploading
-    # from the card has already given the disc back, and holding the tray shut for it
-    # would waste the very minutes early eject exists to reclaim.
-    if db.drive_busy():
-        return None, "Riparr is already working on a disc."
+        # The *drive*, not "anything in flight". A previous rip that is still uploading
+        # from the card has already given the disc back, and holding the tray shut for
+        # it would waste the very minutes early eject exists to reclaim.
+        if db.drive_busy(dev):
+            return None, "Riparr is already working on the disc in that drive."
+        return _enqueue(d, dev, force, expect, lock.release)
+    finally:
+        lock.release()
+
+
+class _OnceLock:
+    """A held lock that can be let go early, and only once."""
+    def __init__(self, lock):
+        self._lock, self._held = lock, True
+        lock.acquire()
+
+    def release(self):
+        if self._held:
+            self._held = False
+            self._lock.release()
+
+
+def _enqueue(d, dev, force, expect, claimed):
 
     # Before anything expensive: can this drive read this disc at all? Refused here
     # rather than three minutes later inside MakeMKV, and the disc comes back out --
@@ -209,7 +281,7 @@ def enqueue(force=False, expect=None):
     if refusal:
         log.info("Refused a disc this drive cannot read: %s", refusal)
         notify.send("failed", title=d.get("label") or "A disc", body=refusal)
-        P.eject()
+        eject(device=dev)
         return None, refusal
 
     label = d.get("label") or ""
@@ -248,9 +320,10 @@ def enqueue(force=False, expect=None):
     # the one impression an appliance cannot afford. `identifying` is a state the
     # interface already renders ("Reading the disc"), so this costs no new UI.
     job_id = db.create_job(
-        title=None, disc_label=label, kind="movie", fingerprint="",
+        title=None, disc_label=label, kind="movie", fingerprint="", device=dev,
         state="identifying", phase="Reading the disc \u2014 a few minutes on an encrypted DVD",
         mode=None, bytes_total=int(d.get("size_bytes") or 0))
+    claimed()                            # the row holds the drive now
 
     # The identify stage opens *here*, not in `_identify`. The scan is minutes long and
     # it happens inside enqueue -- the worker's later call is a cache hit -- so timing
@@ -382,7 +455,7 @@ def _refuse_duplicate(known, drive, label, abandon=None):
     r = P.duplicate_signal(drive.get("device") or "/dev/sr0",
                            mode=_settings().get("duplicate_signal", "flash"))
     log.info("Duplicate signal: %s", r.get("message"))
-    P.eject()
+    eject(device=drive.get("device"))
     msg = "You've already ripped %s." % title
     if abandon:
         abandon(msg)
@@ -424,7 +497,7 @@ def answer(job_id, title_index=None, name=None, skip=False, season=None,
     if skip:
         db.update_job(job_id, state="cancelled", question=None,
                       finished_at=int(time.time()), error="Skipped")
-        P.eject()
+        eject(job)
         return True, "Skipped, and the disc has been ejected."
 
     fields = {"state": "queued", "question": None, "phase": "Waiting to start",
@@ -714,22 +787,35 @@ def _seconds(text):
 # what to rip -- and each read is a ~2.5 minute `makemkvcon` run on a real drive, so
 # doing it twice put five minutes of silence in front of every rip. Keyed on the same
 # cheap signature the disc watcher uses, so swapping discs invalidates it.
-_titles_cache = {"key": None, "titles": None, "at": 0.0}
-_last_scan = {"key": None, "at": 0.0, "raw": ""}
-_scan_state = {"running": False, "error": None, "progress": None, "started": None}
+# Per drive, all of it: each tray holds its own disc, scanned on its own.
+_titles_cache = {}              # _titles_key(disc) -> {"titles", "at"}
+_last_scan = {}                 # device -> {"key", "at", "raw"}
+_scan_states = {}               # device -> {"running", "error", "progress", "started"}
+
+
+def _scan_state(device):
+    return _scan_states.setdefault(device or "", {"running": False, "error": None,
+                                                  "progress": None, "started": None})
+
 
 # MakeMKV's own running commentary, for the rip card's "What MakeMKV is doing". Kept off
 # the card itself -- "...failed" in a healthy rip's commentary reads as an alarm -- and
-# behind a disclosure for whoever wants to see exactly what it's seeing.
-_mk_recent = collections.deque(maxlen=40)
+# behind a disclosure for whoever wants to see exactly what it's seeing. Each line says
+# which drive it came from, so two rips' commentaries stay on their own cards.
+_mk_recent = collections.deque(maxlen=80)
 
 
-def _mk_note(text):
-    _mk_recent.append({"at": time.time(), "text": text})
+def _mk_note(text, device=None):
+    _mk_recent.append({"at": time.time(), "text": text, "device": device})
 
 
-def makemkv_recent(limit=12):
-    return list(_mk_recent)[-limit:]
+def makemkv_recent(limit=12, device=None):
+    lines = [x for x in _mk_recent if device is None or x.get("device") in (device, None)]
+    return [{"at": x["at"], "text": x["text"]} for x in lines[-limit:]]
+
+
+def makemkv_recent_by_device(devices, limit=12):
+    return {d: makemkv_recent(limit, d) for d in devices}
 TITLES_TTL = 1800
 # Ceiling for one `makemkvcon info` scan. See the note at the subprocess call.
 TITLES_TIMEOUT = 1800
@@ -851,9 +937,9 @@ def read_titles(device, disc=None, on_progress=None):
     if P.MOCK:
         return _mock_titles()
     key = _titles_key(disc)
-    if key and _titles_cache["key"] == key and _titles_cache["titles"] \
-            and time.time() - _titles_cache["at"] < TITLES_TTL:
-        return _titles_cache["titles"]
+    hit = _titles_cache.get(key) if key else None
+    if hit and hit["titles"] and time.time() - hit["at"] < TITLES_TTL:
+        return hit["titles"]
 
     binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"
     if not os.path.exists(binary):
@@ -861,7 +947,7 @@ def read_titles(device, disc=None, on_progress=None):
     # Before MakeMKV's first look at this drive: catch its SDF hang and work round it.
     note = MK.ensure_drive_ready(_disc_arg(device))
     if note:
-        _mk_note(note)
+        _mk_note(note, device)
     # 300s was killing real discs mid-scan. An encrypted retail DVD makes MakeMKV do
     # the decryption work in software, and on four A53 cores that is CPU-bound for
     # minutes -- measured on the reference board with nothing else touching the drive:
@@ -887,8 +973,8 @@ def read_titles(device, disc=None, on_progress=None):
             # go to the log, so a slow scan can be followed on System > Log Files.
             mmsg = MSG.match(raw.strip())
             if mmsg:
-                log.info("MakeMKV: %s", mmsg.group(2))
-                _mk_note(mmsg.group(2))
+                log.info("MakeMKV (%s): %s", device, mmsg.group(2))
+                _mk_note(mmsg.group(2), device)
             if on_progress:
                 # `makemkvcon info` emits no PRGV at all -- a full scan of a real disc
                 # is 172 MSG lines and 16 DRV lines and nothing else, so there is no
@@ -954,9 +1040,9 @@ def read_titles(device, disc=None, on_progress=None):
     out = [titles[k] for k in sorted(titles)]
     # The raw scan, for the disc details panel and the diagnostics download: when a
     # name comes out wrong, this is what says whether MakeMKV or Riparr got it wrong.
-    _last_scan.update(key=key, at=time.time(), raw=p.stdout[-500000:])
+    _last_scan[device or ""] = {"key": key, "at": time.time(), "raw": p.stdout[-500000:]}
     if key and out:
-        _titles_cache.update(key=key, titles=out, at=time.time())
+        _titles_cache[key] = {"titles": out, "at": time.time()}
     return out
 
 
@@ -1219,7 +1305,21 @@ def purge_staging(need_bytes=0, keep_newest=0):
     return freed, notes
 
 
-def _plan_transfer(needed_bytes, kind="movie"):
+_plan_lock = threading.Lock()
+
+
+def _reserved_staging(job_id=None):
+    """Staging space another rip still has to write: what it's expected to take, less
+    what it has written already, which free space already counts."""
+    held = 0
+    for j in db.list_jobs(states=["ripping", "identifying", "queued"], limit=20):
+        if j["id"] == job_id or j.get("mode") not in ("burst", "stream"):
+            continue
+        held += max(0, int(j.get("bytes_total") or 0) - int(j.get("bytes_ripped") or 0))
+    return held
+
+
+def _plan_transfer(needed_bytes, kind="movie", job_id=None):
     """Mode selection (D11), honest about what this build can actually do.
 
     With follow-copy unavailable the whole title has to fit in staging, so this is
@@ -1246,14 +1346,16 @@ def _plan_transfer(needed_bytes, kind="movie"):
                           "free." % (needed_bytes // 2 ** 30, free // 2 ** 30))
         return "direct", None
 
-    free = _staging_free()
+    # The other drive's rip, still writing, will need its share of what's free now.
+    reserved = _reserved_staging(job_id)
+    free = _staging_free() - reserved
     short = (needed_bytes + WINDOW_BYTES - free) if needed_bytes else (WINDOW_BYTES - free)
     if short > 0:
         freed, notes = purge_staging(need_bytes=short)
         if freed:
             log.info("Freed %d MiB from staging to make room: %s",
                      freed // 2 ** 20, ", ".join(notes))
-            free = _staging_free()
+            free = _staging_free() - reserved
     if free < WINDOW_BYTES:
         return None, ("There's not enough room in staging to rip anything safely. "
                       "Free some space, then try again.")
@@ -1265,8 +1367,9 @@ def _plan_transfer(needed_bytes, kind="movie"):
         # non-question -- so if we are counting card space at all, either the user
         # chose to stage or the share is away. Telling somebody to buy a bigger card
         # when their NAS is simply asleep sends them to the wrong shop.
-        short = "This disc needs about %d GB and there's %d GB free in staging." % (
-            needed_bytes // 2 ** 30, free // 2 ** 30)
+        short = "This disc needs about %d GB and there's %d GB free in staging%s." % (
+            needed_bytes // 2 ** 30, max(0, free) // 2 ** 30,
+            ", once the other drive's rip has the room it needs" if reserved else "")
         if (_settings() or {}).get("transfer_mode") == "direct":
             return None, (short + " Rips normally go straight to your library, which "
                           "has no such limit — reconnect the share and this disc will "
@@ -1600,10 +1703,10 @@ def _identify(job, s):
                   phase="Reading the disc \u2014 a few minutes on an encrypted DVD",
                   started_at=job.get("started_at") or int(time.time()))
     db.stage_enter(job["id"], "identify")
-    drives = P.optical_drives()
-    d = next((x for x in drives if x.get("present")), None)
+    d = drive_for(device_of(job))
     if not d:
         raise RipFailed("The disc was removed before Riparr could read it.")
+    job["_device"] = d.get("device")
 
     # Full-disc backup takes the whole disc, so there is no title to choose and no
     # season to work out -- and no reason to spend minutes scanning for them. All it
@@ -1685,7 +1788,7 @@ def _identify(job, s):
             db.stage_end(job["id"])
             db.update_job(job["id"], state="cancelled", finished_at=int(time.time()),
                           error="Couldn't identify the disc, and the setting is to skip.")
-            P.eject()
+            eject(job)
             return None
         # "label" with no label to use is not an answer, so it falls through and asks.
         if behaviour == "label" and d.get("label"):
@@ -1836,7 +1939,7 @@ def _run_makemkv(job, s, title_index, out_dir, cancel_ev, total_bytes,
     binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"
     note = MK.ensure_drive_ready(_disc_arg(job.get("_device")))
     if note:
-        _mk_note(note)
+        _mk_note(note, job.get("_device"))
     cmd = [binary, "-r", "--progress=-same",
            "--minlength=%d" % s["min_title_seconds"],
            "mkv", _disc_arg(job.get("_device")), str(title_index), out_dir]
@@ -1891,7 +1994,7 @@ def _run_makemkv(job, s, title_index, out_dir, cancel_ev, total_bytes,
             m = PRGC.match(line)
             if m:
                 if m.group(1) != last_msg:
-                    _mk_note(m.group(1))
+                    _mk_note(m.group(1), job.get("_device"))
                 last_msg = m.group(1)
                 continue
             # MSG lines are MakeMKV's running commentary -- "Automatic SDF downloading
@@ -1903,7 +2006,7 @@ def _run_makemkv(job, s, title_index, out_dir, cancel_ev, total_bytes,
             m = MSG.match(line)
             if m:
                 log.info("Job %d: %s", job["id"], m.group(2))
-                _mk_note(m.group(2))
+                _mk_note(m.group(2), job.get("_device"))
     finally:
         try:
             proc.stdout.close()
@@ -2017,7 +2120,7 @@ def _mock_rip(job, out_dir, cancel_ev):
                  "Title #1 was added (28 cell(s), 2:11:14)",
                  "Title #2 has length of 33 seconds which is less than minimum title length of 120 seconds and was therefore skipped",
                  "Saving 1 titles into directory file://%s" % out_dir):
-        _mk_note(line)
+        _mk_note(line, device_of(job))
     path = os.path.join(out_dir, "title_t00.mkv")
     # `_rip` already opened "decrypt". Stand in for MakeMKV's silent analysis pass so
     # the stage breakdown off-hardware has the same shape it has on the box.
@@ -2096,15 +2199,17 @@ _TEMPLATES = {
 }
 
 
-def disc_details():
-    """What MakeMKV reported about the disc, for the details panel.
+def disc_details(device=None):
+    """What MakeMKV reported about the disc in `device`, for the details panel.
 
     From the job working on it when there is one -- that's the title list the rip
     actually used -- otherwise from the last scan of the disc that's in the tray now.
-    Each title carries its streams and what Riparr made of them for naming.
+    Each title carries its streams and what Riparr made of them for naming. Without a
+    device, the first drive with a disc in it.
     """
-    drive = next((d for d in P.optical_drives() if d.get("present")), None)
-    job = db.active_job()
+    drive = drive_for(device) if device else drive_for()
+    dev = device or (drive and drive.get("device"))
+    job = db.drive_busy(dev) if dev else db.active_job()
     titles, chosen, family, source = None, None, None, None
     if job and job.get("titles"):
         try:
@@ -2114,58 +2219,67 @@ def disc_details():
         chosen, family, source = job.get("chosen_title"), job.get("disc_family"), "job"
     if not titles and drive:
         key = _titles_key(drive)
+        hit = _titles_cache.get(key) or {}
         if P.MOCK:
             titles = _mock_titles()
-        elif _titles_cache["key"] == key and _titles_cache["titles"]:
-            titles = _titles_cache["titles"]
+        elif hit.get("titles"):
+            titles = hit["titles"]
         family, source = disc_family(drive), "scan" if titles else None
     out = []
     for t in titles or []:
         out.append(dict(t, media=naming.media_info(t, family),
                         chosen=chosen is not None and t.get("index") == int(chosen)))
-    raw_ok = bool(_last_scan["raw"]) and (source == "job" or (
-        drive and _last_scan["key"] == _titles_key(drive)))
+    last = _last_scan.get(dev or "") or {}
+    raw_ok = bool(last.get("raw")) and (source == "job" or (
+        drive and last.get("key") == _titles_key(drive)))
+    st = _scan_state(dev)
     return {"drive": drive and {k: drive.get(k) for k in
                                 ("device", "vendor", "model", "label", "media")},
+            "device": dev,
             "family": family, "source": source, "titles": out,
-            "scanning": _scan_state["running"], "scan_error": _scan_state["error"],
-            "scan_progress": _scan_state["progress"],
-            "scan_seconds": (int(time.time() - _scan_state["started"])
-                             if _scan_state["running"] and _scan_state["started"] else None),
+            "scanning": st["running"], "scan_error": st["error"],
+            "scan_progress": st["progress"],
+            "scan_seconds": (int(time.time() - st["started"])
+                             if st["running"] and st["started"] else None),
             "raw": raw_ok, "job_id": job and job.get("id")}
 
 
-def scan_disc():
-    """Read the disc in the tray in the background, for the details panel.
+def scan_disc(device=None):
+    """Read the disc in `device`'s tray in the background, for the details panel.
 
-    Refused while a rip needs the drive: a second makemkvcon fighting the first for the
+    Refused while a rip needs that drive: a second makemkvcon fighting the first for the
     disc is how a rip that was fine becomes one that fails."""
-    if _scan_state["running"]:
-        return True, "Already reading the disc."
-    if db.drive_busy():
-        return False, "A rip is using the drive. Its details are shown already."
-    drive = next((d for d in P.optical_drives() if d.get("present")), None)
+    drive = drive_for(device) if device else drive_for()
     if not drive:
         return False, "There's no disc in the tray."
+    dev = drive.get("device")
+    st = _scan_state(dev)
+    if st["running"]:
+        return True, "Already reading the disc."
+    if db.drive_busy(dev):
+        return False, "A rip is using the drive. Its details are shown already."
 
     def progress(_frac, msg=None):
         if msg:
-            _scan_state["progress"] = msg
+            st["progress"] = msg
 
     def go():
-        _scan_state.update(running=True, error=None, progress=None, started=time.time())
+        st.update(running=True, error=None, progress=None, started=time.time())
         try:
-            read_titles(drive.get("device"), drive, on_progress=progress)
+            read_titles(dev, drive, on_progress=progress)
         except Exception as e:
-            _scan_state["error"] = str(e)
+            st["error"] = str(e)
         finally:
-            _scan_state["running"] = False
+            st["running"] = False
     threading.Thread(target=go, name="riparr-disc-scan", daemon=True).start()
     return True, "Reading the disc. A few minutes on a real drive."
 
 
-def last_scan_raw():
-    return _last_scan["raw"] or ""
+def last_scan_raw(device=None):
+    if device:
+        return (_last_scan.get(device) or {}).get("raw") or ""
+    newest = max(_last_scan.values(), key=lambda x: x["at"], default=None)
+    return (newest or {}).get("raw") or ""
 
 
 def planned_destination(job, s=None):
@@ -2578,7 +2692,7 @@ def _finish(job, s, transport, name, local_path, sent_from_card=False):
     # very likely already back on a shelf -- or replaced by the next one, which would
     # be spat out by an eject that thinks it is being helpful.
     if not sent_from_card:
-        P.eject()
+        eject(job)
     log.info("Job %d finished: %s", job["id"], transport.describe(name))
     what = ("Backed up, menus and all, and verified" if job.get("output") == BACKUP
             else "Ripped and verified")
@@ -2610,7 +2724,7 @@ def _finish_season(job, s, transport, folder, base, sent_from_card=False):
     # likely with the next disc of the box set already loaded -- which an eject that
     # thinks it is being helpful would spit onto the tray mid-rip.
     if not sent_from_card:
-        P.eject()
+        eject(job)
     span = ""
     if rows:
         first, last = rows[0], rows[-1]
@@ -2655,7 +2769,7 @@ def _identify_backup(job, s, d):
             db.stage_end(job["id"])
             db.update_job(job["id"], state="cancelled", finished_at=int(time.time()),
                           error="Couldn't identify the disc, and the setting is to skip.")
-            P.eject()
+            eject(job)
             return None
         if behaviour == "label" and d.get("label"):
             name = d.get("label")
@@ -2939,11 +3053,14 @@ def _run_job(job):
         if job is None:
             return                       # needs_input, skipped, or ejected
 
-        mode, refusal = _plan_transfer(job.get("bytes_total") or 0,
-                                       job.get("kind") or "movie")
-        if refusal:
-            raise RipFailed(refusal)
-        db.update_job(job["id"], mode=mode)
+        # Planned one rip at a time, and recorded before the next is planned: two
+        # drives finishing their scans together must not both count the same free space.
+        with _plan_lock:
+            mode, refusal = _plan_transfer(job.get("bytes_total") or 0,
+                                           job.get("kind") or "movie", job_id=job["id"])
+            if refusal:
+                raise RipFailed(refusal)
+            db.update_job(job["id"], mode=mode)
         job["mode"] = mode
 
         # A season disc is one job with many files, which is a different shape all the
@@ -2953,7 +3070,7 @@ def _run_job(job):
         # moment mid-job where the tray is free.
         if job.get("kind") == "tv" and job.get("_plan"):
             base = _rip_season(job, s, cancel_ev)
-            P.eject()
+            eject(job)
             transport, folder, base = _transfer_season(job, s, base, cancel_ev)
             _finish_season(job, s, transport, folder, base)
             return
@@ -2971,7 +3088,7 @@ def _run_job(job):
         if not use_direct(s):
             db.update_job(job["id"], state="transferring", bytes_sent=0,
                           phase="Waiting to send to your library")
-            P.eject()
+            eject(job)
             log.info("Job %d: disc read and ejected; sending in the background.",
                      job["id"])
             notify.send("ripped", title=job.get("title") or "A disc",
@@ -3000,7 +3117,7 @@ def _run_job(job):
         row = db.get_job(job_id) or {}
         db.update_job(job_id, state="failed", phase=None,
                       finished_at=int(time.time()), error=str(e))
-        P.eject()
+        eject(row or job)
         notify.send("failed",
                     title=row.get("title") or row.get("disc_label") or "A disc",
                     body=str(e))
@@ -3215,19 +3332,43 @@ def _remote_name(job):
 
 # ─────────────────────────────── the worker ───────────────────────────────
 
+# job id -> its drive, for every rip running right now. One per drive at a time, each
+# on its own thread, so two drives rip two discs at once.
+_running = {}
+_running_lock = threading.Lock()
+
+
 def _loop():
     while not _stop.is_set():
-        job = db.next_queued_job()
-        if not job:
-            _wake.wait(5)
-            _wake.clear()
-            continue
-        try:
-            _run_job(job)
-        except Exception as e:
-            log.exception("Worker error on job %s: %s", job.get("id"), e)
-            db.update_job(job["id"], state="failed", finished_at=int(time.time()),
-                          error="Something went wrong: %s" % e)
+        for job in db.queued_jobs():
+            dev = job.get("device")
+            with _running_lock:
+                if job["id"] in _running:
+                    continue
+                held = set(_running.values())
+                # A job with no drive recorded is from before there could be two, and
+                # can't be told apart from one on either drive: it runs alone.
+                if dev in held or (held and (dev is None or None in held)):
+                    continue
+                _running[job["id"]] = dev
+            threading.Thread(target=_run_one, args=(job,),
+                             name="riparr-rip-%s" % os.path.basename(dev or "sr"),
+                             daemon=True).start()
+        _wake.wait(5)
+        _wake.clear()
+
+
+def _run_one(job):
+    try:
+        _run_job(job)
+    except Exception as e:
+        log.exception("Worker error on job %s: %s", job.get("id"), e)
+        db.update_job(job["id"], state="failed", finished_at=int(time.time()),
+                      error="Something went wrong: %s" % e)
+    finally:
+        with _running_lock:
+            _running.pop(job["id"], None)
+        _wake.set()                      # a job waiting on this drive can start now
 
 
 def _send_loop():
