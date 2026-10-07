@@ -2,6 +2,7 @@
 The Riparr service. API-first: the web UI is just the first client of this API (D2),
 which is what makes Homepage widgets and multi-unit setups nearly free later.
 """
+import html
 import json
 import os
 import re
@@ -10,7 +11,7 @@ import time
 
 from fastapi import (FastAPI, File, HTTPException, Request, Response, Depends,
                      UploadFile)
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from typing import Dict, List
 
@@ -180,12 +181,15 @@ def _login_succeeded():
 
 
 @app.post("/api/auth/login")
-def login(body: Login, response: Response):
+def login(body: Login, response: Response, request: Request):
     time.sleep(_login_delay())            # pay the accumulated cost before answering
     if not db.verify_user(body.username, body.password):
         _login_failed(body.username)
         raise HTTPException(status_code=401, detail="Wrong username or password")
     _login_succeeded()
+    # The address you sign in at is the best guess at how your phone reaches Riparr,
+    # for the buttons in notifications, until one is set on Settings → Connect.
+    db.set("seen_url", str(request.base_url).rstrip("/"))
     token = _serializer().dumps({"u": body.username, "t": int(time.time())})
     response.set_cookie(COOKIE, token, httponly=True, samesite="lax",
                         max_age=SESSION_MAX_AGE)
@@ -805,6 +809,13 @@ async def put_settings(request: Request, user=Depends(require_user)):
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Expected an object")
     body.pop("session_secret", None)
+    body.pop("seen_url", None)
+    if (body.get("public_url") or "").strip():
+        try:
+            NT._check_url(body["public_url"].strip())
+        except NT.BadWebhookURL:
+            raise HTTPException(status_code=400,
+                                detail="Riparr's address must start with http:// or https://")
     for k, v in body.items():
         if k in SECRET_SETTINGS and v == SECRET_MASK:
             continue                      # unchanged; do not overwrite with the mask
@@ -833,7 +844,8 @@ async def put_settings(request: Request, user=Depends(require_user)):
 def notifications(user=Depends(require_user)):
     return {"events": [{"key": k, "label": label, "default": on} for k, label, on in NT.EVENTS],
             "enabled": NT.enabled_events(),
-            "configured": NT.configured()}
+            "configured": NT.configured(),
+            "seen_url": db.get("seen_url") or ""}
 
 
 class NotifyTest(BaseModel):
@@ -1217,6 +1229,86 @@ def rip_answer(job_id: int, body: DiscAnswer, user=Depends(require_user)):
     if not ok:
         raise HTTPException(status_code=400, detail=message)
     return {"ok": True, "message": message}
+
+
+# ─────────────────────────────── answering from a notification ───────────────────────
+#
+# No sign-in: the signed token in the URL is the permission, and it can only give the
+# one answer it was made for (see notify.read_answer). GET only shows the question and
+# a button, because link previews and mail scanners open links too; POST answers. The
+# ntfy app POSTs straight from the phone, so ntfy's buttons skip the page.
+
+def _answer_page(title, lines, form=None, status=200):
+    theme = html.escape(main_theme())
+    body = "".join("<p>%s</p>" % ln for ln in lines)
+    button = ("""<form method="post" style="margin-top:18px">
+      <button class="btn primary wide" type="submit">%s</button></form>"""
+              % html.escape(form) if form else "")
+    page = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Riparr</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/themes/%s.css">
+<style>.gate-card p { margin: 10px 0 0; line-height: 1.5; } .gate-card .btn.wide { width: 100%%; }</style>
+</head><body><div class="gate"><div class="gate-card">
+<img class="gate-mark" src="/static/img/riparr-mark.png" alt="">
+<h1>%s</h1>%s%s
+<p><a href="/#/queue">Open Riparr</a></p>
+</div></div></body></html>""" % (theme, html.escape(title), body, button)
+    return HTMLResponse(page, status_code=status, headers={"Cache-Control": "no-store"})
+
+
+def main_theme():
+    return _theme_name(db.get("theme"))
+
+
+def _answer_target(token):
+    got = NT.read_answer(token)
+    if got.get("error"):
+        return got, None
+    job = db.get_job(got["job"])
+    if not job or job["state"] != "needs_input":
+        return {"error": "This disc has already been answered."}, job
+    return got, job
+
+
+@app.get("/api/answer/{token}")
+def answer_page(token: str):
+    got, job = _answer_target(token)
+    name = (job or {}).get("title") or (job or {}).get("disc_label") or "A disc"
+    if got.get("error"):
+        return _answer_page(name if job else "Riparr", [html.escape(got["error"])],
+                            status=410 if job is None and "expired" in got["error"] else 200)
+    return _answer_page(name, [html.escape(job.get("question") or "")], form=_answer_verb(got))
+
+
+def _answer_verb(got):
+    """The button reads as what it does: "Rip as The Thing (1982)"."""
+    return "Rip as %s" % got["label"] if got["answer"] else got["label"]
+
+
+@app.post("/api/answer/{token}")
+def answer_from_notification(token: str, request: Request):
+    """Answer a disc's question from a notification's button."""
+    wants_page = "text/html" in (request.headers.get("accept") or "")
+    got, job = _answer_target(token)
+    if got.get("error"):
+        if wants_page:
+            return _answer_page("Riparr", [html.escape(got["error"])], status=409)
+        raise HTTPException(status_code=409, detail=got["error"])
+    ok, message = RIP.answer(got["job"], **got["answer"])
+    if not ok:
+        if wants_page:
+            return _answer_page("Riparr", [html.escape(message)], status=400)
+        raise HTTPException(status_code=400, detail=message)
+    SY.component("Queue").info("Job %d answered from a notification: %s", got["job"], got["label"])
+    done = ("Riparr is ripping it as %s." % got["label"] if got["answer"]
+            else "Riparr is ripping it now.")
+    if wants_page:
+        return _answer_page(job.get("title") or job.get("disc_label") or "A disc",
+                            [html.escape(done)])
+    return {"ok": True, "message": done}
 
 
 @app.get("/api/tv/search")

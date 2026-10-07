@@ -225,6 +225,34 @@ looking at the web page.
 each version is announced once, so it amounts to a handful of messages a year. It is
 sent at a lower priority than the rest, because nothing is broken.
 
+### Answering a disc from the notification
+
+When a disc stops to ask a question, *A disc needs your input* comes with Riparr's
+best guesses attached, so you can answer without going to a computer:
+
+| The question | The choices |
+|---|---|
+| Which film is this? (TMDb isn't sure) | The two best-known of TMDb's suggestions |
+| Which show is this season disc? | The two shows it's choosing between |
+| Is this season's episode order right? | **Looks right, rip it** |
+| Anything else | Just **Open Riparr** |
+
+**ntfy** shows them as buttons that answer straight away and clear the notification.
+**Discord** and **email** show them as links, because a Discord webhook can't send
+buttons. A link opens a page with the button on it: link previews and mail scanners open
+links too, and would otherwise answer the disc before you'd seen it. The **webhook** gets
+them as an `actions` list: POST to an answer's `url` to choose it.
+
+Each button answers its own disc once. A second tap says it's already been answered, a
+week-old one has expired, and changing Riparr's password retires every one sent before.
+There's no Skip button, because skipping ejects the disc.
+
+The buttons are sent from your phone, so your phone has to reach Riparr. **Riparr's
+address**, under *Answer from your phone*, says where they point. Left empty, it's the
+address you last signed in at. To use them away from home, set it to an address that
+reaches Riparr from outside, such as through a VPN or a reverse proxy. Until Riparr
+knows an address, notifications come without buttons.
+
 ### Discord, if you want Riparr to tell *you*
 
 A Discord webhook posts into a **channel**, which is a thing you find later. What

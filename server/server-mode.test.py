@@ -306,6 +306,84 @@ check("and the year comes with it", (known or {}).get("year"), 1995)
 check("a disc we don't have isn't", main._known_disc({"label": "ALIEN", "size_bytes": 1}),
       None)
 
+print("answering a disc from a notification")
+from riparr import notify as NT  # noqa: E402
+
+
+class _Req:  # the two things the answer endpoint reads off a request
+    def __init__(self, accept=""):
+        self.headers = {"accept": accept}
+
+
+db.set("public_url", "")
+db.set("seen_url", "")
+check("no address known, no buttons", NT.actions(NT.answer_action(1, "X", {}), NT.open_action()), [])
+db.set("seen_url", "http://10.0.0.5:8080")
+check("the address you signed in at is the fallback", NT.public_url(), "http://10.0.0.5:8080")
+db.set("public_url", "https://riparr.example.com/")
+check("one set on Connect wins, without its trailing slash", NT.public_url(),
+      "https://riparr.example.com")
+db.set("public_url", "file:///etc/passwd")
+check("an address that isn't http(s) gives no buttons", NT.public_url(), "")
+db.set("public_url", "")
+
+jid = db.create_job(title=None, disc_label="THE_THING", kind="movie", fingerprint="",
+                    state="needs_input", question="TMDb isn't sure which film.",
+                    phase="Waiting for you", mode=None, bytes_total=1)
+picks = RIP._film_buttons(jid, [{"id": 1091, "title": "The Thing", "year": 1982, "votes": 7000},
+                                {"id": 60935, "title": "The Thing", "year": 2011, "votes": 3000},
+                                {"id": 9, "title": "The Thing", "year": 1951, "votes": 500}])
+check("the two best-known films, then Open",
+      [a["label"] for a in picks], ["The Thing (1982)", "The Thing (2011)", "Open Riparr"])
+token = picks[0]["url"].rsplit("/", 1)[1]
+check("a button carries its own answer", NT.read_answer(token),
+      {"job": jid, "answer": {"tmdb_id": 1091}, "label": "The Thing (1982)"})
+check("a tampered one is refused", "error" in NT.read_answer(token[:-3] + "abc"), True)
+forged = NT._signer().dumps({"j": jid, "a": {"skip": True}})
+check("and so is an answer a button can't give", "error" in NT.read_answer(forged), True)
+saved = NT.ANSWER_MAX_AGE
+NT.ANSWER_MAX_AGE = -1
+check("an old one has expired", "expired" in NT.read_answer(token).get("error", ""), True)
+NT.ANSWER_MAX_AGE = saved
+
+msg = NT.ntfy_message("topic", "needs_you", "THE_THING", "Which?", picks)
+check("ntfy gets buttons that answer from the phone",
+      msg["actions"][0], {"action": "http", "label": "The Thing (1982)",
+                          "url": picks[0]["url"], "method": "POST", "clear": True})
+check("and one that opens Riparr", msg["actions"][2]["action"], "view")
+check("tapping the notification opens Riparr too", msg["click"], picks[2]["url"])
+check("Discord gets links", "[The Thing (2011)](" in NT.discord_links(picks), True)
+
+page = main.answer_page(token)
+check("following the link only asks", (page.status_code, db.get_job(jid)["state"]),
+      (200, "needs_input"))
+check("with the choice on the button", b"Rip as The Thing (1982)</button>" in page.body, True)
+got = main.answer_from_notification(token, _Req())
+check("the button answers it", (got["ok"], db.get_job(jid)["tmdb_id"], db.get_job(jid)["state"]),
+      (True, 1091, "queued"))
+try:
+    main.answer_from_notification(token, _Req())
+    again = None
+except main.HTTPException as e:
+    again = e.status_code
+check("a second tap is refused", again, 409)
+check("and the page says so", b"already been answered" in main.answer_page(token).body, True)
+
+db.set("seen_url", "")
+check("a season disc with no season gets only Open",
+      len(RIP._season_buttons(jid, {"season": None}, False)), 0)
+db.set("seen_url", "http://10.0.0.5:8080")
+check("…which is there when the address is known",
+      [a["kind"] for a in RIP._season_buttons(jid, {"season": None}, False)], ["open"])
+check("a sure one can be ripped as it is",
+      [a["label"] for a in RIP._season_buttons(jid, {"season": 2}, False)],
+      ["Looks right, rip it", "Open Riparr"])
+check("an unsure one offers the shows",
+      [a["label"] for a in RIP._season_buttons(jid, {"season": 2, "series_options": [
+          {"id": 526, "name": "The Office", "year": 2005},
+          {"id": 2996, "name": "The Office", "year": 2001}]}, True)],
+      ["The Office (2005)", "The Office (2001)", "Open Riparr"])
+
 print()
 if failures:
     print("%d check(s) failed: %s" % (len(failures), ", ".join(failures)))

@@ -23,6 +23,8 @@ import urllib.parse
 import urllib.request
 from email.message import EmailMessage
 
+from itsdangerous import BadSignature, URLSafeTimedSerializer
+
 from . import db, platform as P, system as SY
 
 log = SY.component("Notifications")
@@ -68,23 +70,105 @@ def enabled_events():
     return got if isinstance(got, list) else DEFAULT_EVENTS
 
 
-def send(event, title="", body="", force=False):
-    """Queue a notification on every configured channel. Never raises, never blocks."""
+def send(event, title="", body="", force=False, actions=None):
+    """Queue a notification on every configured channel. Never raises, never blocks.
+
+    `actions` are buttons, from `answer_action` and `open_action`: ntfy shows them as
+    buttons, Discord and email as links, and the webhook gets them as data.
+    """
     if not force and event not in enabled_events():
         return
+    actions = actions or []
     payload = {"event": event, "title": title, "body": body,
                "hostname": P.hostname()}
-    threading.Thread(target=_fanout, args=(event, title, body, payload),
+    if actions:
+        payload["actions"] = [{"label": a["label"], "url": a["url"],
+                               "method": "POST" if a["kind"] == "answer" else "GET"}
+                              for a in actions]
+    threading.Thread(target=_fanout, args=(event, title, body, payload, actions),
                      name="riparr-notify", daemon=True).start()
 
 
-def _fanout(event, title, body, payload):
+def _fanout(event, title, body, payload, actions=()):
     for name, fn in (("ntfy", _ntfy), ("Discord", _discord),
                      ("webhook", _webhook), ("email", _email)):
         try:
-            fn(event, title, body, payload)
+            fn(event, title, body, payload, actions)
         except Exception as e:
             log.warning("%s notification failed: %s", name, e)
+
+
+# ─────────────────────────────── answering from a notification ───────────────────────
+#
+# A disc that stops to ask "which film is this?" used to need somebody to walk to a
+# computer. These are the buttons that answer it from the notification instead.
+#
+# Each button is a link carrying a signed answer -- this job, this choice -- so it needs
+# no sign-in, and can't be edited into a different answer. It works once: answering
+# moves the job out of "needs input", and the second tap is refused. A password change
+# mints a new secret, which retires every link already sent, on purpose.
+
+ANSWER_SALT = "riparr-answer"     # never the cookie's salt: one can't stand in for the other
+ANSWER_MAX_AGE = 7 * 24 * 3600    # a disc can sit waiting over a long weekend
+LABEL_MAX = 40
+
+
+def _signer():
+    secret = db.get("session_secret") or ""
+    return URLSafeTimedSerializer(secret, salt=ANSWER_SALT)
+
+
+def public_url():
+    """How a phone reaches Riparr: the address set on Settings → Connect, or else the
+    one it was last signed in at. Empty when neither is known, and then there are no
+    buttons -- a button that points nowhere is worse than none."""
+    url = (db.get("public_url") or db.get("seen_url") or "").strip().rstrip("/")
+    try:
+        return _check_url(url) if url else ""
+    except BadWebhookURL:
+        return ""
+
+
+def _label(text):
+    text = " ".join((text or "").split())
+    return text if len(text) <= LABEL_MAX else text[:LABEL_MAX - 1].rstrip() + "…"
+
+
+def answer_action(job_id, label, answer):
+    """A button that answers job `job_id` with `answer` (the fields rip.answer takes)."""
+    base = public_url()
+    if not base:
+        return None
+    token = _signer().dumps({"j": int(job_id), "a": answer, "l": _label(label)})
+    url = "%s/api/answer/%s" % (base, token)
+    return {"kind": "answer", "label": _label(label), "url": url}
+
+
+def open_action(label="Open Riparr", where="#/queue"):
+    base = public_url()
+    return {"kind": "open", "label": label, "url": base + "/" + where} if base else None
+
+
+def actions(*items):
+    """The buttons that could be made, at most three (ntfy's limit)."""
+    return [a for a in items if a][:3]
+
+
+# The only answers a button can give: a film, a show, or "as proposed" (no fields).
+ANSWER_FIELDS = {"tmdb_id", "series_id"}
+
+
+def read_answer(token):
+    """{"job", "answer", "label"} from a button's token, or {"error": why}."""
+    try:
+        got = _signer().loads(token, max_age=ANSWER_MAX_AGE)
+    except BadSignature:
+        return {"error": "This button has expired, or Riparr's password was changed "
+                         "since it was sent. Answer on the Queue page instead."}
+    if (not isinstance(got, dict) or not isinstance(got.get("a"), dict)
+            or set(got["a"]) - ANSWER_FIELDS):
+        return {"error": "That isn't a Riparr answer."}
+    return {"job": int(got["j"]), "answer": got["a"], "label": got.get("l") or "Rip it"}
 
 
 class BadWebhookURL(ValueError):
@@ -121,19 +205,45 @@ def _post(url, data, headers=None, content_type="application/json"):
 
 # ─────────────────────────────── channels ───────────────────────────────
 
-def _ntfy(event, title, body, payload):
+def _ntfy(event, title, body, payload, actions=()):
     topic = (db.get("ntfy_topic") or "").strip()
     if not topic:
         return
     server = (db.get("ntfy_server") or "https://ntfy.sh").strip().rstrip("/")
     tag, priority = _TAGS.get(event, ("cd", 3))
-    headers = {"Title": _ascii(title or "Riparr"),
-               "Tags": tag, "Priority": str(priority)}
+    headers = {}
     token = (db.get("ntfy_token") or "").strip()
     if token:
         headers["Authorization"] = "Bearer %s" % token
+    if actions:
+        # Buttons go as JSON, not in the Actions header, where a comma in a film's
+        # title would split one button into two.
+        _post(server + "/", ntfy_message(topic, event, title, body, actions), headers)
+        return
+    headers.update({"Title": _ascii(title or "Riparr"),
+                    "Tags": tag, "Priority": str(priority)})
     _post("%s/%s" % (server, urllib.parse.quote(topic)),
           (body or "").encode("utf-8"), headers, content_type="text/plain")
+
+
+def ntfy_message(topic, event, title, body, actions):
+    """ntfy's JSON publish. An answer is an `http` action, which the ntfy app sends
+    straight from the phone and then clears the notification; Open is a `view`."""
+    tag, priority = _TAGS.get(event, ("cd", 3))
+    out = []
+    for a in actions:
+        if a["kind"] == "answer":
+            out.append({"action": "http", "label": a["label"], "url": a["url"],
+                        "method": "POST", "clear": True})
+        else:
+            out.append({"action": "view", "label": a["label"], "url": a["url"]})
+    msg = {"topic": topic, "title": title or "Riparr", "message": body or "",
+           "tags": [tag], "priority": priority, "actions": out}
+    opener = next((a for a in actions if a["kind"] == "open"), None)
+    if opener:
+        msg["click"] = opener["url"]
+    return msg
+
 
 
 _DISCORD_RE = re.compile(
@@ -159,7 +269,7 @@ def discord_mention_prefix(event):
     return "<@%s> " % who, {"parse": [], "users": [who]}
 
 
-def _discord(event, title, body, payload):
+def _discord(event, title, body, payload, actions=()):
     url = (db.get("discord_webhook") or "").strip()
     if not url:
         return
@@ -169,7 +279,7 @@ def _discord(event, title, body, payload):
     mention, allowed = discord_mention_prefix(event)
     msg = {"username": "Riparr",
            "embeds": [{"title": title or "Riparr",
-                       "description": body or "",
+                       "description": (body or "") + discord_links(actions),
                        "color": colour,
                        "footer": {"text": "Riparr on %s" % P.hostname()}}]}
     if mention:
@@ -178,6 +288,16 @@ def _discord(event, title, body, payload):
         # not ping anyone the webhook was not explicitly told to ping.
         msg["allowed_mentions"] = allowed
     _post(url, msg)
+
+
+def discord_links(actions):
+    """Webhooks can't send Discord buttons -- those need a bot -- so the choices are
+    links under the message. Opening an answer's link shows a page with the button on
+    it rather than answering: link previews and mail scanners open links too."""
+    if not actions:
+        return ""
+    return "\n\n" + " · ".join("[%s](%s)" % (a["label"].replace("]", ")"), a["url"])
+                               for a in actions)
 
 
 def discord_check(url=None):
@@ -219,7 +339,7 @@ def discord_check(url=None):
             "guild_id": info.get("guild_id")}
 
 
-def _webhook(event, title, body, payload):
+def _webhook(event, title, body, payload, actions=()):
     """The field that has been on the settings page all along, finally connected."""
     url = (db.get("webhook_url") or "").strip()
     if not url:
@@ -227,7 +347,7 @@ def _webhook(event, title, body, payload):
     _post(url, payload)
 
 
-def _email(event, title, body, payload):
+def _email(event, title, body, payload, actions=()):
     host = (db.get("smtp_host") or "").strip()
     to = (db.get("smtp_to") or "").strip()
     if not host or not to:
@@ -236,7 +356,8 @@ def _email(event, title, body, payload):
     msg["Subject"] = "Riparr: %s" % (title or event)
     msg["From"] = (db.get("smtp_from") or "riparr@localhost").strip()
     msg["To"] = to
-    msg.set_content("%s\n\n%s\n\n— Riparr" % (title or "", body or ""))
+    links = "".join("\n%s: %s" % (a["label"], a["url"]) for a in actions)
+    msg.set_content("%s\n\n%s\n%s\n— Riparr" % (title or "", body or "", links))
 
     port = int(db.get("smtp_port") or 587)
     user = (db.get("smtp_username") or "").strip()

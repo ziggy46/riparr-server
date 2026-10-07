@@ -2915,7 +2915,9 @@ settingsPages.connect = async (s) => {
         trigger; in n8n, a Webhook node; anywhere else, whatever you already use.</li>
       <li><b>Paste it below and send a test.</b> The body looks like this:
         <code class="block">{"event":"done","title":"Arthur Christmas",
-"body":"Ripped and verified","hostname":"riparr"}</code></li>
+"body":"Ripped and verified","hostname":"riparr"}</code>
+        When a disc needs you, there's also <code>actions</code>: each has a
+        <code>label</code>, and a <code>url</code> to POST to (an answer) or open.</li>
       <li><b>Events are the ones ticked at the top of this page.</b> <code>event</code>
         is one of <code>${n.events.map(e => e.key).join("</code>, <code>")}</code>.</li>
     </ol>
@@ -2936,6 +2938,21 @@ settingsPages.connect = async (s) => {
                 value="${esc(e.key)}" ${on.has(e.key) ? "checked" : ""}>
           <span class="track"></span><span class="lbl">${esc(e.label)}</span></label>`).join("")}
     </div>
+  </div></div>
+
+  <div class="section"><h2>Answer from your phone</h2><div>
+    <p class="muted">When a disc stops to ask which film or show it is, the notification
+      has buttons with Riparr's best guesses. In ntfy a button answers straight away;
+      Discord and email get links to a page with the button on it. Either way, your
+      phone has to be able to reach Riparr.</p>
+    <label class="f" style="margin-top:14px"><span>Riparr's address</span>
+      <input data-set="public_url" value="${esc(s.public_url || "")}"
+             placeholder="${esc(n.seen_url || "http://192.168.1.10:8080")}">
+      <span class="help">${n.seen_url
+        ? `Empty means the address you signed in at, <code>${esc(n.seen_url)}</code>.`
+        : "Empty means the address you next sign in at."} Away from home, the buttons
+        only work if this address reaches Riparr from there too, through a VPN or a
+        reverse proxy.</span></label>
   </div></div>
 
   <div class="section"><h2>Channels

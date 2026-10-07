@@ -25,6 +25,14 @@ MS Sans Serif where your computer has it, and Tahoma or Geneva where it doesn't.
 
 The sign-in page now uses your theme too, in every browser.
 
+**Answer a disc from the notification.** When a disc asks "which film is this?", the
+notification has Riparr's two best guesses from TMDb. A season disc gets the two shows
+it's choosing between, or **Looks right, rip it** when only the episode order needs a
+look. In ntfy they're buttons, and one tap starts the rip. Discord and email get links to
+a page with the button, since Discord webhooks can't send buttons. The webhook gets them
+as an `actions` list. Your phone has to reach Riparr: **Settings → Connect → Riparr's
+address** is where the buttons point, and it defaults to the address you sign in at.
+
 ## 0.8.0
 
 **Fixed: a rip could sit on "Reading the disc" forever.** A Linux-only MakeMKV bug can

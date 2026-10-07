@@ -472,6 +472,30 @@ def answer(job_id, title_index=None, name=None, skip=False, season=None,
     return True, "Thanks — starting the rip."
 
 
+def _film_buttons(job_id, candidates):
+    """The two best-known of TMDb's picks, and Open. Two, not three, so there's room to
+    open the page when it's neither -- and no Skip, which ejects the disc on a mis-tap."""
+    best = sorted(candidates or [], key=lambda c: c.get("votes") or 0, reverse=True)[:2]
+    return notify.actions(*[notify.answer_action(job_id, TM.display_name(c),
+                                                 {"tmdb_id": int(c["id"])})
+                            for c in best], notify.open_action())
+
+
+def _season_buttons(job_id, plan, unsure_series):
+    """A season disc can be answered from the notification once its season is known:
+    with the show it's unsure between, or, when only the order needs a look, as it is."""
+    if plan.get("season") is None:
+        return notify.actions(notify.open_action())
+    if unsure_series:
+        options = [o for o in plan.get("series_options") or []
+                   if o.get("id") is not None][:2]
+        picks = [notify.answer_action(job_id, tv.describe(o), {"series_id": int(o["id"])})
+                 for o in options]
+    else:
+        picks = [notify.answer_action(job_id, "Looks right, rip it", {})]
+    return notify.actions(*picks, notify.open_action())
+
+
 def _apply_season_answer(job, plan, season, first_episode, series_id, include,
                          episode_titles, order):
     """Fold a human's corrections into a stored season plan. Returns (plan, error).
@@ -1538,7 +1562,7 @@ def _identify_season(job, s, d, titles, remembered):
                       phase="Waiting for you")
         log.info("Job %d needs a human: %s", job["id"], question)
         notify.send("needs_you", title=plan.get("series") or label or "A disc",
-                    body=question)
+                    body=question, actions=_season_buttons(job["id"], plan, unsure_series))
         return True, None
 
     return True, _commit_season(job, s, d, titles, plan)
@@ -1697,8 +1721,11 @@ def _identify(job, s):
                       chosen_title=chosen["index"], candidates=candidates,
                       disc_label=d.get("label") or job.get("disc_label"))
         log.info("Job %d needs a human: %s", job["id"], question)
+        # TMDb's picks can answer "which film is this?" from the notification. When the
+        # question is also which title is the film, that needs the page.
+        picks = candidates if tmdb_question and not ask_title else []
         notify.send("needs_you", title=name or d.get("label") or "A disc",
-                    body=question)
+                    body=question, actions=_film_buttons(job["id"], picks))
         return None
 
     title_name, year = _split_year(name)
@@ -2640,7 +2667,8 @@ def _identify_backup(job, s, d):
                       disc_family=family,
                       disc_label=d.get("label") or job.get("disc_label"))
         log.info("Job %d needs a human: %s", job["id"], question)
-        notify.send("needs_you", title=d.get("label") or "A disc", body=question)
+        notify.send("needs_you", title=d.get("label") or "A disc", body=question,
+                    actions=notify.actions(notify.open_action()))
         return None
 
     title_name, year = _split_year(name)
