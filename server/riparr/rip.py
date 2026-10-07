@@ -690,7 +690,7 @@ def _seconds(text):
 # cheap signature the disc watcher uses, so swapping discs invalidates it.
 _titles_cache = {"key": None, "titles": None, "at": 0.0}
 _last_scan = {"key": None, "at": 0.0, "raw": ""}
-_scan_state = {"running": False, "error": None}
+_scan_state = {"running": False, "error": None, "progress": None, "started": None}
 TITLES_TTL = 1800
 # Ceiling for one `makemkvcon info` scan. See the note at the subprocess call.
 TITLES_TIMEOUT = 1800
@@ -840,6 +840,11 @@ def read_titles(device, disc=None, on_progress=None):
             if time.time() > deadline:
                 proc.kill()
                 raise subprocess.TimeoutExpired(binary, TITLES_TIMEOUT)
+            # MakeMKV's own words ("Using direct disc access mode", read errors...)
+            # go to the log, so a slow scan can be followed on System > Log Files.
+            mmsg = MSG.match(raw.strip())
+            if mmsg:
+                log.info("MakeMKV: %s", mmsg.group(2))
             if on_progress:
                 # `makemkvcon info` emits no PRGV at all -- a full scan of a real disc
                 # is 172 MSG lines and 16 DRV lines and nothing else, so there is no
@@ -2061,6 +2066,9 @@ def disc_details():
                                 ("device", "vendor", "model", "label", "media")},
             "family": family, "source": source, "titles": out,
             "scanning": _scan_state["running"], "scan_error": _scan_state["error"],
+            "scan_progress": _scan_state["progress"],
+            "scan_seconds": (int(time.time() - _scan_state["started"])
+                             if _scan_state["running"] and _scan_state["started"] else None),
             "raw": raw_ok, "job_id": job and job.get("id")}
 
 
@@ -2077,10 +2085,14 @@ def scan_disc():
     if not drive:
         return False, "There's no disc in the tray."
 
+    def progress(_frac, msg=None):
+        if msg:
+            _scan_state["progress"] = msg
+
     def go():
-        _scan_state.update(running=True, error=None)
+        _scan_state.update(running=True, error=None, progress=None, started=time.time())
         try:
-            read_titles(drive.get("device"), drive)
+            read_titles(drive.get("device"), drive, on_progress=progress)
         except Exception as e:
             _scan_state["error"] = str(e)
         finally:

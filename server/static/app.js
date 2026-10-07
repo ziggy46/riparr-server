@@ -1393,8 +1393,11 @@ async function showDiscDetails() {
         : d.source === "scan" ? "From the last scan of this disc."
         : "This disc hasn't been read yet."}
         Titles under a minute are menus and idents and are left out.</p>
-      ${d.scanning ? `<div class="result busy"><span class="spin"></span>Reading the disc —
-          a few minutes on a real drive. This updates when it's done.</div>`
+      ${d.scanning ? `<div class="result busy"><span class="spin"></span><span>${esc(
+          d.scan_progress || "Reading the disc")}${d.scan_seconds != null
+          ? ` \u00b7 ${esc(duration(d.scan_seconds))}` : ""}<br><span class="muted">An
+          encrypted disc can take several minutes. MakeMKV's progress is on
+          <a href="#/system/logs">System \u2192 Log Files</a>.</span></span></div>`
         : !titles.length ? `<div class="btn-row"><button class="btn primary" data-scan>Read the disc</button>
           <span class="test-out">Only while nothing is ripping.</span></div>` : ""}
       ${d.scan_error ? `<div class="result bad">${esc(d.scan_error)}</div>` : ""}
