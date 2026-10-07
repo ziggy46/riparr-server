@@ -98,10 +98,22 @@ server already has:
 
 ## Where it's at
 
-Pre-1.0, like upstream. The image builds and runs, MakeMKV compiles on first start, and
-the interface works in both live and simulated modes. **Rips with a real drive passed through haven't been
-tested yet in this fork**, so if you're first, [an issue](../../issues) with your drive
-and host is genuinely useful.
+Pre-1.0, like upstream. What has and hasn't been tried with real drives and discs, as
+opposed to Riparr's simulated drive:
+
+- [x] A DVD, ripped and filed end to end in Docker (an LXC on Proxmox)
+- [x] Installing without Docker, on a Linux VM (amd64): MakeMKV built, a DVD scanned and
+  ripped through a passed-through USB drive
+- [x] MakeMKV's first-run hang on a new drive, worked around on its own
+- [ ] A Blu-ray (1080p), end to end
+- [ ] **Two or more drives ripping at once.** Only tested with the simulated drives, never
+  on real hardware, so two MakeMKV runs sharing one USB bus or host are unknown
+- [ ] A TV season disc on a real drive
+- [ ] 4K UHD discs and LibreDrive
+- [ ] Answering a disc from a phone notification (tested against a stand-in ntfy server)
+
+If you try one of the unticked ones, [an issue](../../issues) saying how it went, with
+your drive and host, is genuinely useful.
 
 Deliberate limits:
 
