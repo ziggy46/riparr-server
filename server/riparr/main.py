@@ -91,6 +91,21 @@ def _check_password_reset():
         return
 
 
+def _key_on_start():
+    """Look the current beta key up once at start, in the background, so a box with no
+    key (or a lapsed beta key) gets the published one now -- not whenever the scheduled
+    check next runs, or somebody happens to open System → Status."""
+    if not db.get("auto_renew_beta_key", True):
+        return
+
+    def look():
+        try:
+            MK.beta_key(force=True)
+        except Exception as e:
+            SY.component("MakeMKV").warning("Couldn't look up the beta key at start: %s", e)
+    threading.Thread(target=look, name="riparr-key-on-start", daemon=True).start()
+
+
 def _stop_keeping_copies():
     """0.9.1 stopped keeping a verified rip's staged copy. Once, on the way up: turn
     the old default off, and clear the copies that are already safely on the share --
@@ -121,6 +136,7 @@ def _startup():
     for key in NM.upgrade_saved_templates(db.get, db.set):
         SY.component("Setup").info("Updated the saved %s to the current TRaSH preset.", key)
     _stop_keeping_copies()
+    _key_on_start()
     SY.start_scheduler()
     RIP.start()
 
@@ -743,7 +759,7 @@ def _autorip_state():
               "MakeMKV %s" % (mk.get("version") or "installed"))
     else:
         check("Riparr can read discs", "fail", "MakeMKV isn't installed",
-              "Riparr has no way to read a disc without it.", "#/settings/general")
+              "Riparr has no way to read a disc without it.", "#/settings/makemkv")
 
     # 2. ...and a licence for it. Kept separate from the install because a key that
     #    lapsed last week is a working install and a dead appliance, and those two
@@ -753,28 +769,28 @@ def _autorip_state():
         days = None                       # a day count computed against a wrong clock
     if not mk.get("installed"):
         check("The MakeMKV key is current", "fail", "Nothing installed to key yet",
-              "Install MakeMKV first.", "#/settings/general")
+              "Install MakeMKV first.", "#/settings/makemkv")
     elif not db.get("makemkv_key"):
         check("The MakeMKV key is current", "fail", "No key entered",
-              "Encrypted discs won't decode without one.", "#/settings/general")
+              "Encrypted discs won't decode without one.", "#/settings/makemkv")
     elif mk.get("installed") and not P.MOCK and not MK.key_is_registered():
         # The key is in Riparr but not in MakeMKV. This was the silent case: the row
         # above went green on a stored key while makemkvcon had never been given one.
         check("The MakeMKV key is current", "fail", "Entered but not registered",
               "Re-save the key in Settings to write it to MakeMKV.",
-              "#/settings/general")
+              "#/settings/makemkv")
     elif days is not None and days <= 0:
         check("The MakeMKV key is current", "fail", "Expired",
-              "Every rip will fail until it's replaced.", "#/settings/general")
+              "Every rip will fail until it's replaced.", "#/settings/makemkv")
     elif mk.get("key_stale"):
         check("The MakeMKV key is current", "warn", "A newer key has been published",
               "Yours is an older key and may already be dead. Settings offers the "
-              "current one.", "#/settings/general")
+              "current one.", "#/settings/makemkv")
     elif days is not None and days <= warn_days:
         check("The MakeMKV key is current", "warn",
               "%s key, %d day%s left" % ((mk.get("key_type") or "Beta").capitalize(),
                                          days, "" if days == 1 else "s"),
-              "Rips start failing the day it lapses.", "#/settings/general")
+              "Rips start failing the day it lapses.", "#/settings/makemkv")
     else:
         check("The MakeMKV key is current", "ok",
               "%s key%s" % ((mk.get("key_type") or "Licence").capitalize(),
@@ -804,7 +820,7 @@ def _autorip_state():
     elif not share.get("verified_at"):
         check("Somewhere to put the files", "fail", "Share hasn't been tested",
               "Riparr writes a test file before it will trust a share with a rip.",
-              "#/settings/library")
+              "#/settings/library/share")
     else:
         check("Somewhere to put the files", "ok",
               "//%s/%s" % (share["host"], share["path"]))
@@ -1087,6 +1103,48 @@ def shares_create(body: ShareCreate, user=Depends(require_user)):
                        body.username, body.password)
     db.mark_share_verified(sid)
     return {"ok": True, "id": sid, "test": result}
+
+
+class ShareLogin(BaseModel):
+    username: str = ""
+    password: str = ""
+
+
+def _test_stored(sh):
+    share, _, path = (sh.get("path") or "").partition("/")
+    r = SH.test_write(sh["host"], share, path, sh.get("username") or "", sh.get("password") or "")
+    if r.get("ok"):
+        db.mark_share_verified(sh["id"])
+    return r
+
+
+@app.post("/api/shares/{share_id}/test")
+def shares_retest(share_id: int, user=Depends(require_user)):
+    """Run the write test on a share already set up, and mark it tested when it passes:
+    the one way to clear "Share hasn't been tested" without removing it."""
+    sh = db.share_by_id(share_id)
+    if not sh:
+        raise HTTPException(status_code=404, detail="No such share.")
+    r = _test_stored(sh)
+    if not r.get("ok"):
+        raise HTTPException(status_code=400, detail=r.get("error", "The write test failed"))
+    return {"ok": True, "message": "Riparr wrote a file there and read it back."}
+
+
+@app.put("/api/shares/{share_id}/login")
+def shares_login(share_id: int, body: ShareLogin, user=Depends(require_user)):
+    """New credentials for a share, kept only if the write test passes with them."""
+    sh = db.share_by_id(share_id)
+    if not sh:
+        raise HTTPException(status_code=404, detail="No such share.")
+    pw = sh.get("password") if body.password == SECRET_MASK else body.password
+    share, _, path = (sh.get("path") or "").partition("/")
+    r = SH.test_write(sh["host"], share, path, body.username, pw)
+    if not r.get("ok"):
+        raise HTTPException(status_code=400, detail=r.get("error", "The write test failed"))
+    db.update_share_login(share_id, body.username, pw)
+    db.mark_share_verified(share_id)
+    return {"ok": True, "message": "Signed in and tested."}
 
 
 @app.delete("/api/shares/{share_id}")

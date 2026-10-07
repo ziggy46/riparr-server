@@ -878,8 +878,16 @@ def makemkv_status():
             return {"installed": True, "version": "2.0.0", "eula_accepted": True,
                     "key_type": None, "key_expires": None, "days_left": None,
                     "key_stale": False}
+        # The saved key's own expiry, counted from today -- a fixed date and a fixed
+        # count disagreed with each other and with Settings.
+        expires = db.get("makemkv_key_expires") or (
+            datetime.date.today() + datetime.timedelta(days=24)).isoformat()
+        try:
+            days = (datetime.date.fromisoformat(expires) - datetime.date.today()).days
+        except ValueError:
+            days = None
         return {"installed": True, "version": "2.0.0", "eula_accepted": True,
-                "key_type": "beta", "key_expires": "2026-10-14", "days_left": 56}
+                "key_type": "beta", "key_expires": expires, "days_left": days}
     binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"
     installed = os.path.exists(binary)
     ver = _makemkv_version(binary) if installed else None

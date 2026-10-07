@@ -145,7 +145,7 @@ Plex and Jellyfin both read several files in one movie folder as **versions** of
 same film, so you get a "play version" choice rather than two entries. The rip that was
 renamed says so on its History row.
 
-Re-ripping the *same* disc still replaces its own file, which is what Re-rip is for.
+Re-ripping the *same* disc still replaces its own file, which is what Rip again is for.
 
 To tag every rip from the start instead, put `{Source}` in the template:
 `{Title} ({Year})/{Title} ({Year}) - {Source}.mkv`.

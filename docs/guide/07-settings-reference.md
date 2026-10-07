@@ -18,8 +18,9 @@ or five weeks. Riparr says which month yours is good for rather than counting do
 date it cannot know, and **puts in the new key itself** when GuinpinSoft publishes it.
 It checks makemkv.com every six hours, and only ever swaps a beta key for a beta key: a
 bought key is never touched, and if makemkv.com, its forum and the backup key service
-disagree about the new key, nothing changes. The next time you open the web page, Riparr
-tells you it renewed the key.
+disagree about the new key, nothing changes. A new install with no key gets the current
+beta key the same way, when Riparr starts. The next time you open the web page, Riparr
+tells you it added or renewed the key. All of this is on **Settings → MakeMKV**.
 
 | Setting | Notes |
 |---|---|
@@ -49,7 +50,7 @@ Every MakeMKV download is checked against a checksum pinned in
 `packaging/makemkv-manifest.json`, and mirrors are tried in order if makemkv.com is
 down, so the build gets the right file or fails.
 
-**Settings → General** also tracks makemkv.com and its forum separately, because they are
+**Settings → MakeMKV** also tracks makemkv.com and its forum separately, because they are
 different machines and fail independently. Both publish the free key, and one is usually
 up when the other is not.
 
@@ -91,6 +92,8 @@ and bind-mount it into the container at `/srv/library` for the default share, or
 | **Folder** | Everything below it. Riparr creates it if it does not exist |
 | **Username** | Optional. A domain account goes in as `DOMAIN\name`, `DOMAIN/name` or `name@domain` |
 | **Test and save** | Writes a real file into the folder, reads it back, compares it, deletes it. A share is not saved until that passes |
+| **Test** | On a saved share: the same write-and-read-back, again. A share marked *not tested* (one imported from settings, say) needs this before Riparr trusts a rip to it, and the header's "Share hasn't been tested" link lands here |
+| **Sign-in** | Change a saved share's username and password. Leave the password as it is to keep the old one; the new sign-in is tested before it's saved |
 
 Files are copied to shares with `smbclient`, so a share works with nothing mounted.
 
@@ -162,6 +165,9 @@ Keeping every language and commentary can roughly double file size for no benefi
 people notice.
 
 ## Storage & transfer
+
+On **Settings → Ripping**. The Queue page shows a one-line summary of these, which links
+here.
 
 | Setting | Notes |
 |---|---|
@@ -312,12 +318,17 @@ copy in staging** on.
 
 ## Discs
 
-Every disc Riparr has seen, by fingerprint, with its poster.
+Your collection: one tile per film, show or album, with its poster or cover, and every
+disc of it inside. **Films**, **TV** and **Music** narrow it down. History is where each
+rip attempt is listed; this page is what you have.
 
 | Action | Effect |
 |---|---|
-| **Re-rip** | Rips it again, duplicate flag and all. Leave the disc on the tray — Riparr pulls the tray in itself |
-| **Forget** | Drops Riparr's memory of the disc entirely, including any correction you made |
+| **Rip again** | Rips it again, duplicate flag and all. Leave the disc on the tray — Riparr pulls the tray in itself. It asks first, naming the drive, and says if the disc may not fit in staging |
+| **Forget** | In the **⋯** menu. Drops Riparr's memory of the disc entirely, including any correction you made |
+
+A film with more than one disc (a DVD and a Blu-ray, or a box set) has a **Discs…** menu
+instead, with these two for each disc.
 
 This is what makes Riparr only ask you about a problem disc once, ever. A tile with a
 warning triangle is a disc Riparr has seen but never finished a verified rip of.
@@ -338,6 +349,10 @@ On **Settings → Ripping**.
 | **Try the light** / **Try the tray** | Fires the signal now, with whatever disc is in the tray. Riparr cannot see the result, so watching it is the only test |
 
 ## System
+
+**System → Status** lists every health check, passing or not, with a **Fix** link for
+each one that isn't and **Check now** to run them again. **Events** collapses a line
+logged several times in a row into one, with a count, and **Show older** pages back.
 
 | Setting | Notes |
 |---|---|

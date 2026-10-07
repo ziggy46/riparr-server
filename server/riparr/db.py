@@ -529,6 +529,13 @@ def default_share():
     return dict(row) if row else None
 
 
+def update_share_login(share_id, username, password):
+    c = conn()
+    c.execute("UPDATE shares SET username=?, password=?, verified_at=NULL WHERE id=?",
+              (username or None, password or None, share_id))
+    c.commit()
+
+
 def share_by_id(share_id):
     if not share_id:
         return None

@@ -34,6 +34,15 @@ doesn't display the line.
   room it also needs. Edge builds say "edge" rather than "up to date". History's attempts
   have column headings, a repeated failure is said once, and a rip that never started
   says so instead of "never". Events can show just warnings and errors.
+- **Discs is your collection.** One tile per film, show or album, with all its discs
+  inside, and Films / TV / Music filters. Forget sits in a menu, away from Rip again, and
+  Rip again, Cancel and Skip ask first in Riparr's own dialog, naming the drive.
+- **Each setting in one place.** The rip options are set on **Settings → Ripping**; the
+  Queue shows a one-line summary that links there. MakeMKV has its own settings page.
+  Library lets you **Test** a share again or change its **Sign-in**, and "Share hasn't been
+  tested" takes you straight to it. System → Status no longer repeats what Health says,
+  and has **Check now**. Events collapses a line logged over and over, and pages back with
+  **Show older**. On a phone, the Tasks, Backup, Log Files and Events tables become lists.
 - **Easier to read and to tap.** Muted text, badges and the version line pass contrast;
   every control on a phone is at least 44px tall; History rows no longer break apart on a
   phone. Screen readers hear the sign-in error and can tell the Tasks buttons apart.

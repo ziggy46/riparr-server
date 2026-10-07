@@ -134,11 +134,11 @@ light, three times — or two tray cycles, if you set it that way. Change it on
 **Settings → Ripping → Already-ripped discs**,
 where **Try the light** and **Try the tray** let you see each one on demand.
 
-**To rip it anyway:** the **Re-rip** button on that film's tile in **Discs**. Leave the
+**To rip it anyway:** the **Rip again** button on that film's tile in **Discs**. Leave the
 disc on the open tray — Riparr pulls the tray back in itself.
 
 **If it says this about a disc you have never ripped**, Riparr has matched it to
-something else by mistake. **Forget** on the same tile clears its memory of it, and the
+something else by mistake. **Forget**, in the same tile's **⋯** menu, clears its memory of it, and the
 next insertion is treated as new.
 
 ## Paused — library unreachable

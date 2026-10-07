@@ -111,8 +111,8 @@ host, then bind it in:
       - /mnt/nas/media:/srv/library
 ```
 
-Then open **Rip options** on the Queue page and set **Each rip goes** to *straight to
-your library*. Only the
+Then open **Settings → Ripping** (the rip options line on the Queue page goes there too)
+and set **Each rip goes** to *straight to your library*. Only the
 **default** share uses `/srv/library`. If nothing is mounted there when a disc goes
 in, that rip stages and copies over SMB instead of failing. The mount has to be writable
 by `PUID`/`PGID`.

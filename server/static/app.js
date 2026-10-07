@@ -743,7 +743,7 @@ const wizard = {
              skipped.length > 1 ? "them" : "it"} in Settings. ` : "") + lede, ar.enabled
       ? ["Insert a disc", "Riparr identifies it and starts on its own"]
       : building
-      ? ["First", "Install MakeMKV — Settings → General says how"]
+      ? ["First", "Install MakeMKV — Settings → MakeMKV says how"]
       : ["Insert a disc", "Then press Rip. Auto Rip can start it for you once it is on"]);
   },
 };
@@ -779,8 +779,9 @@ async function showRenewalNotice() {
   const d = document.createElement("dialog");
   d.id = "renewal-dialog";
   d.className = "notice-dialog";
+  d.setAttribute("aria-labelledby", "renewal-title");
   d.innerHTML = `
-    <h2>${icon("circle-check", "ok")} MakeMKV key ${r.first ? "added" : "renewed"}</h2>
+    <h2 id="renewal-title">${icon("circle-check", "ok")} MakeMKV key ${r.first ? "added" : "renewed"}</h2>
     <p>${r.first ? "There was no MakeMKV key, so Riparr put in" : "Your MakeMKV beta key ran out, so Riparr put in the new"}
       free one that GuinpinSoft publishes each month${until ? `. It works until <b>${esc(until)}</b>` : ""}.
       Your discs keep ripping without you having to do anything.</p>
@@ -954,16 +955,18 @@ function nowRipping({ q, ar, drives, cards, away }) {
    drives each has its own, named at the top. */
 function discCard({ d, loaded, hero, busy, filed, mk }, { drives, multi, todo }) {
   const dev = (d || {}).device || "";
-  const poster = (img) => `<div class="np-art">${img
+  const square = (hero[0] && hero[0].kind === "music") || (filed && filed.kind === "music")
+    || (loaded && loaded.disc_family === "cd");
+  const poster = (img) => `<div class="np-art${square ? " square" : ""}">${img
     ? `<img src="${esc(img)}" alt="">`
     : `<span class="np-art-none">${icon("compact-disc")}</span>`}</div>`;
   // A CD has no label to look a poster up by; an album Riparr knows brings its cover.
   const art = artFor(loaded && loaded.label) || (loaded && loaded.known && loaded.known.art) || null;
   // Eject leads: right after a rip it is the next thing anybody does. Disc info next,
   // then whatever belongs to this card, with the destructive one last.
-  const acts = ({ lead = "", trail = "", ejectDisabled = false } = {}) => {
+  const acts = ({ lead = "", trail = "", ejectDisabled = false, ejectPrimary = false } = {}) => {
     const disc = loaded ? `
-      <button class="btn sm" data-eject="${esc(dev)}" ${busy || ejectDisabled ? "disabled" : ""}
+      <button class="btn sm${ejectPrimary && !busy ? " primary" : ""}" data-eject="${esc(dev)}" ${busy || ejectDisabled ? "disabled" : ""}
               ${ejectDisabled ? `title="Answer or skip first"` : busy ? `title="The drive is in use — cancel the rip to eject"` : ""}>${icon("eject")} Eject</button>
       <button class="btn sm" data-disc="${esc(dev)}">${icon("compact-disc")} Disc info</button>` : "";
     return lead || disc || trail ? `<div class="np-acts">${lead}${disc}${trail}</div>` : "";
@@ -1230,7 +1233,7 @@ function npFiled(j, acts) {
         esc(shortPath(j.dest_path, isFolderJob(j)))}</span></summary><code>${esc(j.dest_path)}</code></details>` : ""}
     ${!ok && j.error ? `<p class="np-err">${esc(j.error)}</p>` : ""}
     ${ok && facts.length ? `<div class="np-facts">${facts.map(esc).join(" · ")}</div>` : ""}
-    ${acts({ lead: retry ? `<button class="btn sm primary" data-hretry="${j.id}" data-haction="${esc(retry.action)}"
+    ${acts({ ejectPrimary: ok, lead: retry ? `<button class="btn sm primary" data-hretry="${j.id}" data-haction="${esc(retry.action)}"
                 title="${esc(retry.why)}">${icon(RETRY_ICON[retry.action] || "arrows-rotate")} ${esc(retry.label)}</button>` : "",
               trail: `<a class="btn sm" href="#/history">History</a>
       <button class="btn sm" data-filed-dismiss="${j.id}">Dismiss</button>` })}`;
@@ -1245,8 +1248,7 @@ function npKnown(d, acts) {
     <h2 class="np-title" tabindex="-1">${esc(name)} ${familyTag(d.disc_family)}</h2>
     ${k.artist ? `<div class="np-sub">${esc(k.artist)}</div>`
       : d.label ? `<div class="np-sub">${esc(d.label)}</div>` : ""}
-    ${d.space_warning ? `<p class="np-err np-caution">${esc(d.space_warning)}</p>` : ""}
-    ${acts({ trail: `<button class="btn sm" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip again</button>
+    ${acts({ ejectPrimary: true, trail: `<button class="btn sm" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip again</button>
       <a class="btn sm" href="#/discs">See it in Discs</a>` })}`;
 }
 
@@ -1472,6 +1474,28 @@ function applyTheme(name) {
 }
 
 const clockTime = (sec) => `${Math.floor((sec || 0) / 60)}:${String((sec || 0) % 60).padStart(2, "0")}`;
+
+/* A question with two answers, in the app's own dialog rather than the browser's: it
+   can say which drive, show a warning, and looks like the rest of Riparr. Resolves to
+   true for the main button. */
+function askDialog({ title, body = "", ok = "OK", cancel = "Cancel", danger = false }) {
+  return new Promise((resolve) => {
+    const d = document.createElement("dialog");
+    d.className = "notice-dialog";
+    d.setAttribute("aria-labelledby", "ask-title");
+    d.innerHTML = `<h2 id="ask-title">${esc(title)}</h2>${body}
+      <div class="btn-row">
+        <button class="btn ${danger ? "danger" : "primary"}" data-ok>${esc(ok)}</button>
+        <button class="btn" data-no>${esc(cancel)}</button></div>`;
+    document.body.appendChild(d);
+    const done = (v) => { d.close(); d.remove(); resolve(v); };
+    d.querySelector("[data-ok]").onclick = () => done(true);
+    d.querySelector("[data-no]").onclick = () => done(false);
+    d.addEventListener("cancel", (e) => { e.preventDefault(); done(false); });
+    d.showModal();
+    d.querySelector("[data-no]").focus();
+  });
+}
 
 async function showDiscDetails(device = "") {
   const q = device ? `?device=${encodeURIComponent(device)}` : "";
@@ -2066,54 +2090,17 @@ function ripOptions() {
   const s = state.settings || {};
   const lib = (state.status && state.status.library) || {};
   const direct = s.transfer_mode === "direct";
-  const card = s.card_speed || {};
   const route = direct && !lib.mounted ? "staged, then copied (library not usable yet)"
               : direct ? "straight to your library"
               : "staged, then sent";
   const check = { quick: "size check", deep: "full check", off: "no check" }[s.verify_mode]
                 || "size check";
+  // Changed in one place, Settings → Ripping; the Queue says what's set and links there.
   return `
-  <details class="rip-opts-d" id="rip-opts" ${state.ripOptsOpen ? "open" : ""}>
-  <summary><span class="ropt-k">${icon("gears")} Rip options</span>
+  <a class="rip-opts-d rip-opts-link" href="#/settings/ripping">
+    <span class="ropt-k">${icon("gears")} Rip options</span>
     <span class="ropt-sum">${esc(route)} · ${esc(check)}</span>
-    <span class="ropt-change">${state.ripOptsOpen ? "Done" : "Change"}</span></summary>
-  <div class="rip-opts">
-    <div class="ropt">
-      <div class="ropt-head">
-        <label class="ropt-k" for="ar-route">${icon("hard-drive")} Each rip goes</label>
-        <button class="btn sm" id="ar-speedtest"
-                title="Measures your staging disk and says which of these suits it">Test staging speed</button>
-        <select id="ar-route" title="Applies to every rip, automatic or started by hand">
-          ${opt("direct", lib.mounted ? "straight to your library"
-                                       : "straight to your library (not usable yet)", s.transfer_mode)}
-          ${opt("auto", "staged first, then sent", s.transfer_mode)}
-        </select>
-      </div>
-      <p class="ropt-why">${
-        direct
-          ? `No staging space needed, and the file is in your library as soon as the
-             disc is done.${card.write_mbs
-               ? ` Your staging disk writes at about <b>${esc(String(card.write_mbs))} MB/s</b>.` : ""}`
-          : `The rip is safe in staging before anything is sent, so a network that drops
-             mid-disc costs a re-send rather than a re-rip.`}</p>
-      ${!lib.mounted && direct ? `<p class="ropt-warn">${icon("triangle-exclamation")}
-        <span>${esc(lib.problem || `Your library isn't mounted at ${lib.mount || "/srv/library"}.`)}
-        Until then, rips are staged and copied over SMB.</span></p>` : ""}
-      <span class="test-out ropt-out" id="ar-speed-out"></span>
-    </div>
-
-    <div class="ropt">
-      <div class="ropt-head">
-        <label class="ropt-k" for="ar-verify">${icon("circle-check")} After each rip</label>
-        <select id="ar-verify" title="Applies to every rip, automatic or started by hand">
-          ${opt("quick", "size check", s.verify_mode)}
-          ${direct ? "" : opt("deep", "full check (slow)", s.verify_mode)}
-          ${opt("off", "no check", s.verify_mode)}
-        </select>
-      </div>
-      <p class="ropt-why">${verifyNote(direct && lib.mounted)}</p>
-    </div>
-  </div></details>`;
+    <span class="ropt-change">Change</span></a>`;
 }
 
 /* ── History: the data page ──
@@ -2239,7 +2226,7 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
     if (!groups.has(key(j))) groups.set(key(j), []);
     groups.get(key(j)).push(j);          // newest first, as the jobs come
   }
-  const head_ = head("History", "Every disc, whether it's in your library, and every attempt underneath.",
+  const head_ = head("History", "Every rip, grouped by disc: what worked, what didn't, and where the time went.",
                      stageLegend(typical, h.stage_order, h.stage_labels));
   const items = [...groups.entries()].map(([k, list]) => {
     const latest = list[0];
@@ -2403,7 +2390,7 @@ views.discs = async (highlight) => {
   const { discs } = await api.get("/api/discs");
   const hit = highlight ? discs.find(d => d.fingerprint === highlight) : null;
   if (!discs.length) {
-    return `${head("Discs", "Every disc Riparr has seen. Put one back in and Riparr tells you it's already in your library, with Rip again for when you mean it.")}
+    return `${head("Discs", "Your collection: every film, show and album Riparr has ripped.")}
       <div class="card"><div class="empty-state"><div class="big">${icon("compact-disc")}</div>
         <h2>No discs recorded</h2>
         <p>Once Riparr rips a disc it remembers it, so reinserting it is refused
@@ -2412,36 +2399,59 @@ views.discs = async (highlight) => {
   }
   const nameOf = (d) => (d.title || pretty(d.label) || "Unknown disc")
     + (d.title && d.year && d.kind !== "tv" ? ` (${d.year})` : "");
-  // Two discs of one film (a DVD and a Blu-ray, say) would otherwise be two identical
-  // tiles: each says which disc it is.
-  const seen = {};
-  discs.forEach(d => { seen[nameOf(d)] = (seen[nameOf(d)] || 0) + 1; });
-  const card = (d) => {
+  // The collection: one tile per film, show or album, however many discs of it there
+  // are -- a DVD and a Blu-ray of Arrival are one film. History is where each attempt is.
+  const groups = new Map();
+  for (const d of discs) {
+    const k = `${d.kind || "movie"}|${nameOf(d).toLowerCase()}`;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(d);
+  }
+  const KIND_WORD = { movie: "Films", tv: "TV", music: "Music" };
+  const kinds = [...new Set(discs.map(d => d.kind || "movie"))];
+  const only = kinds.includes(state.discsKind) ? state.discsKind : "";
+  const discWord = (d) => d.label ? pretty(d.label) : (FAMILY[d.disc_family] || {}).label || "Disc";
+  const card = (list) => {
+    const d = list.find(x => highlight && x.fingerprint === highlight) || list[0];
     const name = nameOf(d);
-    const which = seen[name] > 1 ? (d.label || FAMILY[d.disc_family]?.label || "") : "";
-    const me = highlight && d.fingerprint === highlight;
+    const me = list.some(x => highlight && x.fingerprint === highlight);
+    const newest = Math.max(...list.map(x => x.ripped_at || 0));
+    const families = [...new Set(list.map(x => x.disc_family).filter(Boolean))];
+    const menu = list.map(x => `
+        ${list.length > 1 ? `<div class="rip-menu-h">${esc(discWord(x))} ${familyTag(x.disc_family)}</div>` : ""}
+        <button class="btn tiny" data-rerip="${esc(x.fingerprint)}"
+                title="Put this disc back in the tray and read it again from the start.">Rip again</button>
+        <button class="btn tiny quiet-danger" data-forget="${esc(x.fingerprint)}"
+                title="Forget this disc, so the next time it goes in it is treated as new.">Forget</button>`).join("");
     return `<figure class="rip${me ? " dupe" : ""}"${me ? ` id="dupe-tile"` : ""}
+                    data-kind="${esc(d.kind || "movie")}"${only && (d.kind || "movie") !== only ? " hidden" : ""}
                     ${d.art ? "" : `data-art="${esc(d.title || d.label || "")}"`}
-                    data-find="${esc([name, d.label, d.year].filter(Boolean).join(" "))}">
-      <div class="rip-art${d.art ? " has" : ""}"${d.art ? ` style="background-image:url('${esc(d.art)}')"` : ""}>
+                    data-find="${esc([name, ...list.map(x => x.label), d.year].filter(Boolean).join(" "))}">
+      <div class="rip-art${d.art ? " has" : ""}${d.kind === "music" ? " square" : ""}"${d.art ? ` style="background-image:url('${esc(d.art)}')"` : ""}>
         <span class="rip-fallback">${icon("compact-disc")}</span>
-        ${familyTag(d.disc_family, "on-art")}
+        ${families.map(f => familyTag(f, "on-art")).join("")}
         ${!d.ripped_at ? `<span class="rip-flag" title="Seen, but never finished a verified rip">${
           icon("triangle-exclamation")}</span>` : ""}
       </div>
       <figcaption>
         <div class="rip-title" title="${esc(name)}">${esc(name)}</div>
-        <div class="rip-meta">${which ? `${esc(which)} \u00b7 ` : ""}${d.ripped_at ? esc(ago(d.ripped_at))
+        <div class="rip-meta">${list.length > 1 ? `${list.length} discs \u00b7 ` : ""}${newest ? esc(ago(newest))
                                             : `<span class="bad">never finished</span>`}</div>
       </figcaption>
       <div class="rip-acts">
-        <button class="btn tiny" data-rerip="${esc(d.fingerprint)}"
-                title="Put this disc back in the tray and read it again from the start.">Rip again</button>
-        <button class="btn tiny" data-forget="${esc(d.fingerprint)}"
-                title="Forget this disc, so the next time it goes in it is treated as new.">Forget</button>
+        ${list.length === 1 ? `<button class="btn tiny" data-rerip="${esc(d.fingerprint)}"
+                title="Put this disc back in the tray and read it again from the start.">Rip again</button>` : ""}
+        <details class="row-menu"><summary class="btn tiny" aria-label="More for ${esc(name)}">${
+          list.length > 1 ? "Discs\u2026" : "\u22ef"}</summary>
+          <div class="row-menu-pop">${list.length > 1 ? menu : menu.replace(/<button class="btn tiny" data-rerip[\s\S]*?<\/button>/, "")}</div></details>
       </div>
     </figure>`;
   };
+  const filter = kinds.length > 1 ? `<div class="kind-filter" role="group" aria-label="Show">
+      ${["", ...["movie", "tv", "music"].filter(k => kinds.includes(k))].map(k =>
+        `<button class="btn sm${only === k ? " on" : ""}" data-discs-kind="${k}"
+                 aria-pressed="${only === k}">${k ? KIND_WORD[k] : "All"}</button>`).join("")}
+    </div>` : "";
   // The banner is the sentence the box would say out loud. It names the film and the
   // date, because "you already have this" is only convincing with evidence, and it
   // points at the button rather than describing a menu path.
@@ -2461,9 +2471,10 @@ views.discs = async (highlight) => {
       </div>
       <button class="icon-btn" id="dupe-dismiss" title="Dismiss" aria-label="Dismiss">${icon("xmark")}</button>
     </div>` : "";
-  return `${head("Discs", "Every disc Riparr has seen. Put one back in and Riparr tells you it's already in your library, with Rip again for when you mean it.")}
+  return `${head("Discs", "Your collection: every film, show and album Riparr has ripped. Put a disc back in and it says you already have it.")}
     ${banner}
-    <div class="rips">${discs.map(card).join("")}</div>`;
+    ${filter}
+    <div class="rips">${[...groups.values()].map(card).join("")}</div>`;
 };
 
 /* The same tidy-up the server does to a volume label, so ALL_CAPS_1999 does not sit
@@ -2513,11 +2524,14 @@ const SETTINGS_TABS = [
   ["ripping", "Ripping",
    "What Riparr takes off a disc, how it gets to your library, and how thoroughly it "
    + "is checked afterwards."],
+  ["makemkv", "MakeMKV",
+   "The software that reads your discs: its key, its version, and whether its websites "
+   + "are up."],
   ["connect", "Connect",
    "How Riparr reaches you when you are not looking at this page, and where finished "
    + "files are handed on."],
   ["general", "General",
-   "MakeMKV, the look of this interface, your password, and updates."],
+   "The look of this interface, your password, and updates."],
 ];
 
 views.settings = async (sub = "library") => {
@@ -2601,15 +2615,31 @@ settingsPages.library = async (s) => {
       <button class="btn" id="add-share">Add a share</button></h2>
       <div>
       ${shares.length ? `<div class="shares">${shares.map(sh => `
-        <div class="rowitem">
+        <div class="rowitem share-row${sh.verified_at ? "" : " untested"}" id="share-${sh.id}">
           <div class="grow">
             <div class="t">${esc(sh.name)} ${
-              sh.is_default ? '<span class="badge ok">default</span>' : ""}</div>
+              sh.is_default ? '<span class="badge ok">default</span>' : ""} ${
+              sh.verified_at ? "" : '<span class="badge warn">not tested</span>'}</div>
             <div class="s">//${esc(sh.host)}/${esc(sh.path)}
               · ${sh.username ? `as ${esc(sh.username)}` : "as a guest"}
-              · last verified ${ago(sh.verified_at)}</div>
+              · ${sh.verified_at ? `tested ${ago(sh.verified_at)}` : "never tested"}</div>
+            <div class="share-out test-out" aria-live="polite"></div>
+            <div class="share-login" hidden>
+              <div class="grid2">
+                <label class="f"><span>Username</span><input class="sl-user" value="${esc(sh.username || "")}"
+                       autocomplete="off"></label>
+                <label class="f"><span>Password</span><input class="sl-pass" type="password"
+                       placeholder="unchanged" autocomplete="new-password"></label>
+              </div>
+              <div class="btn-row"><button class="btn primary" data-login-save="${sh.id}">Sign in and test</button>
+                <button class="btn" data-login-cancel>Cancel</button></div>
+            </div>
           </div>
-          <button class="btn quiet-danger" data-del-share="${sh.id}">Remove</button>
+          <div class="share-acts">
+            <button class="btn${sh.verified_at ? "" : " primary"}" data-test-share="${sh.id}">Test</button>
+            <button class="btn" data-login-share="${sh.id}">Sign-in</button>
+            <button class="btn quiet-danger" data-del-share="${sh.id}">Remove</button>
+          </div>
         </div>`).join("")}</div>` : ""}
       <div id="share-add"></div>
     </div></div>
@@ -3135,7 +3165,7 @@ settingsPages.connect = async (s) => {
         : "Empty means the address you next open Riparr at."} Away from home, the buttons
         only work if this address reaches Riparr from there too, through a VPN or a
         reverse proxy.</span></label>
-    ${/^https?:\/\/(localhost|127\.|\[::1\])/.test(s.public_url || n.seen_url || "")
+    ${live && /^https?:\/\/(localhost|127\.|\[::1\])/.test(s.public_url || n.seen_url || "")
       ? `<div class="alert warn"><b>Your phone can't reach this address.</b> <code>${esc(
           s.public_url || n.seen_url)}</code> only means "this computer". Put in the address
           you'd type on your phone, like <code>http://192.168.1.10:9797</code>.</div>` : ""}
@@ -3244,14 +3274,11 @@ function testRow(channel) {
     Save and send a test</button><span class="test-out" id="test-${channel}"></span></div>`;
 }
 
-settingsPages.general = async (s) => {
+settingsPages.makemkv = async (s) => {
   const mk = await api.get("/api/makemkv");
   const st = mk.status;
   state.mkKeyTopic = mk.key_topic;
   const expiringSoon = st.days_left != null && st.days_left < 8;
-  const themes = ["servarr", "organizr", "dark", "nord", "dracula", "plex",
-                  "space-gray", "aquamarine", "hotline", "hotpink", "maroon", "overseerr", "win98"];
-  const themeName = { win98: "Windows 98" };
   return `
     <div class="section"><h2>MakeMKV
       <span class="grow"></span>
@@ -3280,7 +3307,14 @@ settingsPages.general = async (s) => {
     </div></div>
 
     ${sitesPanel(mk)}
+    ${saveBar()}`;
+};
 
+settingsPages.general = async (s) => {
+  const themes = ["servarr", "organizr", "dark", "nord", "dracula", "plex",
+                  "space-gray", "aquamarine", "hotline", "hotpink", "maroon", "overseerr", "win98"];
+  const themeName = { win98: "Windows 98" };
+  return `
     <div class="section"><h2>Appearance</h2><div>
       <p class="muted">Riparr uses the theme.park variable set, so a theme you already run
         on your *arr stack applies here too. Windows 98 is Riparr's own.</p>
@@ -3369,15 +3403,15 @@ systemPages.status = async () => {
 
     <div class="section"><h2>Health</h2>
       <table class="health-table"><tbody>${healthRows}</tbody></table>
-      <div class="alert">Health checks re-run every six hours, and whenever you open
-        this page. You can force one from
-        <a href="#/system/tasks">Tasks</a>; anything logged along the way is on
-        <a href="#/system/events">Events</a>.</div>
+      <div class="btn-row"><button class="btn sm" data-task="health">${icon("arrows-rotate")} Check now</button>
+        <span class="muted" style="font-size:13px">These run every six hours and whenever this
+        page opens. Anything logged along the way is on <a href="#/system/events">Events</a>.</span></div>
     </div>
 
     <div class="section"><h2>About</h2>
       <div class="kv">
         <div class="k">Version</div><div class="v">${esc(st.version)} ${channelTag(st.build)}</div>
+        <div class="k">Hostname</div><div class="v">${esc(st.hostname)}</div>
         <div class="k">Model</div><div class="v">${esc(sys.model)}</div>
         <div class="k">Operating system</div><div class="v">${esc(sys.os)}</div>
         <div class="k">Kernel</div><div class="v">${esc(sys.kernel || "—")}</div>
@@ -3404,16 +3438,13 @@ systemPages.status = async () => {
         Mount a volume at the staging path.</div>` : ""}
     </div>
 
-    <div class="section"><h2>Disc reading<span class="grow"></span>
-      <span class="badge ${m.installed ? "ok" : "bad"}">${m.installed ? "Ready" : "Missing"}</span></h2>
+    <div class="section"><h2>Drives</h2>
       <div class="kv">
-        <div class="k">MakeMKV</div><div class="v">${m.installed ? esc(m.version || "installed") : "not installed"}</div>
-        <div class="k">Key</div><div class="v">${esc(keyPhrase(m))}</div>
         ${m.sdf_stop ? `<div class="k">Drive data</div><div class="v">Skipped for this drive, to
           avoid a MakeMKV bug that hangs fetching it. DVDs and Blu-rays rip as usual; 4K
           LibreDrive features are off. <span class="muted">(<code>sdf_Stop</code> in
           MakeMKV's settings)</span></div>` : ""}
-        <div class="k">Drive</div><div class="v">${(st.drives && st.drives.length)
+        <div class="k">${(st.drives || []).length > 1 ? "Drives" : "Drive"}</div><div class="v">${(st.drives && st.drives.length)
           ? st.drives.map(d => `${esc(driveName(d))} <span class="muted">· ${esc(d.reads || "capability unknown")}</span>`).join("<br>")
           : `<span class="muted">${esc((st.optical && st.optical.summary) || "no drive detected")}</span>`}</div>
         <div class="k">4K UHD</div><div class="v">${(() => {
@@ -3426,14 +3457,6 @@ systemPages.status = async () => {
           if (d.uhd === "firmware") return `<span class="muted">Depends on firmware — check MakeMKV's LibreDrive list</span>`;
           return `<span class="muted">Unconfirmed — 4K needs a specific drive, and this one isn't on Riparr's list</span>`;
         })()}</div>
-      </div>
-    </div>
-
-    <div class="section"><h2>Network</h2>
-      <div class="kv">
-        <div class="k">Hostname</div><div class="v">${esc(st.hostname)}</div>
-        <div class="k">Share</div><div class="v">${st.share
-          ? `//${esc(st.share.host)}/${esc(st.share.path)}` : "not configured"}</div>
       </div>
     </div>
 
@@ -3489,11 +3512,11 @@ function healthMessages(st) {
 systemPages.tasks = async () => {
   const t = await api.get("/api/system/tasks");
   const rows = t.scheduled.map(s => `<tr>
-      <td>${esc(s.label)}</td>
-      <td>${interval(s.interval)}</td>
-      <td>${since(s.last_execution)}</td>
-      <td>${s.last_duration == null ? "—" : hms(s.last_duration)}</td>
-      <td>${since(s.next_execution)}</td>
+      <td class="st-name">${esc(s.label)}</td>
+      <td data-label="Every">${interval(s.interval)}</td>
+      <td data-label="Last run">${since(s.last_execution)}</td>
+      <td data-label="Took">${s.last_duration == null ? "—" : hms(s.last_duration)}</td>
+      <td data-label="Next">${since(s.next_execution)}</td>
       <td class="act"><button class="icon-btn" data-task="${esc(s.name)}"
           title="Run now" aria-label="Run ${esc(s.label)} now">${icon("arrows-rotate")}</button></td>
     </tr>`).join("");
@@ -3501,25 +3524,25 @@ systemPages.tasks = async () => {
   const queue = t.queue.length ? t.queue.map(q => `<tr>
       <td class="stat">${q.error ? icon("circle-exclamation", "bad")
                                  : q.ended_at ? icon("check", "ok") : icon("clock")}</td>
-      <td>${esc(q.label)}</td>
-      <td>${since(q.queued_at)}</td>
-      <td>${since(q.started_at)}</td>
-      <td>${since(q.ended_at)}</td>
-      <td>${q.ended_at && q.started_at ? hms(q.ended_at - q.started_at) : "—"}</td>
+      <td class="st-name">${esc(q.label)}</td>
+      <td data-label="Queued">${since(q.queued_at)}</td>
+      <td data-label="Started">${since(q.started_at)}</td>
+      <td data-label="Ended">${since(q.ended_at)}</td>
+      <td data-label="Took">${q.ended_at && q.started_at ? hms(q.ended_at - q.started_at) : "—"}</td>
       <td>${q.error ? `<span class="badge bad">${esc(q.error)}</span>` : ""}</td>
     </tr>`).join("")
     : `<tr><td colspan="7" class="muted">Nothing has run yet.</td></tr>`;
 
   return `
     <div class="section"><h2>Scheduled</h2>
-      <table>
+      <table class="stack-table">
         <thead><tr><th>Name</th><th>Interval</th><th>Last Execution</th>
           <th>Last Duration</th><th>Next Execution</th><th class="act"></th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <div class="section"><h2>Queue</h2>
-      <table>
+    <div class="section"><h2>Recent runs</h2>
+      <table class="stack-table">
         <thead><tr><th class="stat"></th><th>Name</th><th>Queued</th><th>Started</th>
           <th>Ended</th><th>Duration</th><th></th></tr></thead>
         <tbody>${queue}</tbody>
@@ -3532,9 +3555,9 @@ systemPages.backup = async () => {
   const b = await api.get("/api/system/backups");
   const rows = b.backups.length ? b.backups.map(x => `<tr>
       <td class="stat">${icon(x.kind === "scheduled" ? "clock" : "file-zipper")}</td>
-      <td><a href="/api/system/backups/${encodeURIComponent(x.name)}">${esc(x.name)}</a></td>
-      <td>${filesize(x.size)}</td>
-      <td>${stamp(x.modified)}</td>
+      <td class="st-name"><a href="/api/system/backups/${encodeURIComponent(x.name)}">${esc(x.name)}</a></td>
+      <td data-label="Size">${filesize(x.size)}</td>
+      <td data-label="Made">${stamp(x.modified)}</td>
       <td class="act">
         <button class="icon-btn" data-restore="${esc(x.name)}" title="Restore"
                 aria-label="Restore ${esc(x.name)}">${icon("clock-rotate-left")}</button>
@@ -3554,7 +3577,7 @@ systemPages.backup = async () => {
       runs on its own every seven days and the last ${b.keep} are kept.
       <br>Share passwords are deliberately left out, so a restore asks for them again.</div>
     <div class="section"><h2>Backups</h2>
-      <table>
+      <table class="stack-table">
         <thead><tr><th class="stat"></th><th>Name</th><th>Size</th><th>Time</th>
           <th class="act"></th></tr></thead>
         <tbody>${rows}</tbody>
@@ -3625,7 +3648,7 @@ systemPages.updates = async () => {
       <button class="tool" id="upd-check"><span class="ti">${icon("arrows-rotate")}</span>Check</button>
     </div>
     <div class="section"><h2>Riparr updates<span class="grow"></span>
-      <span class="badge ${kind}">${esc(u.status)}</span></h2>
+      ${u.status === "edge" ? channelTag(u.build) : `<span class="badge ${kind}">${esc(u.status)}</span>`}</h2>
       <div class="kv">
         <div class="k">Installed</div><div class="v">${esc(u.current)} ${channelTag(u.build)}</div>
         <div class="k">Latest release</div><div class="v">${esc(u.latest || "—")}${
@@ -3636,11 +3659,10 @@ systemPages.updates = async () => {
       </div>
       <div class="alert ${u.status === "update" ? "warn" : ""}">${esc(u.message || "")}</div>
       ${u.how && u.status !== "edge" ? `<p class="muted" style="font-size:13px">To update: <code>${esc(u.how)}</code></p>` : ""}
-      ${u.build && u.build.channel === "edge" ? `<p class="muted" style="font-size:13px">You're on
-        <b>edge</b>, built from the newest code on main${u.build.commit ? ` (commit
-        <a href="https://github.com/${esc(u.repo)}/commit/${esc(u.build.commit)}" target="_blank"
-        rel="noopener">${esc(u.build.commit)}</a>)` : ""}. Edge isn't offered releases, since
-        it's already ahead of them: ${u.build.install === "bare"
+      ${u.build && u.build.channel === "edge" ? `<p class="muted" style="font-size:13px">${u.build.commit
+        ? `Built from commit <a href="https://github.com/${esc(u.repo)}/commit/${esc(u.build.commit)}"
+             target="_blank" rel="noopener">${esc(u.build.commit)}</a>. ` : ""}To get newer code:
+        ${u.build.install === "bare"
           ? `<code>sudo /opt/riparr/deploy/install.sh --update</code> picks up the newest
              code. To go back to releases, run it with <code>--release</code>.`
           : `<code>docker compose pull</code> picks up the newest one. To go back to
@@ -3664,20 +3686,34 @@ const EVENT_LEVELS = { info: ["circle-info", ""], warning: ["triangle-exclamatio
                        critical: ["circle-exclamation", "bad"], debug: ["circle", "muted"] };
 
 systemPages.events = async () => {
-  const e = await api.get("/api/system/events?limit=100");
-  // Most of the log is routine. "Problems only" is what somebody opening it is after.
+  // Most of the log is routine. "Problems only" is what somebody opening it is after,
+  // and the server filters, so paging back reaches older problems, not older chatter.
   const problemsOnly = state.evProblems;
-  const shown = e.events.filter(x => !problemsOnly || ["warning", "warn", "error", "critical"].includes(x.level));
-  const rows = shown.length ? shown.map(x => {
+  const pages = state.evPages || 1;
+  const levels = problemsOnly ? "&levels=warning,warn,error,critical" : "";
+  const got = await Promise.all(Array.from({ length: pages }, (_, i) =>
+    api.get(`/api/system/events?limit=200&offset=${i * 200}${levels}`)));
+  const e = { total: got[0].total, events: got.flatMap(g => g.events) };
+  // The same line logged over and over (a drive polled every few seconds, say) is one
+  // row with a count, not a screenful.
+  const runs = [];
+  for (const x of e.events) {
+    const last = runs[runs.length - 1];
+    if (last && last.level === x.level && last.component === x.component && last.message === x.message) {
+      last.n++; last.from = x.at;
+    } else runs.push({ ...x, n: 1, from: x.at });
+  }
+  const rows = runs.length ? runs.map(x => {
     const [ic, cls] = EVENT_LEVELS[x.level] || EVENT_LEVELS.info;
     return `<tr>
       <td class="stat">${icon(ic, cls)}</td>
-      <td>${stamp(x.at)}</td>
-      <td>${esc(x.component)}</td>
-      <td>${esc(x.message)}</td></tr>`;
+      <td data-label="Time">${stamp(x.at)}${x.n > 1 ? `<div class="muted">since ${stamp(x.from)}</div>` : ""}</td>
+      <td data-label="From">${esc(x.component)}</td>
+      <td class="st-name">${esc(x.message)}${x.n > 1 ? ` <span class="badge">\u00d7${x.n}</span>` : ""}</td></tr>`;
   }).join("")
-    : `<tr><td colspan="4" class="muted">${problemsOnly && e.events.length
-        ? "No warnings or errors among the latest events." : "Nothing logged yet."}</td></tr>`;
+    : `<tr><td colspan="4" class="muted">${problemsOnly
+        ? "No warnings or errors logged." : "Nothing logged yet."}</td></tr>`;
+  const more = e.events.length < e.total;
 
   return `
     <div class="toolbar">
@@ -3689,10 +3725,12 @@ systemPages.events = async () => {
     </div>
     <div class="section"><h2>Events<span class="grow"></span>
       <span class="muted" style="font-size:13px">${e.total} recorded</span></h2>
-      <table>
+      <table class="stack-table">
         <thead><tr><th class="stat"></th><th>Time</th><th>Component</th><th>Message</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
+      ${more ? `<div class="btn-row"><button class="btn sm" id="ev-older">Show older</button>
+        <span class="muted" style="font-size:13px">${e.events.length} of ${e.total} shown</span></div>` : ""}
     </div>`;
 };
 
@@ -3700,9 +3738,9 @@ systemPages.events = async () => {
 systemPages.logs = async () => {
   const l = await api.get("/api/system/logs");
   const rows = l.files.length ? l.files.map(f => `<tr>
-      <td>${esc(f.name)}</td>
-      <td>${filesize(f.size)}</td>
-      <td>${stamp(f.modified)}</td>
+      <td class="st-name">${esc(f.name)}</td>
+      <td data-label="Size">${filesize(f.size)}</td>
+      <td data-label="Changed">${stamp(f.modified)}</td>
       <td class="act"><a href="/api/system/logs/${encodeURIComponent(f.name)}"
         download>Download</a></td></tr>`).join("")
     : `<tr><td colspan="4" class="muted">No log files yet.</td></tr>`;
@@ -3710,8 +3748,8 @@ systemPages.logs = async () => {
   return `
     <div class="toolbar">
       <button class="tool" id="lg-refresh"><span class="ti">${icon("arrows-rotate")}</span>Refresh</button>
-      <button class="tool" id="lg-delete"><span class="ti">${icon("trash-can")}</span>Delete</button>
       <a class="tool" href="/api/system/diagnostics" download><span class="ti">${icon("file-zipper")}</span>Diagnostics</a>
+      <button class="tool sep" id="lg-delete"><span class="ti">${icon("trash-can")}</span>Delete old logs</button>
     </div>
     <div class="section"><h2>Live<span class="grow"></span>
       <label class="switch sm"><input type="checkbox" id="lv-debug"><span class="track"></span>
@@ -3729,7 +3767,7 @@ systemPages.logs = async () => {
       keeps everything and is the one to send if you are asking for help. Each is capped
       at 1 MB and rotated five times.</div>
     <div class="section"><h2>Files</h2>
-      <table>
+      <table class="stack-table">
         <thead><tr><th>Filename</th><th>Size</th><th>Last Write Time</th>
           <th class="act"></th></tr></thead>
         <tbody>${rows}</tbody>
@@ -3883,7 +3921,7 @@ function renderSidebar(section, sub) {
     return html;
   }).join("") + `<div class="side-foot">
     <div class="cap">${
-      st ? `${capacityPhrase(st.storage)}<br><span class="muted">${esc(st.hostname)}</span>` : ""
+      st ? `<span class="muted">Working space on ${esc(st.hostname)}</span><br>${capacityPhrase(st.storage)}` : ""
     }</div>
     <div class="side-ver">${st && st.version ? `Riparr ${esc(st.version)} ${channelTag(st.build)}` : ""}</div>
   </div>`;
@@ -4256,7 +4294,9 @@ function wireContent(section, sub) {
   });
 
   const evProblems = $("#ev-problems");
-  if (evProblems) evProblems.onchange = () => { state.evProblems = evProblems.checked; route(); };
+  if (evProblems) evProblems.onchange = () => { state.evProblems = evProblems.checked; state.evPages = 1; route(); };
+  const evOlder = $("#ev-older");
+  if (evOlder) evOlder.onclick = () => { state.evPages = (state.evPages || 1) + 1; route(); };
   const evRefresh = $("#ev-refresh");
   if (evRefresh) evRefresh.onclick = () => route();
   const evClear = $("#ev-clear");
@@ -4381,6 +4421,11 @@ function wireContent(section, sub) {
     if (open) histOpen.add(k); else histOpen.delete(k);
   });
 
+  $$("[data-discs-kind]").forEach(b => b.onclick = () => {
+    state.discsKind = b.dataset.discsKind;
+    route();
+  });
+
   $$("[data-filed-dismiss]").forEach(b => b.onclick = () => {
     const ids = dismissedFiled().concat(String(b.dataset.filedDismiss)).slice(-20);
     try { localStorage.setItem(FILED_KEY, JSON.stringify(ids)); } catch (e) { /* fine */ }
@@ -4419,7 +4464,8 @@ function wireContent(section, sub) {
   });
 
   $$("[data-cancel]").forEach(b => b.onclick = async () => {
-    if (!confirm("Cancel this rip?\n\nAnything done so far is discarded.")) return;
+    if (!await askDialog({ title: "Cancel this rip?", body: "<p>Anything done so far is discarded.</p>",
+                           ok: "Cancel the rip", cancel: "Keep ripping", danger: true })) return;
     try { await api.post(`/api/queue/${b.dataset.cancel}/cancel`, {}); }
     catch (e) {
       // Pressed after it had already stopped: the outcome is the one asked for.
@@ -4655,7 +4701,8 @@ function wireContent(section, sub) {
   $$("#ep-season, #ep-first").forEach(el => el.oninput = () => renumberRows(askRoot(el)));
 
   $$("[data-skip]").forEach(b => b.onclick = async () => {
-    if (!confirm("Skip this disc?\n\nIt will be ejected without being ripped.")) return;
+    if (!await askDialog({ title: "Skip this disc?", body: "<p>It's ejected without being ripped.</p>",
+                           ok: "Skip it", cancel: "Keep it", danger: true })) return;
     try { await api.post(`/api/queue/${b.dataset.skip}/answer`, { skip: true }); }
     catch (e) { toast(e.message, "bad"); }
     route();
@@ -4664,12 +4711,18 @@ function wireContent(section, sub) {
   $$("[data-rerip]").forEach(b => b.onclick = async () => {
     // Say the right thing about the tray: the disc is either in the drive already, or
     // out on the tray waiting to be pulled back in.
-    const inDrive = ((state.status || {}).drives || []).some(d =>
-      d.present && d.known && d.known.fingerprint === b.dataset.rerip);
-    if (!confirm(inDrive
-        ? "Rip again?\n\nThis reads the whole disc again and replaces what's in your library."
-        : "Rip again?\n\nLeave the disc on the tray — Riparr will pull the tray in. This "
-          + "reads the whole disc again and replaces what's in your library.")) return;
+    const drives = (state.status || {}).drives || [];
+    const drive = drives.find(d => d.present && d.known && d.known.fingerprint === b.dataset.rerip);
+    const name = drive && drive.known ? drive.known.title : "this disc";
+    const which = drive && drives.length > 1 ? ` in ${driveName(drive)} (${drive.device})` : "";
+    if (!await askDialog({
+      title: `Rip ${name} again?`,
+      body: (drive
+        ? `<p>Riparr reads the whole disc${esc(which)} again and replaces what's in your library.</p>`
+        : `<p>Leave the disc on its tray: Riparr pulls the tray in and reads the whole disc
+             again, replacing what's in your library.</p>`)
+        + (drive && drive.space_warning ? `<p class="np-err np-caution">${esc(drive.space_warning)}</p>` : ""),
+      ok: "Rip again" })) return;
     // Closing the tray and waiting for the drive to find the disc takes up to half a
     // minute, and a button that sits there looking clickable for half a minute is a
     // button somebody clicks twice.
@@ -4898,8 +4951,55 @@ function wireContent(section, sub) {
   };
 
   $$("[data-test-share]").forEach(b => b.onclick = async () => {
-    toast("Testing the share…");
+    const out = b.closest(".share-row").querySelector(".share-out");
+    b.disabled = true;
+    out.className = "share-out test-out";
+    out.textContent = "Writing a test file and reading it back\u2026";
+    try {
+      const r = await api.post(`/api/shares/${b.dataset.testShare}/test`, {});
+      toast(r.message, "ok");
+      state.status = await api.get("/api/status").catch(() => state.status);
+      renderChrome();
+      route();
+    } catch (e) {
+      out.className = "share-out test-out bad";
+      out.textContent = e.message;
+      b.disabled = false;
+    }
   });
+  $$("[data-login-share]").forEach(b => b.onclick = () => {
+    const box = b.closest(".share-row").querySelector(".share-login");
+    box.hidden = !box.hidden;
+    if (!box.hidden) box.querySelector(".sl-user").focus();
+  });
+  $$("[data-login-cancel]").forEach(b => b.onclick = () => {
+    b.closest(".share-login").hidden = true;
+  });
+  $$("[data-login-save]").forEach(b => b.onclick = async () => {
+    const row = b.closest(".share-row");
+    const out = row.querySelector(".share-out");
+    const pass = row.querySelector(".sl-pass").value;
+    b.disabled = true;
+    out.className = "share-out test-out";
+    out.textContent = "Signing in and testing\u2026";
+    try {
+      const r = await api.put(`/api/shares/${b.dataset.loginSave}/login`, {
+        username: row.querySelector(".sl-user").value.trim(),
+        password: pass || "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" });
+      toast(r.message, "ok");
+      route();
+    } catch (e) {
+      out.className = "share-out test-out bad";
+      out.textContent = e.message;
+      b.disabled = false;
+    }
+  });
+  // Arriving from a Fix link: straight to the share that needs it.
+  const want = $(".share-row.untested");
+  if (want && location.hash.endsWith("/share")) {
+    want.scrollIntoView({ block: "center" });
+    want.classList.add("flash");
+  }
 }
 
 /* ════════════════════ chrome ════════════════════ */
@@ -5004,7 +5104,9 @@ function applySearch() {
   if (!items.length) return;
   let shown = 0;
   items.forEach(el => {
-    const hit = !q || el.dataset.find.toLowerCase().includes(q);
+    // Discs' kind filter still applies while searching.
+    const kindOk = !el.dataset.kind || !state.discsKind || el.dataset.kind === state.discsKind;
+    const hit = kindOk && (!q || el.dataset.find.toLowerCase().includes(q));
     el.hidden = !hit;
     if (hit && !el.classList.contains("hist-dest")) shown++;
   });

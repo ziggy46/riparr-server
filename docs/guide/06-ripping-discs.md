@@ -102,7 +102,7 @@ once you've switched to **Full disc backup** — that's the reason you'd put it 
 so it's ripped again as a backup.
 
 **If a browser is open**, the page jumps to **Discs**, names the film and when it landed
-in your library, and highlights it. The **Re-rip** button is right there on the tile: if
+in your library, and highlights it. The **Rip again** button is right there on the tile: if
 you meant it — a bad rip, a changed setting, a better drive — press it. Leave the disc on
 the open tray and Riparr pulls the tray back in for you.
 

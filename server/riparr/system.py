@@ -460,7 +460,7 @@ def _task_key_check():
             "key_expiring",
             title="A newer MakeMKV key has been published",
             body=("The key Riparr has is an older one and may already have lapsed. "
-                  "Settings \u2192 General fetches the current one in a click."))
+                  "Settings \u2192 MakeMKV fetches the current one in a click."))
         return "A newer key has been published"
     if days is None:
         return "No MakeMKV key registered"
@@ -475,7 +475,7 @@ def _task_key_check():
             title="MakeMKV key expires in %d day%s" % (days, "" if days == 1 else "s"),
             body=(("Riparr renews the beta key itself once the next one is published."
                    if db.get("auto_renew_beta_key", True) and st.get("key_type") == "beta"
-                   else "Every rip fails the day it lapses. Settings \u2192 General "
+                   else "Every rip fails the day it lapses. Settings \u2192 MakeMKV "
                         "fetches the current beta key in one click."))
                  if days > 0 else
                  "The key has expired. Rips will fail until it's replaced.")
