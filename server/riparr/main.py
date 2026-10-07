@@ -1088,6 +1088,9 @@ def queue(user=Depends(require_user)):
     return {"jobs": [j for j in jobs if j.get("state") not in db.SENDING_STATES],
             "sending": sending,
             "filed": _filed_out(filed) if filed else None,
+            # What MakeMKV has been saying, newest last -- only while something is
+            # happening, for the rip card's "What MakeMKV is doing".
+            "makemkv": RIP.makemkv_recent() if jobs else [],
             "drive_busy": bool(db.drive_busy()),
             "typical_seconds": typical, "typical_samples": samples,
             "typical_stages": stages, "typical_kind": kind,

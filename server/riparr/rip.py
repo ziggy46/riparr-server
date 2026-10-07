@@ -29,6 +29,7 @@ does not fit, which is D10 as originally written -- the refusal D11 was meant to
 retire. `Transport.supports_follow_copy` is the seam; when it goes True, only
 `_plan_transfer` below needs to change.
 """
+import collections
 import json
 import os
 import re
@@ -691,6 +692,19 @@ def _seconds(text):
 _titles_cache = {"key": None, "titles": None, "at": 0.0}
 _last_scan = {"key": None, "at": 0.0, "raw": ""}
 _scan_state = {"running": False, "error": None, "progress": None, "started": None}
+
+# MakeMKV's own running commentary, for the rip card's "What MakeMKV is doing". Kept off
+# the card itself -- "...failed" in a healthy rip's commentary reads as an alarm -- and
+# behind a disclosure for whoever wants to see exactly what it's seeing.
+_mk_recent = collections.deque(maxlen=40)
+
+
+def _mk_note(text):
+    _mk_recent.append({"at": time.time(), "text": text})
+
+
+def makemkv_recent(limit=12):
+    return list(_mk_recent)[-limit:]
 TITLES_TTL = 1800
 # Ceiling for one `makemkvcon info` scan. See the note at the subprocess call.
 TITLES_TIMEOUT = 1800
@@ -845,6 +859,7 @@ def read_titles(device, disc=None, on_progress=None):
             mmsg = MSG.match(raw.strip())
             if mmsg:
                 log.info("MakeMKV: %s", mmsg.group(2))
+                _mk_note(mmsg.group(2))
             if on_progress:
                 # `makemkvcon info` emits no PRGV at all -- a full scan of a real disc
                 # is 172 MSG lines and 16 DRV lines and nothing else, so there is no
@@ -1836,6 +1851,8 @@ def _run_makemkv(job, s, title_index, out_dir, cancel_ev, total_bytes,
                 continue
             m = PRGC.match(line)
             if m:
+                if m.group(1) != last_msg:
+                    _mk_note(m.group(1))
                 last_msg = m.group(1)
                 continue
             # MSG lines are MakeMKV's running commentary -- "Automatic SDF downloading
@@ -1847,6 +1864,7 @@ def _run_makemkv(job, s, title_index, out_dir, cancel_ev, total_bytes,
             m = MSG.match(line)
             if m:
                 log.info("Job %d: %s", job["id"], m.group(2))
+                _mk_note(m.group(2))
     finally:
         try:
             proc.stdout.close()
@@ -1955,6 +1973,12 @@ def _mock_rip(job, out_dir, cancel_ev):
     Small (32 MiB) but genuinely written, hashed and transferred, so every stage
     downstream of here is exercised for real off-hardware rather than stubbed.
     """
+    # Simulated commentary, so "What MakeMKV is doing" has something to show off-hardware.
+    for line in ("Using direct disc access mode",
+                 "Title #1 was added (28 cell(s), 2:11:14)",
+                 "Title #2 has length of 33 seconds which is less than minimum title length of 120 seconds and was therefore skipped",
+                 "Saving 1 titles into directory file://%s" % out_dir):
+        _mk_note(line)
     path = os.path.join(out_dir, "title_t00.mkv")
     # `_rip` already opened "decrypt". Stand in for MakeMKV's silent analysis pass so
     # the stage breakdown off-hardware has the same shape it has on the box.

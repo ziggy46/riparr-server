@@ -872,6 +872,7 @@ views.queue = async () => {
   state.typicalStages = q.typical_stages || {};
   state.stageLabels = q.stage_labels || {};
   state.stageLabelSets = q.stage_label_sets || {};
+  state.mkLines = q.makemkv || [];
   state.stageOrder = q.stage_order || [];
   state.status = st;
   const drives = state.status.drives || [];
@@ -1011,7 +1012,11 @@ function npLive(j, acts) {
          aria-valuetext="${shown}%, step ${p.step} of ${p.steps}${eta ? ", " + esc(eta) : ""}"`}>
       <i${working ? "" : ` style="transform:scaleX(${(p.pct / 100).toFixed(4)})"`}></i>${p.ticks.map(x =>
         `<b class="np-tick" style="left:${x.toFixed(1)}%"></b>`).join("")}</div>
-    <div class="np-figs"><span class="np-pct">${shown}%</span><span class="grow"></span>
+    <div class="np-figs"><span class="np-pct">${working
+      // No percentage to be had (reading an encrypted disc reports none): say how long
+      // it's been going instead of a 0% that looks stuck.
+      ? (j.started_at ? `${esc(duration(Math.max(0, Date.now() / 1000 - j.started_at)))} so far` : "")
+      : `${shown}%`}</span><span class="grow"></span>
       <span class="np-eta">${esc(eta)}</span></div>
     ${(() => {
       // Everything about the current step on one labelled line, so its numbers aren't
@@ -1021,6 +1026,7 @@ function npLive(j, acts) {
       return bits.length ? `<div class="np-step">This step: ${esc(bits.join(" \u00b7 "))}</div>` : "";
     })()}
     ${planned}
+    ${npMakemkv()}
     ${acts({ trail: `<button class="btn sm" data-cancel="${j.id}">${icon("xmark")} Cancel</button>` })}`;
 }
 
@@ -1037,8 +1043,26 @@ function npBytes(j) {
 
 function npPhase(j, stageName) {
   const ph = (j.phase || "").trim();
-  const same = (a, b) => a.toLowerCase().split(" ")[0] === b.toLowerCase().split(" ")[0];
-  return ph && !same(ph, stageName) ? ph : "";
+  if (!ph) return "";
+  // "Reading the disc — 14 tracks catalogued" under "Reading the disc": keep the news,
+  // drop the repeat.
+  const lead = ph.split(/\s+[\u2014-]\s+/);
+  if (lead[0].toLowerCase() === stageName.toLowerCase()) return lead.slice(1).join(" \u2014 ");
+  const first = (x) => x.toLowerCase().split(" ")[0];
+  return first(ph) === first(stageName) && lead.length === 1 ? "" : ph;
+}
+
+/* MakeMKV's own commentary -- what it's reading, which titles it found, what it skips --
+   folded away, for anyone who wants to see exactly what it's doing. */
+function npMakemkv() {
+  const lines = state.mkLines || [];
+  if (!lines.length) return "";
+  const t = (at) => new Date(at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
+  return `<details class="np-mk" id="np-mk"${state.mkOpen ? " open" : ""}>
+    <summary>What MakeMKV is doing</summary>
+    <ol class="np-mk-lines">${lines.slice().reverse().map(l =>
+      `<li><time>${esc(t(l.at))}</time><span>${esc(l.text)}</span></li>`).join("")}</ol>
+  </details>`;
 }
 
 function npAsk(j, acts) {
@@ -4162,6 +4186,9 @@ function wireContent(section, sub) {
     // Focus goes to what replaced the card, not to the top of the page.
     route().then(() => focusHeading());
   };
+
+  const mk = $("#np-mk");
+  if (mk) mk.ontoggle = () => { state.mkOpen = mk.open; };
 
   const ripOpts = $("#rip-opts");
   if (ripOpts) ripOpts.ontoggle = () => {
