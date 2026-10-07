@@ -14,7 +14,7 @@ doesn't display the line.
 
 ---
 
-## Unreleased
+## 0.9.1
 
 **Staging is cleared as soon as a rip is safe.** Once a rip is in your library and has
 passed its check, its staged copy is deleted. History keeps the record: its size, where
