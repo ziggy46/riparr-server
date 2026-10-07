@@ -23,7 +23,7 @@ navy progress bars and yellow tray-balloon notifications. On a phone the tabs be
 taskbar and More opens a Start menu, and sign-in is a dialog on the teal desktop. It uses
 MS Sans Serif where your computer has it, and Tahoma or Geneva where it doesn't.
 
-Your browser now remembers your theme, so the sign-in page uses it too.
+The sign-in page now uses your theme too, in every browser.
 
 ## 0.8.0
 

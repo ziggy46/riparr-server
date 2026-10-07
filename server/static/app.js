@@ -1393,12 +1393,9 @@ function discReport(d) {
   return lines.join("\n");
 }
 
-// The theme is remembered in the browser too, so the sign-in page is drawn in it
-// before the settings can be read. The phone's status bar follows it: Windows 98's
-// title bar is navy.
+// The phone's status bar follows the theme: Windows 98's title bar is navy.
 function applyTheme(name) {
   $("#theme").href = `/static/themes/${name}.css`;
-  try { localStorage.setItem("riparr-theme", name); } catch (e) { /* private mode */ }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = name === "win98" ? "#000080" : "#241155";
 }
@@ -4910,10 +4907,6 @@ function renderTabs(section) {
 }
 
 async function boot() {
-  try {
-    const t = localStorage.getItem("riparr-theme");
-    if (t && /^[a-z0-9-]+$/.test(t)) applyTheme(t);
-  } catch (e) { /* no storage: the default theme until settings load */ }
   paintIcons();          // the static chrome in index.html
   let setup;
   for (let attempt = 0; ; attempt++) {
@@ -4927,6 +4920,8 @@ async function boot() {
     }
   }
   hideWaiting();
+  // Before sign-in, so the sign-in page is drawn in it too.
+  if (setup.theme) applyTheme(setup.theme);
 
   if (!setup.has_users) { wizard.step = 0; wizard.render(); return; }
 

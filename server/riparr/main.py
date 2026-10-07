@@ -4,6 +4,7 @@ which is what makes Homepage widgets and multi-unit setups nearly free later.
 """
 import json
 import os
+import re
 import threading
 import time
 
@@ -255,7 +256,14 @@ def setup_state():
         },
         "hostname": P.hostname(),
         "version": __version__,
+        # So the sign-in page is drawn in the chosen theme. It's a look, not a secret,
+        # and it goes into a stylesheet URL, so only a plain name is passed on.
+        "theme": _theme_name(db.get("theme")),
     }
+
+
+def _theme_name(name):
+    return name if isinstance(name, str) and re.fullmatch(r"[a-z0-9-]{1,32}", name) else "servarr"
 
 
 @app.post("/api/setup/user")

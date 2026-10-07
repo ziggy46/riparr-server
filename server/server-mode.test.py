@@ -232,6 +232,14 @@ db.create_user("admin", "a-test-password")
 main._check_password_reset()
 check("with no file, nothing happens", db.has_users(), True)
 
+print("the sign-in page knows the theme")
+check("the default before anything is chosen", main.setup_state()["theme"], "servarr")
+db.set("theme", "win98")
+check("the chosen one after", main.setup_state()["theme"], "win98")
+db.set("theme", "../../etc/passwd")
+check("anything that isn't a plain name falls back", main.setup_state()["theme"], "servarr")
+db.set("theme", "servarr")
+
 print("the live log")
 import logging  # noqa: E402
 from riparr import system as SY  # noqa: E402
