@@ -97,6 +97,8 @@ def _startup():
     _secret()
     SY.init()
     _check_password_reset()
+    for key in NM.upgrade_saved_templates(db.get, db.set):
+        SY.component("Setup").info("Updated the saved %s to the current TRaSH preset.", key)
     SY.start_scheduler()
     RIP.start()
 

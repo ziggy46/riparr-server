@@ -16,6 +16,12 @@ doesn't display the line.
 
 ## Unreleased
 
+**TRaSH folder names for films.** The TRaSH Guides Plex, Emby and Jellyfin presets put
+the TMDb ID on the film's folder as well as its file, as TRaSH recommends:
+`Dune (2021) {tmdb-438631}/Dune (2021) {tmdb-438631} [Remux-2160p]….mkv`. A template
+saved from one of those presets is updated on its own; one you wrote yourself isn't.
+Films already in your library keep their folders.
+
 **Two drives rip at once.** With more than one drive, each rips its own disc at the same
 time. The Queue shows a card per drive, with its own Rip, Eject, Disc info, progress and
 "What MakeMKV is doing", and Auto Rip watches every tray. A disc that won't fit until the

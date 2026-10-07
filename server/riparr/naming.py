@@ -332,6 +332,13 @@ _FOLDER = "{Movie CleanTitle} ({Release Year})"
 
 
 def _trash(ids):
+    # The ID on the folder as well as the file, as TRaSH has it: the folder is where
+    # Plex, Emby and Jellyfin look first, and it survives a file being replaced.
+    return "%s%s/{Movie CleanTitle} {(Release Year)}%s %s.mkv" % (_FOLDER, ids, ids, _MEDIA)
+
+
+def _trash_before_0_9(ids):
+    """The film presets as they were, with the ID on the file only."""
     return "%s/{Movie CleanTitle} {(Release Year)}%s %s.mkv" % (_FOLDER, ids, _MEDIA)
 
 
@@ -347,6 +354,24 @@ MOVIE_PRESETS = [
     {"id": "trash-jellyfin", "label": "TRaSH Guides: Jellyfin",
      "template": _trash(" [tmdbid-{TmdbId}]")},
 ]
+
+# A template saved from one of those presets becomes the new version of it, so the
+# settings page still shows the preset's name rather than "Custom".
+_UPGRADES = {"movie_template": {_trash_before_0_9(ids): _trash(ids) for ids in
+                                (" {tmdb-{TmdbId}}", " [tmdb-{TmdbId}]", " [tmdbid-{TmdbId}]")}}
+
+
+def upgrade_saved_templates(get, put):
+    """Bring a saved copy of an older preset up to date. Returns the keys changed. A
+    template somebody wrote themselves is never touched."""
+    changed = []
+    for key, table in _UPGRADES.items():
+        now = get(key)
+        if now in table:
+            put(key, table[now])
+            changed.append(key)
+    return changed
+
 
 # TRaSH Guides' recommended Sonarr naming, trimmed the same way as the film presets:
 # https://trash-guides.info/Sonarr/Sonarr-recommended-naming-scheme/

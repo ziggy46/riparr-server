@@ -83,16 +83,24 @@ preset = {p["id"]: p["template"] for p in N.MOVIE_PRESETS}
 media = "[Remux-2160p][TrueHD Atmos 7.1][HEVC].mkv"
 check("Standard", N.render(preset["trash"], known), "Dune (2021)/Dune (2021) " + media)
 check("Plex puts the ID in braces", N.render(preset["trash-plex"], known),
-      "Dune (2021)/Dune (2021) {tmdb-438631} " + media)
+      "Dune (2021) {tmdb-438631}/Dune (2021) {tmdb-438631} " + media)
 check("Emby in brackets", N.render(preset["trash-emby"], known),
-      "Dune (2021)/Dune (2021) [tmdb-438631] " + media)
+      "Dune (2021) [tmdb-438631]/Dune (2021) [tmdb-438631] " + media)
 check("Jellyfin as tmdbid", N.render(preset["trash-jellyfin"], known),
-      "Dune (2021)/Dune (2021) [tmdbid-438631] " + media)
+      "Dune (2021) [tmdbid-438631]/Dune (2021) [tmdbid-438631] " + media)
 no_id = N.values_for("Dune", 2021, source="uhd",
                      media={k: v for k, v in N.SAMPLE_MEDIA.items() if k != "tmdb_id"})
 for pid in ("trash-plex", "trash-emby", "trash-jellyfin"):
     check("%s without an ID is clean" % pid, N.render(preset[pid], no_id),
           "Dune (2021)/Dune (2021) " + media)
+saved = {"movie_template": N._trash_before_0_9(" {tmdb-{TmdbId}}")}
+check("a saved copy of the old Plex preset becomes the new one",
+      (N.upgrade_saved_templates(saved.get, saved.__setitem__), saved["movie_template"]),
+      (["movie_template"], preset["trash-plex"]))
+mine = {"movie_template": "{Title}/{Title} {tmdb-{TmdbId}}.mkv"}
+check("a template somebody wrote is left alone",
+      (N.upgrade_saved_templates(mine.get, mine.__setitem__), mine["movie_template"]),
+      ([], "{Title}/{Title} {tmdb-{TmdbId}}.mkv"))
 dropped = ("Edition Tags", "Custom Formats", "Release Group", "MediaInfo 3D",
            "VideoDynamicRangeType")
 check("the presets leave out what a rip can't fill",
