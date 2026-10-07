@@ -224,6 +224,12 @@ def optical_drives():
                     "label": OPT.volume_label(dev) or None,
                     "size_bytes": OPT.disc_size_bytes(dev),
                 }
+                if cached["media_kind"] == "cd":
+                    # An audio CD has no label and no file system; its track layout
+                    # is what identifies it (musicbrainz.disc_id).
+                    cached["toc"] = OPT.read_toc(dev)
+                    cached["audio_tracks"] = sum(
+                        1 for t in (cached["toc"] or {}).get("tracks", []) if t["audio"])
                 _disc_cache[dev] = cached
             d.update(cached)
         else:
@@ -237,7 +243,7 @@ def optical_drives():
 # exists, and it has to be reachable without owning either.
 #
 #   RIPARR_MOCK_DRIVE = uhd | bluray | dvd | none
-#   RIPARR_MOCK_DISC  = uhd | bluray | dvd | none
+#   RIPARR_MOCK_DISC  = uhd | bluray | dvd | cd | none
 #   RIPARR_MOCK_LABEL = a volume label to report instead of the default
 #   RIPARR_MOCK_DRIVES = 2 adds a second drive, a DVD writer at /dev/sr1, to rip two
 #                        discs at once; RIPARR_MOCK_DISC2 / RIPARR_MOCK_LABEL2 set its disc
@@ -257,6 +263,12 @@ _MOCK_DISCS = {
                "size_bytes": 24 * 2 ** 30},
     "dvd": {"media": "DVD-ROM", "media_kind": "dvd", "label": "THE_MATRIX",
             "size_bytes": 7 * 2 ** 30},
+    # MusicBrainz's own worked example of a disc ID: six tracks, 49HHV7Eb8UKF3aQiNmu1GR8vKTY-.
+    "cd": {"media": "CD-ROM", "media_kind": "cd", "label": None,
+           "size_bytes": 95312 * 2352, "audio_tracks": 6,
+           "toc": {"first": 1, "last": 6, "leadout": 95312, "tracks": [
+               {"number": n + 1, "lba": lba, "audio": True} for n, lba in
+               enumerate([0, 15213, 32164, 46442, 63264, 80339])]}},
 }
 
 
@@ -298,7 +310,7 @@ def _mock_drive(device, which, disc, label):
         # season and disc number on a box set (BREAKING_BAD_S1_D1 with
         # RIPARR_MOCK_CONTENT=tv). Overridable so that behaviour can be exercised
         # off-hardware without a drawer of real discs.
-        if label:
+        if label and disc != "cd":           # an audio CD has no label to set
             d["label"] = label
     return d
 

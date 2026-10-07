@@ -17,6 +17,8 @@ PKGS=(
   # Riparr itself
   python3 python3-venv ca-certificates curl smbclient eject util-linux procps tini
   dvdbackup
+  # Audio CDs: the careful reader, and the lossless encoder
+  cdparanoia flac
   # Building MakeMKV and libdvdcss on first start
   build-essential pkg-config libssl-dev libexpat1-dev zlib1g-dev
   libavcodec-dev libavutil-dev libavformat-dev meson ninja-build xz-utils

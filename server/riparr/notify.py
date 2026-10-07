@@ -156,8 +156,8 @@ def actions(*items):
     return [a for a in items if a][:3]
 
 
-# The only answers a button can give: a film, a show, or "as proposed" (no fields).
-ANSWER_FIELDS = {"tmdb_id", "series_id"}
+# The only answers a button can give: a film, a show, an album, or "as proposed".
+ANSWER_FIELDS = {"tmdb_id", "series_id", "release_id"}
 
 
 def read_answer(token):

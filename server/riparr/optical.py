@@ -164,6 +164,72 @@ def _scsi_in(device, cdb, length, timeout_ms=8000):
         os.close(fd)
 
 
+# ─────────────────────────────── a CD's table of contents ───────────────────────────────
+#
+# What an audio CD is made of: where each track starts, and where the last one ends.
+# MusicBrainz identifies a CD from exactly this (musicbrainz.disc_id), and it is what
+# says whether the disc has any audio on it at all. Two ioctls the kernel answers from
+# the TOC it read when the disc went in, so it is as cheap as the tray check.
+
+CDROMREADTOCHDR = 0x5305
+CDROMREADTOCENTRY = 0x5306
+CDROM_LBA = 0x01
+CDROM_LEADOUT = 0xAA
+CDROM_DATA_TRACK = 0x04          # the control nibble's "this is data, not audio" bit
+
+
+class _TocHeader(ctypes.Structure):
+    _fields_ = [("first", ctypes.c_ubyte), ("last", ctypes.c_ubyte)]
+
+
+class _TocEntry(ctypes.Structure):
+    # linux/cdrom.h struct cdrom_tocentry. adr and ctrl share a byte as two nibbles;
+    # the address is a union of an MSF triple and an int, and with CDROM_LBA it's the int.
+    _fields_ = [("track", ctypes.c_ubyte), ("adr_ctrl", ctypes.c_ubyte),
+                ("format", ctypes.c_ubyte), ("lba", ctypes.c_int),
+                ("datamode", ctypes.c_ubyte)]
+
+
+def read_toc(device):
+    """{"first", "last", "leadout", "tracks": [{"number", "lba", "audio"}]} with LBAs as
+    the drive reports them (track 1 usually at 0), or None when there's no TOC."""
+    fd = _open(device)
+    if fd is None:
+        return None
+    try:
+        hdr = _TocHeader()
+        fcntl.ioctl(fd, CDROMREADTOCHDR, hdr)
+        tracks = []
+        for n in list(range(hdr.first, hdr.last + 1)) + [CDROM_LEADOUT]:
+            e = _TocEntry(track=n, format=CDROM_LBA)
+            fcntl.ioctl(fd, CDROMREADTOCENTRY, e)
+            ctrl = e.adr_ctrl >> 4       # adr:4 then ctrl:4, low bits first (x86, ARM)
+            tracks.append({"number": n, "lba": int(e.lba),
+                           "audio": not (ctrl & CDROM_DATA_TRACK)})
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    leadout = tracks.pop()
+    return {"first": hdr.first, "last": hdr.last, "leadout": leadout["lba"], "tracks": tracks}
+
+
+def audio_session(toc):
+    """The audio part of a TOC, as MusicBrainz sees it: (first, last, leadout, [starts]),
+    LBAs as reported. An enhanced CD puts a data session after the music; its audio ends
+    11400 sectors before the data track starts (the gap between sessions), not at the
+    disc's lead-out. None when there are no audio tracks."""
+    if not toc:
+        return None
+    audio = [t for t in toc["tracks"] if t["audio"]]
+    if not audio:
+        return None
+    last = audio[-1]["number"]
+    after = [t for t in toc["tracks"] if t["number"] > last and not t["audio"]]
+    leadout = after[0]["lba"] - 11400 if after else toc["leadout"]
+    return audio[0]["number"], last, leadout, [t["lba"] for t in audio]
+
+
 # ─────────────────────────── GET CONFIGURATION (46h) ───────────────────────────
 
 # MMC-6 Table 244. Only the ones a video disc can actually be are named; anything

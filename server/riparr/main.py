@@ -20,7 +20,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature
 
 from . import (__version__, build, artwork as ART, backup as BK, db, drives as DRV,
                makemkv as MK,
-               naming as NM, notify as NT, tmdb as TM, platform as P, rip as RIP, shares as SH, system as SY,
+               naming as NM, musicbrainz as MB, notify as NT, tmdb as TM, platform as P, rip as RIP, shares as SH, system as SY,
                tv as TV, updater)
 
 STATIC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
@@ -1098,6 +1098,12 @@ def _job_out(j):
             j["titles"] = []
     if j.get("episode_plan"):
         j["episode_plan"] = db.episode_plan(j)
+    if j.get("music"):
+        j["music"] = db.music_plan(j)
+    if j.get("release_id"):
+        # An album's cover, through the same proxy as film posters. The page must not
+        # look an album up by name the way it does a film: it would find a film.
+        j["art"] = "/api/artwork/image/%s" % ART._remember(MB.cover_url(j["release_id"], 250))
     # Which stage is running and since when. The queue's counting timer is built from
     # this against the medians: the two slowest stages of a rip -- the disc scan and
     # the decrypt pass -- can report no progress at all, so "this box usually takes
@@ -1128,6 +1134,8 @@ def _with_posters(films):
     out = []
     for f in films or []:
         f = dict(f)
+        if f.get("artist") is not None and f.get("id"):      # a MusicBrainz album
+            f["poster"] = "/api/artwork/image/%s" % ART._remember(MB.cover_url(f["id"], 250))
         if f.get("poster_path"):
             f["poster"] = "/api/artwork/image/%s" % ART._remember(
                 TM.IMAGES + "w185" + f["poster_path"])
@@ -1282,6 +1290,10 @@ class DiscAnswer(BaseModel):
     episode_titles: Dict[str, str] = None   # title index -> a name typed by hand
     order: List[int] = None             # title indexes, in the order they should go
     tmdb_id: int = None                 # a film picked from TMDb's suggestions
+    # An audio CD: an album picked from MusicBrainz, or its artist and name typed in.
+    release_id: str = None
+    artist: str = ""
+    album: str = ""
 
 
 @app.post("/api/queue/{job_id}/answer")
@@ -1295,7 +1307,8 @@ def rip_answer(job_id: int, body: DiscAnswer, user=Depends(require_user)):
                              season=body.season, first_episode=body.first_episode,
                              series_id=body.series_id, include=body.include,
                              episode_titles=body.episode_titles, order=body.order,
-                             tmdb_id=body.tmdb_id)
+                             tmdb_id=body.tmdb_id, release_id=body.release_id,
+                             artist=body.artist, album=body.album)
     if not ok:
         raise HTTPException(status_code=400, detail=message)
     return {"ok": True, "message": message}
@@ -1379,6 +1392,13 @@ def answer_from_notification(token: str, request: Request):
         return _answer_page(job.get("title") or job.get("disc_label") or "A disc",
                             [html.escape(done)])
     return {"ok": True, "message": done}
+
+
+@app.get("/api/musicbrainz/search")
+def musicbrainz_search(album: str = "", artist: str = "", tracks: int = 0,
+                       user=Depends(require_user)):
+    """Albums on MusicBrainz by name and/or artist, for "which album is this CD?"."""
+    return {"results": MB.search(album, artist, tracks=tracks or None)}
 
 
 @app.get("/api/tv/search")
@@ -1544,7 +1564,14 @@ def _retries_for(j):
 
 @app.get("/api/discs")
 def discs(user=Depends(require_user)):
-    return {"discs": db.list_discs()}
+    out = []
+    for d in db.list_discs():
+        d = dict(d)
+        if d.get("release_id"):
+            d["art"] = "/api/artwork/image/%s" % ART._remember(
+                MB.cover_url(d["release_id"], 250))
+        out.append(d)
+    return {"discs": out}
 
 
 @app.delete("/api/discs/{fingerprint}")

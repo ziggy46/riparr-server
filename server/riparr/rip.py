@@ -42,6 +42,9 @@ from . import db, tv, notify, platform as P, shares as SH, system as SY
 from . import backup as BK
 from . import naming
 from . import makemkv as MK
+from . import musicbrainz as MB
+from . import music as MU
+from . import optical as OPT
 from . import tmdb as TM
 
 log = SY.component("Rip")
@@ -63,6 +66,7 @@ DEFAULT_MIN_TITLE = 120
 # which may have changed since.
 BACKUP = "backup"
 MKV = "mkv"
+MUSIC = "music"                  # an audio CD: a folder of FLAC tracks
 
 
 def _already_have(known):
@@ -74,9 +78,12 @@ def _already_have(known):
     """
     if not known or not known.get("ripped_at"):
         return False
-    want = BACKUP if (_settings() or {}).get("rip_mode") == BACKUP else MKV
     prior = db.get_job(known["job_id"]) if known.get("job_id") else None
-    return ((prior or {}).get("output") or MKV) == want
+    done_as = (prior or {}).get("output") or MKV
+    if done_as == MUSIC or known.get("kind") == "music":
+        return True                      # a CD only ever becomes an album
+    want = BACKUP if (_settings() or {}).get("rip_mode") == BACKUP else MKV
+    return done_as == want
 
 _wake = threading.Event()
 _send_wake = threading.Event()
@@ -487,7 +494,7 @@ def cancel(job_id):
 
 def answer(job_id, title_index=None, name=None, skip=False, season=None,
            first_episode=None, series_id=None, include=None, episode_titles=None,
-           order=None, tmdb_id=None):
+           order=None, tmdb_id=None, release_id=None, artist=None, album=None):
     """Resolve a `needs_input` job -- the other half of `on_unknown_disc: ask`.
 
     The answer is written to the disc record as well as the job, because the whole
@@ -510,6 +517,22 @@ def answer(job_id, title_index=None, name=None, skip=False, season=None,
 
     fields = {"state": "queued", "question": None, "phase": "Waiting to start",
               "candidates": None}
+    if job.get("output") == MUSIC:
+        # An audio CD: an album picked from MusicBrainz, or one named by hand.
+        if release_id:
+            fields.update(release_id=release_id, music=None)
+        elif (artist or "").strip() or (album or "").strip():
+            name, year = _split_year((album or "").strip())
+            fields.update(release_id=None, music={"manual": {
+                "artist": (artist or "").strip() or "Unknown Artist",
+                "album": name or "Unknown Album", "year": year}})
+        else:
+            return False, "Pick the album, or type its artist and name."
+        db.update_job(job_id, **fields)
+        if release_id and job.get("fingerprint"):
+            db.record_disc(job["fingerprint"], release_id=release_id)
+        _wake.set()
+        return True, "Thanks — ripping it now."
     if name:
         fields["title"] = name
     # A film picked from TMDb's suggestions. A typed name replaces any earlier pick, so
@@ -681,7 +704,7 @@ BD_DL_BYTES = 50 * 2 ** 30
 
 # What to call each family when talking to a person. "BD-ROM" is what the drive says;
 # it is not what is printed on the box the disc came in.
-DISC_WORD = {"dvd": "DVD", "bluray": "Blu-ray", "uhd": "4K UHD disc"}
+DISC_WORD = {"dvd": "DVD", "bluray": "Blu-ray", "uhd": "4K UHD disc", "cd": "audio CD"}
 
 
 def disc_family(drive):
@@ -716,6 +739,12 @@ def unreadable_reason(drive, libredrive=None):
     none of this. Only the UHD branch may consult it.
     """
     family = disc_family(drive)
+    if family == "cd":
+        # Every optical drive reads CDs, so the only questions are whether this one has
+        # music on it and whether the tools to rip it are here.
+        if not drive.get("audio_tracks"):
+            return "This is a data CD, with no music or film on it to rip."
+        return MU.missing_tools_reason()
     if family == "dvd" and not drive.get("reads_dvd"):
         return "There's a DVD in the tray and this drive can't read DVDs."
     if family in ("bluray", "uhd") and not drive.get("reads_bluray"):
@@ -766,6 +795,11 @@ def fingerprint(drive, on_progress=None):
     how many titles and how long each runs -- separates them, and is cheap because
     MakeMKV has to read the disc header anyway.
     """
+    if disc_family(drive) == "cd":
+        # A CD's identity is its track layout, which MusicBrainz names: no scan needed.
+        sess = OPT.audio_session(drive.get("toc"))
+        if sess:
+            return "cd:" + MB.disc_id(*sess)
     parts = [drive.get("label") or "", drive.get("media") or ""]
     try:
         for t in read_titles(drive.get("device"), drive, on_progress=on_progress):
@@ -1794,6 +1828,9 @@ def _identify(job, s):
         raise RipFailed("The disc was removed before Riparr could read it.")
     job["_device"] = d.get("device")
 
+    if disc_family(d) == "cd":
+        return _identify_music(job, s, d)
+
     # Full-disc backup takes the whole disc, so there is no title to choose and no
     # season to work out -- and no reason to spend minutes scanning for them. All it
     # needs is a name. If the disc cannot be backed up right now (a DVD on a box whose
@@ -2303,6 +2340,16 @@ def disc_details(device=None):
         except ValueError:
             titles = None
         chosen, family, source = job.get("chosen_title"), job.get("disc_family"), "job"
+    if not titles and drive and disc_family(drive) == "cd":
+        # A CD's tracks are in its table of contents: nothing to scan.
+        sess = OPT.audio_session(drive.get("toc"))
+        if sess:
+            first, _last, leadout, starts = sess
+            ends = starts[1:] + [leadout]
+            titles = [{"index": first + i, "seconds": sec, "chapters": 0,
+                       "bytes": (ends[i] - starts[i]) * MU.SECTOR, "name": ""}
+                      for i, sec in enumerate(MB.track_seconds(leadout, starts))]
+            family, source = "cd", "toc"
     if not titles and drive:
         key = _titles_key(drive)
         hit = _titles_cache.get(key) or {}
@@ -2339,6 +2386,8 @@ def scan_disc(device=None):
     if not drive:
         return False, "There's no disc in the tray."
     dev = drive.get("device")
+    if disc_family(drive) == "cd":
+        return True, "A CD's tracks are listed already; there's nothing more to read."
     st = _scan_state(dev)
     if st["running"]:
         return True, "Already reading the disc."
@@ -2393,6 +2442,10 @@ def planned_destination(job, s=None):
                 return None
             return {"path": transport.describe(_episode_name(job, s, plan, rows[0])),
                     "count": len(rows), "kind": "tv"}
+        if job.get("output") == MUSIC:
+            plan = db.music_plan(job)
+            return {"path": transport.describe(_music_name(job)) + "/",
+                    "count": len(plan.get("tracks") or []), "kind": "music"}
         if job.get("output") == BACKUP:
             return {"path": transport.describe(_backup_name(job, s)) + "/",
                     "count": 1, "kind": "backup"}
@@ -2761,10 +2814,11 @@ def _finish(job, s, transport, name, local_path, sent_from_card=False):
     db.stage_end(job["id"], at=now)
     if job.get("fingerprint"):
         db.record_disc(job["fingerprint"], label=job.get("disc_label"),
-                       title=job.get("title"), kind="movie", ripped_at=now,
-                       size_bytes=job.get("disc_bytes") or 0,
-                       disc_family=job.get("disc_family"),
-                       title_index=job.get("chosen_title"), job_id=job["id"])
+                       title=job.get("title"), kind=job.get("kind") or "movie",
+                       ripped_at=now, size_bytes=job.get("disc_bytes") or 0,
+                       disc_family=job.get("disc_family"), year=job.get("year"),
+                       title_index=job.get("chosen_title"), job_id=job["id"],
+                       release_id=job.get("release_id"))
 
     # Verified and in the library, so the staged copy goes now. What it was -- size,
     # checksum, where it went -- stays on the job for History. Keeping the copy until
@@ -2783,6 +2837,7 @@ def _finish(job, s, transport, name, local_path, sent_from_card=False):
         eject(job)
     log.info("Job %d finished: %s", job["id"], transport.describe(name))
     what = ("Backed up, menus and all, and verified" if job.get("output") == BACKUP
+            else "Every track ripped and verified" if job.get("output") == MUSIC
             else "Ripped and verified")
     notify.send("done", title=job.get("title") or job.get("disc_label") or "A disc",
                 body="%s. It's in your library at %s." % (what, transport.describe(name)))
@@ -2928,6 +2983,293 @@ def _rip_backup(job, s, cancel_ev):
         fields["warning"] = " ".join(w for w in (job.get("warning"), warning) if w)
     db.update_job(job["id"], **fields)
     return folder
+
+
+# ─────────────────────────────── audio CDs ───────────────────────────────
+#
+# An album rather than a film: no MakeMKV, no titles to choose. The CD's track layout
+# identifies it on MusicBrainz, cdparanoia reads each track and flac encodes it, and the
+# album is filed as a folder of tracks -- music.py has the details.
+
+def _cd_session(d):
+    sess = OPT.audio_session((d or {}).get("toc"))
+    if not sess:
+        raise RipFailed("There's no music on this CD.")
+    return sess
+
+
+def _manual_release(music, sess):
+    """An album somebody named by hand: their artist and album, and the CD's own track
+    lengths, with "Track 01" for the names nobody has."""
+    first, last, leadout, starts = sess
+    secs = MB.track_seconds(leadout, starts)
+    return {"id": None, "title": music.get("album") or "Unknown Album",
+            "artist": music.get("artist") or "Unknown Artist", "date": "",
+            "year": music.get("year"), "disc": 1, "discs": 1, "country": "",
+            "tracks": [{"number": first + i, "title": "Track %02d" % (first + i),
+                        "artist": music.get("artist") or "", "seconds": secs[i]}
+                       for i in range(len(starts))]}
+
+
+def _music_question(job, d, candidates, question):
+    db.stage_end(job["id"])
+    db.update_job(job["id"], state="needs_input", question=question,
+                  phase="Waiting for you", kind="music", output=MUSIC,
+                  disc_family="cd", candidates=candidates)
+    log.info("Job %d needs a human: %s", job["id"], question)
+    picks = [notify.answer_action(job["id"], MB.describe(c), {"release_id": c["id"]})
+             for c in candidates[:2]]
+    notify.send("needs_you", title="An audio CD", body=question,
+                actions=notify.actions(*picks, notify.open_action()))
+
+
+def _identify_music(job, s, d):
+    """Name the CD, from MusicBrainz or from whoever answered. Returns the job, or None
+    when it's waiting for somebody to say which album it is."""
+    sess = _cd_session(d)
+    first, last, leadout, starts = sess
+    disc = MB.disc_id(*sess)
+    remembered = db.get_disc(job.get("fingerprint") or "") or {}
+    asked = db.music_plan(job).get("manual")
+    rid = job.get("release_id") or remembered.get("release_id")
+
+    rel = None
+    if asked:
+        rel = _manual_release(asked, sess)
+    elif rid:
+        rel = MB.get_release(rid, disc)
+    if not rel:
+        found = MB.lookup(disc, MB.toc_string(*sess))
+        if found and (len(found) == 1 or MB.same_album(found)):
+            rel = found[0]
+        else:
+            cands = [{k: c.get(k) for k in ("id", "title", "artist", "year", "country",
+                                           "track_count", "discs")} for c in found[:6]]
+            _music_question(job, d, cands,
+                            "MusicBrainz has %d albums with this CD in them. Which is it?"
+                            % len(found) if found else
+                            "MusicBrainz doesn't know this CD. Search for the album, or "
+                            "type its artist and name.")
+            return None
+
+    # The CD's own layout decides how many tracks there are and how long each is; the
+    # names come from MusicBrainz, matched by track number.
+    secs = MB.track_seconds(leadout, starts)
+    ends = starts[1:] + [leadout]
+    by_number = {t["number"]: t for t in rel.get("tracks") or []}
+    tracks = []
+    for i, start in enumerate(starts):
+        n = first + i
+        t = by_number.get(n) or {}
+        tracks.append({"number": n, "title": t.get("title") or "Track %02d" % n,
+                       "artist": t.get("artist") or rel["artist"], "seconds": secs[i],
+                       "bytes": (ends[i] - start) * MU.SECTOR + MU.WAV_HEADER,
+                       "recording_id": t.get("recording_id"),
+                       "track_id": t.get("track_id"), "state": "pending"})
+    music = {"release_id": rel.get("id"), "artist": rel["artist"], "album": rel["title"],
+             "year": rel.get("year"), "date": rel.get("date") or "",
+             "disc": rel.get("disc") or 1, "discs": rel.get("discs") or 1,
+             "disc_id": disc, "tracks": tracks,
+             "cover": MB.cover_url(rel["id"], 250) if rel.get("id") else None}
+    total = sum(t["bytes"] for t in tracks)
+    db.stage_end(job["id"])
+    db.update_job(job["id"], title=rel["title"], year=rel.get("year"), kind="music",
+                  output=MUSIC, disc_family="cd", music=music, release_id=rel.get("id"),
+                  chosen_title=None, bytes_total=total, disc_bytes=total,
+                  titles=[{"index": t["number"], "seconds": t["seconds"],
+                           "bytes": t["bytes"], "name": t["title"]} for t in tracks],
+                  question=None, candidates=None)
+    job = db.get_job(job["id"])
+    job["_year"] = rel.get("year")
+    job["_device"] = d.get("device")
+    return job
+
+
+def _rip_music(job, s, cancel_ev):
+    """Read and encode every track into the job's folder. Returns the album folder."""
+    music = db.music_plan(job)
+    direct = use_direct(s, "music")
+    job_dir = _job_dir(job["id"], direct=direct, kind="music")
+    album_dir = os.path.join(job_dir, "album")
+    os.makedirs(album_dir, exist_ok=True)
+    if job.get("fingerprint"):
+        db.record_disc(job["fingerprint"], label=job.get("disc_label"),
+                       title=job.get("title"), kind="music",
+                       size_bytes=job.get("disc_bytes") or 0, disc_family="cd")
+    db.update_job(job["id"], state="ripping", phase="Reading the CD",
+                  local_path=None, bytes_ripped=0, stage_pct=0)
+    db.stage_start(job["id"], "save")
+
+    cover = None
+    if music.get("release_id"):
+        art = MB.cover(music["release_id"])
+        if art:
+            cover = os.path.join(album_dir, "cover.jpg")
+            with open(cover, "wb") as f:
+                f.write(art)
+
+    tracks = music["tracks"]
+    total = sum(t["bytes"] for t in tracks) or 1
+    done, skipped = 0, []
+    encoder = MU.Encoder()
+    started = time.time()
+    try:
+        for i, t in enumerate(tracks):
+            if cancel_ev.is_set():
+                raise Cancelled()
+            where = "Reading track %d of %d — %s" % (i + 1, len(tracks), t["title"])
+
+            def progress(got, _base=done, _where=where):
+                at = _base + got
+                frac = at / total
+                el = time.time() - started
+                db.update_job(job["id"], bytes_ripped=at, phase=_where,
+                              stage_pct=round(frac, 4),
+                              eta_seconds=int(el / frac - el) if frac > 0.03 else None)
+
+            db.update_job(job["id"], phase=where)
+            wav = os.path.join(job_dir, "track%02d.wav" % t["number"])
+            try:
+                skips = MU.rip_track(job.get("_device") or device_of(job), t["number"],
+                                     wav, t["bytes"], cancel_ev, on_bytes=progress)
+            except MU.TrackFailed as e:
+                if cancel_ev.is_set():
+                    raise Cancelled()
+                raise RipFailed(str(e))
+            if skips:
+                skipped.append(t["number"])
+            encoder.submit(wav, os.path.join(album_dir, MU.track_file(music, t)),
+                           MU.tags(music, t), cover)
+            t["state"] = "ripped"
+            done += t["bytes"]
+            db.update_job(job["id"], music=music)
+        db.update_job(job["id"], phase="Finishing the last track")
+        encoder.wait()
+    except MU.TrackFailed as e:
+        raise RipFailed(str(e))
+    finally:
+        try:
+            encoder.wait()
+        except Exception:
+            pass
+
+    size = BK.tree_size(album_dir)
+    db.stage_end(job["id"])
+    fields = {"local_path": album_dir, "bytes_ripped": size, "bytes_total": size,
+              "eta_seconds": None}
+    if skipped:
+        warning = ("cdparanoia couldn't fully correct %s, so %s may have a click or a "
+                   "gap. Cleaning the disc and ripping it again may help."
+                   % (_tracks_phrase(skipped), "it" if len(skipped) == 1 else "they"))
+        log.warning("Job %d: %s", job["id"], warning)
+        fields["warning"] = " ".join(w for w in (job.get("warning"), warning) if w)
+    db.update_job(job["id"], **fields)
+    return album_dir
+
+
+def _tracks_phrase(numbers):
+    if len(numbers) == 1:
+        return "track %d" % numbers[0]
+    return "tracks %s and %d" % (", ".join(str(n) for n in numbers[:-1]), numbers[-1])
+
+
+def _music_name(job):
+    """The share-relative album folder: 'Music/Fleetwood Mac/Rumours (1977)'."""
+    _share, folder = db.destination("music")
+    rel = MU.album_folder(db.music_plan(job))
+    return "%s/%s" % (folder, rel) if folder else rel
+
+
+def _music_destination(name, job, exists):
+    """Where the album goes. Its folder is shared with the other discs of the same set,
+    and a re-rip of the same CD writes over its own tracks -- but an album folder that
+    holds something else entirely gets the album beside it, not mixed in."""
+    mine = job.get("release_id") or ""
+    for n in range(1, 10):
+        cand = name if n == 1 else "%s (%d)" % (name, n)
+        if not exists(cand):
+            return cand, None if n == 1 else (
+                "Your library already has a different album at “%s”, so this one went "
+                "into “%s” beside it." % (os.path.basename(name), os.path.basename(cand)))
+        prior = db.job_for_remote_name(cand)
+        if prior and prior.get("output") == MUSIC and (
+                (mine and prior.get("release_id") == mine)
+                or (not mine and prior.get("fingerprint") == job.get("fingerprint"))):
+            return cand, None
+    raise RipFailed("Every folder name Riparr would use for this album is already taken "
+                    "in your library. The album is still in staging.")
+
+
+def _transfer_music(job, s, local_dir, cancel_ev):
+    """Put the album's tracks in the library. Returns (transport, name, where they are).
+
+    Track by track either way, into a folder that may already hold the set's other
+    discs: a folder rename would replace them."""
+    share, _ = db.destination("music")
+    if not share:
+        raise RipFailed("There's no library share configured, so the album has nowhere "
+                        "to go. It's still in staging.")
+    transport = SH.Transport(share)
+    base = _music_name(job)
+    root = _library_root("music")
+    files = BK.tree_files(local_dir)
+    total = sum(size for _, size in files)
+
+    if use_direct(s, "music") and local_dir.startswith(root):
+        name, warning = _music_destination(
+            base, job, lambda n: os.path.exists(os.path.join(root, n)))
+        dest = os.path.join(root, name)
+        db.stage_start(job["id"], "upload")
+        db.update_job(job["id"], state="transferring", phase="Filing it in your library",
+                      bytes_sent=0, bytes_total=total)
+        try:
+            for rel, _size in files:
+                target = os.path.join(dest, *rel.split("/"))
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                os.replace(os.path.join(local_dir, *rel.split("/")), target)
+        except OSError as e:
+            raise RipFailed("The album finished but couldn't be filed in your library: %s" % e)
+        db.stage_end(job["id"])
+        fields = {"bytes_sent": total, "eta_seconds": None, "local_path": dest,
+                  "remote_name": name, "dest_path": transport.describe(name)}
+        if warning:
+            fields["warning"] = " ".join(w for w in (job.get("warning"), warning) if w)
+        db.update_job(job["id"], **fields)
+        _cleanup_staging(job)
+        return transport, name, dest
+
+    _wait_for_share(job, transport, job.get("title") or "The album", cancel_ev)
+    name, warning = _music_destination(base, job, lambda n: transport.size(n) is not None)
+    if warning:
+        db.update_job(job["id"],
+                      warning=" ".join(w for w in (job.get("warning"), warning) if w))
+    db.stage_start(job["id"], "upload")
+    db.update_job(job["id"], state="transferring", phase="Sending to your library",
+                  dest_path=transport.describe(name), remote_name=name,
+                  bytes_sent=0, bytes_total=total)
+    started, sent = time.time(), 0
+    for n, (rel, size) in enumerate(files, 1):
+        if cancel_ev.is_set():
+            raise Cancelled()
+        where = "Sending to your library — file %d of %d" % (n, len(files))
+
+        def progress(got, _of, _base=sent, _where=where):
+            at = _base + got
+            frac = (at / total) if total else 0
+            el = time.time() - started
+            db.update_job(job["id"], bytes_sent=at, phase=_where, stage_pct=round(frac, 4),
+                          eta_seconds=int(el / frac - el) if frac > 0.02 else None)
+
+        r = transport.put(os.path.join(local_dir, *rel.split("/")),
+                          "%s/%s" % (name, rel), progress=progress, cancel=cancel_ev)
+        if cancel_ev.is_set():
+            raise Cancelled()
+        if not r.get("ok"):
+            raise RipFailed("Couldn't write %s to your library: %s" % (rel, r.get("error")))
+        sent += size
+    db.stage_end(job["id"])
+    db.update_job(job["id"], bytes_sent=total, eta_seconds=None)
+    return transport, name, local_dir
 
 
 def _backup_name(job, s):
@@ -3119,8 +3461,9 @@ def _verify_backup(job, s, transport, name, local_dir):
     r = SH.verify_remote_tree(transport, name, local_dir, progress=progress, mode=mode)
     db.stage_end(job["id"])
     if not r.get("ok"):
-        raise RipFailed("The backup reached your library but didn't verify: %s"
-                        % r.get("error"))
+        raise RipFailed("The %s reached your library but didn't verify: %s"
+                        % ("album" if job.get("output") == MUSIC else "backup",
+                           r.get("error")))
     db.update_job(job["id"], verified_mode=r.get("mode") or mode)
 
 
@@ -3158,7 +3501,9 @@ def _run_job(job):
             return
 
         backup = job.get("output") == BACKUP
-        local_path = (_rip_backup if backup else _rip)(job, s, cancel_ev)
+        album = job.get("output") == MUSIC
+        local_path = (_rip_music if album else _rip_backup if backup else _rip)(
+            job, s, cancel_ev)
 
         # The disc has been read. In cache mode everything left to do happens from the
         # card, so the tray opens *now* rather than twenty minutes from now -- the user
@@ -3167,7 +3512,7 @@ def _run_job(job):
         #
         # Direct mode gets no such moment: the film is being written to the library as
         # it is read, so there is nothing to hand off and `_finish` ejects as before.
-        if not use_direct(s):
+        if not use_direct(s, job.get("kind") or "movie"):
             db.update_job(job["id"], state="transferring", bytes_sent=0,
                           phase="Waiting to send to your library")
             eject(job)
@@ -3179,7 +3524,10 @@ def _run_job(job):
             _send_wake.set()
             return
 
-        if backup:
+        if album:
+            transport, name, local_path = _transfer_music(job, s, local_path, cancel_ev)
+            _verify_backup(job, s, transport, name, local_path)
+        elif backup:
             transport, name, local_path = _transfer_backup(job, s, local_path, cancel_ev)
             _verify_backup(job, s, transport, name, local_path)
         else:
@@ -3491,7 +3839,10 @@ def _send_one(job):
             _finish_season(job, s, transport, folder, local, sent_from_card=True)
             return
         job["_year"] = job.get("year") or _split_year(job.get("title") or "")[1]
-        if job.get("output") == BACKUP:
+        if job.get("output") == MUSIC:
+            transport, name, local = _transfer_music(job, s, local, cancel_ev)
+            _verify_backup(job, s, transport, name, local)
+        elif job.get("output") == BACKUP:
             transport, name, local = _transfer_backup(job, s, local, cancel_ev)
             _verify_backup(job, s, transport, name, local)
         else:

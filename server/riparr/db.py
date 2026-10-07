@@ -129,6 +129,11 @@ ADDED_COLUMNS = {
         # SHA-256 of the file in the library, when the full check computed one. Kept
         # for History after the staged copy itself is gone.
         ("sha256", "TEXT"),
+        # ── audio CDs ──
+        # JSON: the album as it's being ripped -- artist, album, year, which disc of how
+        # many, MusicBrainz IDs, and every track with its title and how far it got.
+        ("music", "TEXT"),
+        ("release_id", "TEXT"),        # the MusicBrainz release, chosen or found
     ],
     "discs": [
         ("title_index", "INTEGER"),    # the remembered title choice (R5: fix once, ever)
@@ -150,6 +155,7 @@ ADDED_COLUMNS = {
         # Kept apart from `title`, which is the bare name. Without it a re-rip of
         # "Dune (2021)" with no TMDb key came back as plain "Dune".
         ("year", "INTEGER"),
+        ("release_id", "TEXT"),        # an audio CD's MusicBrainz release, once chosen
     ],
 }
 
@@ -163,11 +169,13 @@ DEFAULTS = {
                    "{Title} - S{Season:00}E{Episode:00} - {EpisodeTitle}.mkv",
     "movie_folder": "Movies",
     "tv_folder": "TV",
+    "music_folder": "Music",
     # Which share each kind is written to. None means "whichever share is the default",
     # which is the right answer for the overwhelmingly common one-share setup and means
     # nothing has to be chosen before the box works. See db.destination().
     "movie_share_id": None,
     "tv_share_id": None,
+    "music_share_id": None,
     # Two different questions, and they used to be one setting.
     #
     # `on_unknown_disc` is *what to call it* -- it fires when the volume label gives
@@ -543,6 +551,7 @@ def share_by_id(share_id):
 KINDS = {
     "movie": ("movie_share_id", "movie_folder", "Movies"),
     "tv":    ("tv_share_id",    "tv_folder",    "TV"),
+    "music": ("music_share_id", "music_folder", "Music"),
 }
 
 
@@ -710,7 +719,7 @@ INTERRUPTIBLE = ["identifying", "ripping", "transferring", "verifying"]
 # Columns held as JSON text. Encoding them in one place rather than at each call site
 # is what stopped `episode_plan` from being written as a Python repr the first time a
 # caller forgot -- which SQLite accepts happily and json.loads does not.
-_JSON_COLUMNS = ("titles", "episode_plan", "candidates")
+_JSON_COLUMNS = ("titles", "episode_plan", "candidates", "music")
 
 
 def _encode_json(fields):
@@ -733,6 +742,18 @@ def episode_plan(job):
         return {}
     try:
         got = json.loads(raw)
+        return got if isinstance(got, dict) else {}
+    except (ValueError, TypeError):
+        return {}
+
+
+def music_plan(job):
+    """A job's album as a dict, however it's stored (see the `music` column)."""
+    raw = (job or {}).get("music")
+    if isinstance(raw, dict):
+        return raw
+    try:
+        got = json.loads(raw) if raw else {}
         return got if isinstance(got, dict) else {}
     except (ValueError, TypeError):
         return {}

@@ -40,7 +40,8 @@ UA = "riparr-server (+https://github.com/ziggy46/riparr-server) python-urllib"
 THRESHOLD = 0.95
 
 # Only these hosts may ever be fetched by the image proxy.
-ALLOWED_HOSTS = {"upload.wikimedia.org", "image.tmdb.org"}
+# coverartarchive.org redirects to archive.org, which urllib follows.
+ALLOWED_HOSTS = {"upload.wikimedia.org", "image.tmdb.org", "coverartarchive.org"}
 
 # Volume labels that identify nothing. Searching for these returns confident nonsense.
 GENERIC = {
