@@ -244,6 +244,8 @@ input:not([type]), select, textarea {
 }
 textarea { height: auto; min-height: 74px; }
 input:focus, select:focus, textarea:focus { box-shadow: var(--w98-field); outline: 0; }
+/* Where the caret is, for a keyboard: the dotted rectangle Windows drew round the field. */
+input:focus-visible, textarea:focus-visible { outline: 1px dotted #000; outline-offset: 1px; }
 input:disabled, input[readonly], select:disabled, textarea:disabled { background-color: var(--w98-face); color: #404040; }
 select {
   appearance: none; -webkit-appearance: none;

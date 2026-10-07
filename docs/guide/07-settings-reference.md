@@ -165,8 +165,8 @@ people notice.
 
 | Setting | Notes |
 |---|---|
-| **Mode** | `Straight to your library` *(default)* — MakeMKV writes onto your share as the disc is read, and nothing is staged. No size ceiling and the film is written once. It needs the library bind-mounted at `/srv/library`; if nothing is mounted there, each rip stages in `/srv/staging` by itself and is copied over SMB afterwards — so it is safe to leave on. `Staged first, then sent` is the answer if your NAS sleeps, your network is unreliable, or you want the full check. (Older setups may show `Staged first, then sent (older setting)`, from the retired "always burst" and "always stream" choices; it behaves the same as `Staged first, then sent`.) |
-| **Verify after transfer** | `Size check` *(default)* — asks your library how big the file is and compares it with what was sent. Nearly free, and it catches what actually goes wrong: a truncated transfer, a share that filled up, a write that was refused. `Full check` also reads every byte back and hashes it, so it catches silent corruption too. `Don't verify` trusts the upload. Applies to automatic and manual rips alike. |
+| **Each rip goes** | `Straight to your library` *(default)* — MakeMKV writes onto your share as the disc is read, and nothing is staged. No size ceiling and the film is written once. It needs the library bind-mounted at `/srv/library`; if nothing is mounted there, each rip stages in `/srv/staging` by itself and is copied over SMB afterwards — so it is safe to leave on. `Staged first, then sent` is the answer if your NAS sleeps, your network is unreliable, or you want the full check. (Older setups may show `Staged first, then sent (older setting)`, from the retired "always burst" and "always stream" choices; it behaves the same as `Staged first, then sent`.) |
+| **After each rip** | `Size check` *(default)* — asks your library how big the file is and compares it with what was sent. Nearly free, and it catches what actually goes wrong: a truncated transfer, a share that filled up, a write that was refused. `Full check` also reads every byte back and hashes it, so it catches silent corruption too. `Don't verify` trusts the upload. Applies to automatic and manual rips alike. |
 | **Keep a copy in staging** | Off. Once a rip is in your library and has passed its check, its staged copy is deleted; History keeps its size, where it went, and its SHA-256 when the full check ran. On keeps the copy until the room is needed, so a problem on the share is a re-copy rather than a re-rip, and the retries below that need it stay available. |
 | **Space remaining** | Staging space, shown in discs, not gigabytes |
 | **Test staging speed** | Measures how fast the staging disk behind `/srv/staging` writes |
@@ -174,7 +174,7 @@ people notice.
 **The full check is only offered when rips are staged.** It works by reading the
 file back off the share and comparing it with the original, so it needs two copies.
 Going straight to your library leaves one — hashing it against itself would pass every
-time and prove nothing. Switch **Mode** to *Staged first, then sent* if you want it, and
+time and prove nothing. Switch **Each rip goes** to *Staged first, then sent* if you want it, and
 give `/srv/staging` room for two copies of the largest title you rip: the read-back has
 to land somewhere, because `smbclient` cannot stream it.
 

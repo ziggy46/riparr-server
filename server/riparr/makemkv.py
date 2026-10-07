@@ -661,8 +661,10 @@ def _record_expiry_inner(result):
 # dead key until somebody opened Settings -- so the box does it itself now.
 #
 # Narrowly. Only a beta key is ever replaced, and only by the key GuinpinSoft has
-# published: a purchased key is never touched, a box with no key is not given one, and
-# two sources disagreeing about the current key stops it. What it does is said once, on
+# published: a purchased key is never touched, and two sources disagreeing about the
+# current key stops it. A box with no key at all is given the current one too -- a
+# fresh install shouldn't open on "No key entered" when the key is published and the
+# licence has been accepted. What it does is said once, on
 # the next visit to the web page, together with the case for buying MakeMKV -- the
 # point is to keep a box working while the shop is down, not to stand in for buying.
 
@@ -680,7 +682,7 @@ def _maybe_renew_inner(result):
         return
     mine = (db.get("makemkv_key") or "").strip()
     new = (result.get("key") or "").strip()
-    if not mine.startswith("T-") or not new.startswith("T-") or new == mine:
+    if (mine and not mine.startswith("T-")) or not new.startswith("T-") or new == mine:
         return
     if result.get("sources_agree") is False:
         return
@@ -701,7 +703,7 @@ def _maybe_renew_inner(result):
     db.set("makemkv_key_expires", expires)
     db.set("makemkv_key_stale", False)
     db.set("makemkv_key_renewal", {"at": int(time.time()), "expires": expires,
-                                   "seen": False})
+                                   "seen": False, "first": not mine})
     try:
         from .system import component
         component("MakeMKV").info(
@@ -717,6 +719,7 @@ def renewal_notice():
     if not isinstance(r, dict) or r.get("seen"):
         return None
     return {"at": r.get("at"), "expires": r.get("expires") or None,
+            "first": bool(r.get("first")),
             "buy_url": BUY_URL, "shop_open": db.get("makemkv_shop_open", None)}
 
 

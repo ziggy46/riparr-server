@@ -780,9 +780,9 @@ async function showRenewalNotice() {
   d.id = "renewal-dialog";
   d.className = "notice-dialog";
   d.innerHTML = `
-    <h2>${icon("circle-check", "ok")} MakeMKV key renewed</h2>
-    <p>Your MakeMKV beta key ran out, so Riparr put in the new free one that
-      GuinpinSoft publishes each month${until ? `. It works until <b>${esc(until)}</b>` : ""}.
+    <h2>${icon("circle-check", "ok")} MakeMKV key ${r.first ? "added" : "renewed"}</h2>
+    <p>${r.first ? "There was no MakeMKV key, so Riparr put in" : "Your MakeMKV beta key ran out, so Riparr put in the new"}
+      free one that GuinpinSoft publishes each month${until ? `. It works until <b>${esc(until)}</b>` : ""}.
       Your discs keep ripping without you having to do anything.</p>
     ${r.shop_open === false ? `
     <p>Riparr can only read your discs because of MakeMKV. GuinpinSoft isn't selling
@@ -932,8 +932,16 @@ function nowRipping({ q, ar, drives, cards, away }) {
     ? `<a class="np-last" href="#/history">${icon("circle-check")}
          <span>Last filed <b>${esc(filedName(q.filed))}</b> · ${esc(ago(q.filed.finished_at))}</span></a>`
     : "";
+  // On a phone the header's warnings are hidden, so the Queue says what's in the way --
+  // unless a card is already listing it.
+  const bad = problems(state.status).filter(p => p.level === "bad");
+  const notReady = bad.length && !html.includes('class="np-todo"')
+    ? `<a class="np-notready" href="#/system/status">${icon("triangle-exclamation")}
+         <span><b>Not ready:</b> ${esc(bad.map(p => p.short || p.what).join(" \u00b7 "))}</span>
+         <span class="np-notready-go">Fix</span></a>` : "";
   return `<div class="np-page${multi ? " np-multi" : ""}">
     ${head("Queue", multi ? `${drives.length} drives` : "")}
+    ${notReady}
     ${html}
     ${sendingStrip(away)}
     ${last}
@@ -949,7 +957,8 @@ function discCard({ d, loaded, hero, busy, filed, mk }, { drives, multi, todo })
   const poster = (img) => `<div class="np-art">${img
     ? `<img src="${esc(img)}" alt="">`
     : `<span class="np-art-none">${icon("compact-disc")}</span>`}</div>`;
-  const art = artFor(loaded && loaded.label);
+  // A CD has no label to look a poster up by; an album Riparr knows brings its cover.
+  const art = artFor(loaded && loaded.label) || (loaded && loaded.known && loaded.known.art) || null;
   // Eject leads: right after a rip it is the next thing anybody does. Disc info next,
   // then whatever belongs to this card, with the destructive one last.
   const acts = ({ lead = "", trail = "", ejectDisabled = false } = {}) => {
@@ -1182,7 +1191,7 @@ function npIdle(drives, loaded, busy, acts, checklist = true) {
     ${d.label ? `<div class="np-sub">${esc(d.label)}${d.disc_word ? ` \u00b7 ${esc(d.disc_word)}` : ""}</div>`
       : d.audio_tracks ? `<div class="np-sub">${d.audio_tracks} track${d.audio_tracks === 1 ? "" : "s"} \u00b7 Riparr looks it up on MusicBrainz when you rip it</div>` : ""}
     ${todo}
-    ${d.space_warning ? `<p class="np-err">${esc(d.space_warning)}</p>` : ""}
+    ${d.space_warning ? `<p class="np-err np-caution">${esc(d.space_warning)}</p>` : ""}
     ${acts({ lead: busy ? "" : blocking.length
       // A rip that can only fail isn't offered as though it would work.
       ? `<button class="btn sm" disabled>Fix ${blocking.length} thing${blocking.length === 1 ? "" : "s"} first</button>`
@@ -1234,8 +1243,10 @@ function npKnown(d, acts) {
     <div class="np-kicker ok">${icon("circle-check")} Already in your library
       <span class="muted">· ripped ${esc(ago(k.ripped_at))}</span></div>
     <h2 class="np-title" tabindex="-1">${esc(name)} ${familyTag(d.disc_family)}</h2>
-    ${d.label ? `<div class="np-sub">${esc(d.label)}</div>` : ""}
-    ${acts({ trail: `<button class="btn sm" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip it again</button>
+    ${k.artist ? `<div class="np-sub">${esc(k.artist)}</div>`
+      : d.label ? `<div class="np-sub">${esc(d.label)}</div>` : ""}
+    ${d.space_warning ? `<p class="np-err np-caution">${esc(d.space_warning)}</p>` : ""}
+    ${acts({ trail: `<button class="btn sm" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip again</button>
       <a class="btn sm" href="#/discs">See it in Discs</a>` })}`;
 }
 
@@ -1382,7 +1393,7 @@ function sendingStrip(sending) {
           j.state === "verifying" ? "checking"
           : done > 0 ? `${Math.round(done)}%` : "waiting"}</span>
         <span class="send-size muted">${esc(filesize(j.bytes_total))}</span>
-        <button class="icon-btn" data-cancel="${j.id}" title="Cancel"
+        <button class="icon-btn" data-cancel="${j.id}" title="Cancel" aria-label="Cancel this rip"
                 aria-label="Cancel sending ${esc(j.title || j.disc_label || "this disc")}">${icon("xmark")}</button>
       </div>`;
     }).join("")}
@@ -1460,6 +1471,8 @@ function applyTheme(name) {
   if (meta) meta.content = name === "win98" ? "#000080" : "#241155";
 }
 
+const clockTime = (sec) => `${Math.floor((sec || 0) / 60)}:${String((sec || 0) % 60).padStart(2, "0")}`;
+
 async function showDiscDetails(device = "") {
   const q = device ? `?device=${encodeURIComponent(device)}` : "";
   const dlg = document.createElement("dialog");
@@ -1474,19 +1487,25 @@ async function showDiscDetails(device = "") {
     try { d = await api.get(`/api/disc/details${q}`); }
     catch (e) { dlg.innerHTML = `<div class="result bad">${esc(e.message)}</div>`; return; }
     const titles = d.titles || [];
+    const cd = d.family === "cd";
+    const drive = (state.status && state.status.drives || []).find(x => x.device === d.device)
+      || (state.status && state.status.drives || [])[0];
+    // The disc's own name: what Riparr knows it as, else its label, tidied.
+    const known = drive && drive.known;
+    const heading = (known && (known.year ? `${known.title} (${known.year})` : known.title))
+      || pretty((d.drive && d.drive.label) || "") || (cd ? "Audio CD" : "Disc");
     dlg.innerHTML = `
-      <div class="dlg-head"><h3>${esc((d.drive && d.drive.label) || "Disc")}</h3>
+      <div class="dlg-head"><h3>${esc(heading)}</h3>
         <span class="grow"></span>${familyTag(d.family)}
-        <button class="icon-btn" data-close title="Close">${icon("xmark")}</button></div>
-      ${(state.status && state.status.drives || []).filter(x => !d.device || x.device === d.device)
-          .map(x => `<p class="disc-drive">${icon("compact-disc")}
-          ${esc(driveName(x))} <span class="muted">${esc(x.device || "")}</span> ${driveTags(x)}</p>`).join("")}
-      <p class="muted">${d.drive ? esc([d.drive.vendor, d.drive.model].filter(Boolean).join(" ")) + " · " : ""}${
+        <button class="icon-btn" data-close aria-label="Close">${icon("xmark")}</button></div>
+      ${drive ? `<p class="disc-drive">${icon("compact-disc")} ${esc(driveName(drive))}
+          <span class="muted">${esc(drive.device || "")}${drive.reads ? ` \u00b7 reads ${esc(drive.reads)}` : ""}</span></p>` : ""}
+      <p class="muted">${
         d.source === "job" ? "From the rip in progress."
-        : d.source === "toc" ? "From the CD's table of contents. The names come from MusicBrainz when it's ripped."
+        : d.source === "toc" ? "From the CD's table of contents. The track names come from MusicBrainz when it's ripped."
         : d.source === "scan" ? "From the last scan of this disc."
-        : "This disc hasn't been read yet."}
-        Titles under a minute are menus and idents and are left out.</p>
+        : "This disc hasn't been read yet."}${cd ? ""
+        : " Titles under a minute are menus and idents and are left out."}</p>
       ${d.scanning ? `<div class="result busy"><span class="spin"></span><span>${esc(
           d.scan_progress || "Reading the disc")}${d.scan_seconds != null
           ? ` \u00b7 ${esc(duration(d.scan_seconds))}` : ""}<br><span class="muted">An
@@ -1495,7 +1514,9 @@ async function showDiscDetails(device = "") {
         : !titles.length ? `<div class="btn-row"><button class="btn primary" data-scan>Read the disc</button>
           <span class="test-out">Only while nothing is ripping.</span></div>` : ""}
       ${d.scan_error ? `<div class="result bad">${esc(d.scan_error)}</div>` : ""}
-      <div class="disc-titles">${titles.filter(t => t.seconds >= 60).map(t => {
+      ${cd ? `<ol class="cd-tracks">${titles.map(t => `<li><span>${esc(t.name || `Track ${t.index}`)}</span>
+          <span class="muted">${esc(clockTime(t.seconds))}</span></li>`).join("")}</ol>` : ""}
+      <div class="disc-titles">${cd ? "" : titles.filter(t => t.seconds >= 60).map(t => {
         const m = t.media || {};
         const tags = [m.quality, m.video_codec, m.bit_depth && `${m.bit_depth}-bit`, m.dynamic_range,
                       [m.audio_codec, m.audio_channels].filter(Boolean).join(" "), m.audio_languages]
@@ -1772,7 +1793,7 @@ function identifyPrompt(j) {
         <span class="badge warn">Needs you</span>
       </div>
       <label class="f wide"><span>What is this film?</span>
-        <input id="ni-name" value="${esc(j.title || "")}" placeholder="e.g. The Matrix (1999)">
+        <input class="ni-name-input" value="${esc(j.title || "")}" placeholder="e.g. The Matrix (1999)">
         <span class="help">A year in brackets is used as the year. Without one Riparr
           won't invent it.</span></label>
       ${plannedLine(j)}
@@ -1956,7 +1977,7 @@ function tray(drives, optical, canRip) {
       <h2>${esc(d.label || "Disc loaded")}</h2>
       <p>Already in your library: you ripped <b>${esc(name)}</b> ${esc(ago(k.ripped_at))}.</p>
       ${canRip ? `<div class="btn-row tray-go">
-        <button class="btn" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip it again</button>
+        <button class="btn" data-rerip="${esc(k.fingerprint)}">${icon("arrows-rotate")} Rip again</button>
         <a class="btn" href="#/discs">See it in Discs</a>
       </div>` : ""}
       ${driveLine(d)}
@@ -2171,7 +2192,8 @@ views.history = async () => {
           familyTag(j.disc_family)}</div>
         ${j.title && j.disc_label && j.title !== j.disc_label
           ? `<div class="hist-sub">${esc(j.disc_label)}</div>` : ""}
-        ${j.error ? `<div class="hist-err">${esc(j.error)}</div>` : ""}
+        ${j._sameError ? `<div class="hist-err muted">Same reason as above.</div>`
+          : j.error ? `<div class="hist-err">${esc(j.error)}</div>` : ""}
       </td>
       <td class="num" data-label="Attempt">${j._tries > 1
         ? `<span title="This disc has been ripped ${j._tries} times. Every attempt is a row here.">${
@@ -2181,7 +2203,8 @@ views.history = async () => {
       <td class="num" data-label="Took">${took != null ? esc(duration(took)) : `<span class="muted">—</span>`}</td>
       <td class="hist-stages" data-label="Where the time went">${
         stageBar(j.stages, typicalFor(j))}</td>
-      <td class="num" data-label="When"><span title="${esc(when(j.finished_at))}">${esc(ago(j.finished_at))}</span></td>
+      <td class="num" data-label="When"><span title="${esc(when(j.finished_at))}">${
+        j.finished_at ? esc(ago(j.finished_at)) : `<span class="muted">didn't start</span>`}</span></td>
       <td class="act">${(() => {
         const btns = (j.retries || []).map(r =>
           `<button class="btn tiny" data-hretry="${j.id}" data-haction="${esc(r.action)}"
@@ -2242,7 +2265,9 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
     // The first few attempts, every failure, and the rest of the successes folded.
     let shownDone = 0;
     const rows = list.map((x, i) => {
-      const r = i > lastGood ? Object.assign({}, x, { retries: [] }) : x;
+      const r = Object.assign({}, x, i > lastGood ? { retries: [] } : {},
+        // The same failure twice running is said once.
+        x.error && i > 0 && list[i - 1].error === x.error ? { _sameError: true } : {});
       const fold = x.state === "done" && ++shownDone > 3;
       return { html: row(r), fold };
     });
@@ -2258,7 +2283,7 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
                                      : "triangle-exclamation")}</span>
         <span class="hg-name"><b>${esc(name)}</b> ${familyTag(j.disc_family)}
           <span class="hg-result">${esc(result)}</span>
-          ${good && good.dest_path ? `<span class="hg-path">${icon("hard-drive")} ${esc(shortPath(good.dest_path, isFolderJob(good)))}</span>` : ""}</span>
+          ${good && good.dest_path ? `<span class="hg-path">${icon("hard-drive")}<span class="hg-path-t">${esc(shortPath(good.dest_path, isFolderJob(good)))}</span></span>` : ""}</span>
         <span class="hg-meta">${(() => {
           // Successes and the rest counted apart: twelve good rips aren't twelve attempts.
           const ok = list.filter(x => x.state === "done").length;
@@ -2269,13 +2294,16 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
           if (failed) parts.push(`${failed} failed`);
           if (cancelled) parts.push(`${cancelled} cancelled`);
           return parts.length ? `${parts.join(", ")} \u00b7 ` : "";
-        })()}${esc(ago(latest.finished_at))}</span>
+        })()}${latest.finished_at ? esc(ago(latest.finished_at)) : "didn't start"}</span>
         <span class="hg-chev">${icon("chevron-down")}</span>
       </button>
       <div class="hg-body" id="hg-${esc(k).replace(/[^a-z0-9]/gi, "-")}"${open ? "" : " hidden"}>
         ${good && good.dest_path ? `<div class="hg-full muted">${esc(good.dest_path)}${good.sha256
           ? `<br>SHA-256 ${esc(good.sha256)}` : ""}</div>` : ""}
-        <table class="hist-table"><tbody>${body}</tbody></table>
+        <table class="hist-table"><thead><tr>
+          <th></th><th></th><th class="num">Attempt</th><th class="num">Size</th>
+          <th class="num">Took</th><th>Where the time went</th><th class="num">When</th><th></th>
+        </tr></thead><tbody>${body}</tbody></table>
         ${folded ? `<button class="btn sm hg-more" type="button" data-hgshow="${esc(k)}">Show ${folded} more successful rip${folded === 1 ? "" : "s"}</button>` : ""}
       </div>
     </div>`;
@@ -2336,7 +2364,7 @@ function stageNote(byKind) {
   const kinds = Object.entries(byKind || {}).filter(([, v]) => Object.keys(v).length);
   const order = ["identify", "decrypt", "save", "upload", "verify"];
   return `
-    ${kinds.length ? `<div class="card stage-key-full"><h3>Typical here</h3>
+    ${kinds.length ? `<div class="card stage-key-full"><h2 class="h3">Typical here</h2>
       ${kinds.map(([k, v]) => `<div class="kind-row">
         ${familyTag(k)}
         <span class="kind-times">${order.filter(n => v[n]).map(n =>
@@ -2375,18 +2403,24 @@ views.discs = async (highlight) => {
   const { discs } = await api.get("/api/discs");
   const hit = highlight ? discs.find(d => d.fingerprint === highlight) : null;
   if (!discs.length) {
-    return `${head("Discs", "Every disc Riparr has seen. Put one back in and Riparr tells you it's already in your library, with Rip it again for when you mean it.")}
+    return `${head("Discs", "Every disc Riparr has seen. Put one back in and Riparr tells you it's already in your library, with Rip again for when you mean it.")}
       <div class="card"><div class="empty-state"><div class="big">${icon("compact-disc")}</div>
         <h2>No discs recorded</h2>
         <p>Once Riparr rips a disc it remembers it, so reinserting it is refused
-           instead of costing you forty minutes — and <b>Re-rip</b> is here for when
+           instead of costing you forty minutes — and <b>Rip again</b> is here for when
            you meant it.</p></div></div>`;
   }
+  const nameOf = (d) => (d.title || pretty(d.label) || "Unknown disc")
+    + (d.title && d.year && d.kind !== "tv" ? ` (${d.year})` : "");
+  // Two discs of one film (a DVD and a Blu-ray, say) would otherwise be two identical
+  // tiles: each says which disc it is.
+  const seen = {};
+  discs.forEach(d => { seen[nameOf(d)] = (seen[nameOf(d)] || 0) + 1; });
   const card = (d) => {
-    const name = (d.title || pretty(d.label) || "Unknown disc")
-      + (d.title && d.year && d.kind !== "tv" ? ` (${d.year})` : "");
+    const name = nameOf(d);
+    const which = seen[name] > 1 ? (d.label || FAMILY[d.disc_family]?.label || "") : "";
     const me = highlight && d.fingerprint === highlight;
-    return `<figure class="rip${me ? " dupe" : ""}" id="${me ? "dupe-tile" : ""}"
+    return `<figure class="rip${me ? " dupe" : ""}"${me ? ` id="dupe-tile"` : ""}
                     ${d.art ? "" : `data-art="${esc(d.title || d.label || "")}"`}
                     data-find="${esc([name, d.label, d.year].filter(Boolean).join(" "))}">
       <div class="rip-art${d.art ? " has" : ""}"${d.art ? ` style="background-image:url('${esc(d.art)}')"` : ""}>
@@ -2397,13 +2431,13 @@ views.discs = async (highlight) => {
       </div>
       <figcaption>
         <div class="rip-title" title="${esc(name)}">${esc(name)}</div>
-        <div class="rip-meta">${d.ripped_at ? esc(ago(d.ripped_at))
+        <div class="rip-meta">${which ? `${esc(which)} \u00b7 ` : ""}${d.ripped_at ? esc(ago(d.ripped_at))
                                             : `<span class="bad">never finished</span>`}</div>
       </figcaption>
       <div class="rip-acts">
         <button class="btn tiny" data-rerip="${esc(d.fingerprint)}"
-                title="Put this disc back in the tray and read it again from the start.">Re-rip</button>
-        <button class="btn tiny quiet" data-forget="${esc(d.fingerprint)}"
+                title="Put this disc back in the tray and read it again from the start.">Rip again</button>
+        <button class="btn tiny" data-forget="${esc(d.fingerprint)}"
                 title="Forget this disc, so the next time it goes in it is treated as new.">Forget</button>
       </div>
     </figure>`;
@@ -2422,12 +2456,12 @@ views.discs = async (highlight) => {
           hit.ripped_at && Date.now() / 1000 - hit.ripped_at > 86400
             ? ` — ${esc(day(hit.ripped_at))}` : ""}, so Riparr gave the disc straight
           back rather than spending another half hour on it.</p>
-        <p class="muted">Meant it? <b>Re-rip</b> on the highlighted tile pulls the tray
+        <p class="muted">Meant it? <b>Rip again</b> on the highlighted tile pulls the tray
           back in and starts over.</p>
       </div>
-      <button class="icon-btn" id="dupe-dismiss" title="Dismiss">${icon("xmark")}</button>
+      <button class="icon-btn" id="dupe-dismiss" title="Dismiss" aria-label="Dismiss">${icon("xmark")}</button>
     </div>` : "";
-  return `${head("Discs", "Every disc Riparr has seen. Put one back in and Riparr tells you it's already in your library, with Rip it again for when you mean it.")}
+  return `${head("Discs", "Every disc Riparr has seen. Put one back in and Riparr tells you it's already in your library, with Rip again for when you mean it.")}
     ${banner}
     <div class="rips">${discs.map(card).join("")}</div>`;
 };
@@ -2553,30 +2587,15 @@ settingsPages.library = async (s) => {
           : lib.mounted
             ? `${icon("circle-check", "ok")} Mounted at <code>${esc(lib.mount)}</code>,
                so <b>Straight to your library</b> works for this one.`
-            : `${icon("circle-info")} ${esc(lib.problem || "Not mounted")}`}
+            // "Nothing is mounted" is said once for the page, below; a mount that's
+            // there but unusable is this kind's own problem and is said here.
+            : lib.problem && !/^Nothing is mounted/.test(lib.problem)
+              ? `${icon("circle-info")} ${esc(lib.problem)}` : ""}
         </div>
       </div>`;
   };
 
   return `
-    <div class="section"><h2>Where things go</h2><div>
-      <p class="muted">Each kind of disc has its own share and its own folder inside
-        it. Pick the same share twice to keep everything on one machine in two folders,
-        or two different shares to split them.</p>
-      ${shares.length ? `<div class="dests">
-          ${row("movie", "Films", "movie_folder", "movie_share_id")}
-          ${row("tv", "Television", "tv_folder", "tv_share_id")}
-          ${row("music", "Music", "music_folder", "music_share_id")}
-        </div>
-        ${Object.values(library || {}).some(l => l && !l.mounted) ? `<p class="muted dests-note">That
-          works as it is. To write straight into your library instead, mount the share on the
-          host and bind-mount it into Riparr at <code>${esc(
-            (Object.values(library).find(l => l && !l.mounted) || {}).mount || "/srv/library")}</code>.</p>` : ""}`
-      : `<div class="empty-state"><div class="big">${icon("hard-drive")}</div>
-          <h2>No share configured</h2>
-          <p>Finished rips have nowhere to go until you add one below.</p></div>`}
-    </div></div>
-
     <div class="section"><h2>Shares
       <span class="grow"></span>
       <button class="btn" id="add-share">Add a share</button></h2>
@@ -2594,6 +2613,36 @@ settingsPages.library = async (s) => {
         </div>`).join("")}</div>` : ""}
       <div id="share-add"></div>
     </div></div>
+
+    <div class="section"><h2>Where things go</h2><div>
+      <p class="muted">Each kind of disc has its own share and its own folder inside
+        it. Use the same share for all of them to keep everything on one machine, or
+        different shares to split them.</p>
+      ${shares.length ? `<div class="dests">
+          ${row("movie", "Films", "movie_folder", "movie_share_id")}
+          ${row("tv", "Television", "tv_folder", "tv_share_id")}
+          ${row("music", "Music", "music_folder", "music_share_id")}
+        </div>
+        ${Object.values(library || {}).some(l => l && !l.mounted) ? `<p class="muted dests-note">${
+          icon("circle-info")} Rips are copied to these shares over the network, which works
+          as it is. To write straight into your library instead, mount the share on the
+          host at <code>${esc(
+            (Object.values(library).find(l => l && !l.mounted) || {}).mount || "/srv/library")}</code>${
+          ((state.status || {}).build || {}).install === "bare" ? "" : " inside Riparr's container"}.</p>` : ""}`
+      : `<div class="empty-state"><div class="big">${icon("hard-drive")}</div>
+          <h2>No share configured</h2>
+          <p>Finished rips have nowhere to go until you add one above.</p></div>`}
+    </div></div>
+
+    <div class="section"><h2>Handoff</h2><div>
+    <p class="muted">Riparr does not transcode. If you run something that does, write
+      each rip where it watches for work instead of straight into your library.</p>
+    <label class="f" style="margin-top:14px"><span>Watch folder</span>
+      <input data-set="watch_folder" value="${esc(s.watch_folder)}" placeholder="/Media/_incoming">
+      <span class="help">A path on your library share. Tdarr and Unmanic both work this
+        way: they pick the file up, transcode it, and put the result wherever they are
+        configured to. Leave this empty to write straight to the folders above.</span></label>
+  </div></div>
 
     <div class="section"><h2>Film lookup (TMDb)</h2><div>
       <p class="muted">With a key from <a href="https://www.themoviedb.org/settings/api"
@@ -2627,6 +2676,11 @@ settingsPages.library = async (s) => {
         pasted in as they are.</p>
       ${namingField("movie", "Films", "movie_template", s.movie_template)}
       ${namingField("tv", "Episodes", "tv_template", s.tv_template)}
+      <div class="f naming-albums"><span>Albums</span>
+        <div class="grow"><code>Artist/Album (Year)/01 - Title.flac</code>
+          <p class="muted naming-note">Audio CDs are named from MusicBrainz, the way Plex,
+            Plexamp and Jellyfin file music, with the discs of a set as 1-01, 2-01\u2026 and
+            a cover.jpg. This one isn't a template.</p></div></div>
       <div class="f"><span></span><span class="help">
         Tokens: ${((naming && naming.tokens) || []).map(t => `<code>${esc(t)}</code>`).join(" ")}.
         <br><br>Text inside the braces is only written when the value exists, Radarr's
@@ -2772,7 +2826,7 @@ settingsPages.ripping = async (s) => {
   </div></div>
 
   <div class="section"><h2>Transfer</h2><div>
-    <label class="f"><span>Mode</span>
+    <label class="f"><span>Each rip goes</span>
       <select data-set="transfer_mode">
         ${opt("direct", "Straight to your library (recommended)", s.transfer_mode)}
         ${opt("auto", "Staged first, then sent", s.transfer_mode)}
@@ -2790,7 +2844,7 @@ settingsPages.ripping = async (s) => {
         only at the end, and there is one copy rather than two, so verification checks
         the size rather than hashing. <b>Staged first</b> is the answer if your NAS
         sleeps, or you want deep verification.</span></label>
-    <label class="f"><span>Verify after transfer</span>
+    <label class="f"><span>After each rip</span>
       <select data-set="verify_mode">
         ${opt("quick", "Size check — compare the size", s.verify_mode)}
         ${s.transfer_mode === "direct" ? ""
@@ -2835,6 +2889,9 @@ settingsPages.ripping = async (s) => {
         it is the gentler of the two. <b>The tray</b> is unmissable across a room and
         is machinery, so it does two cycles and stops.</span></label>
     <div class="btn-row">
+      ${((state.status || {}).drives || []).length > 1 ? `<select id="signal-drive" aria-label="Which drive">
+        ${state.status.drives.map(d => `<option value="${esc(d.device)}">${esc(driveName(d))} (${esc(d.device)})</option>`).join("")}
+      </select>` : ""}
       <button class="btn" data-signal-test="flash">Try the light</button>
       <button class="btn" data-signal-test="tray">Try the tray</button>
       <span class="test-out" id="signal-out"></span></div>
@@ -3039,33 +3096,6 @@ settingsPages.connect = async (s) => {
     ${testRow("webhook")}`;
 
   return `
-  <div class="section"><h2>Tell me when</h2><div>
-    <p class="muted">Riparr sends every event ticked here to every channel set up
-      below. Until at least one channel is configured, nothing is sent anywhere and
-      these have no effect.</p>
-    <div class="notify-events">
-      ${n.events.map(e => `
-        <label class="switch"><input type="checkbox" data-set="notify_events" data-multi
-                value="${esc(e.key)}" ${on.has(e.key) ? "checked" : ""}>
-          <span class="track"></span><span class="lbl">${esc(e.label)}</span></label>`).join("")}
-    </div>
-  </div></div>
-
-  <div class="section"><h2>Answer from your phone</h2><div>
-    <p class="muted">When a disc stops to ask which film or show it is, the notification
-      has buttons with Riparr's best guesses. In ntfy a button answers straight away;
-      Discord and email get links to a page with the button on it. Either way, your
-      phone has to be able to reach Riparr.</p>
-    <label class="f" style="margin-top:14px"><span>Riparr's address</span>
-      <input data-set="public_url" value="${esc(s.public_url || "")}"
-             placeholder="${esc(n.seen_url || "http://192.168.1.10:8080")}">
-      <span class="help">${n.seen_url
-        ? `Empty means the address you signed in at, <code>${esc(n.seen_url)}</code>.`
-        : "Empty means the address you next open Riparr at."} Away from home, the buttons
-        only work if this address reaches Riparr from there too, through a VPN or a
-        reverse proxy.</span></label>
-  </div></div>
-
   <div class="section"><h2>Channels
     <span class="grow"></span>
     <span class="badge ${live ? "ok" : "warn"}">${
@@ -3081,17 +3111,36 @@ settingsPages.connect = async (s) => {
     </div>
   </div></div>
 
-  <div class="section"><h2>Handoff</h2><div>
-    <p class="muted">Not a notification: this is where finished files go <i>next</i>.
-      Riparr does not transcode, so if you run something that does, write the rip
-      where it is watching for work instead of straight into your library.</p>
-    <label class="f" style="margin-top:14px"><span>Watch folder</span>
-      <input data-set="watch_folder" value="${esc(s.watch_folder)}" placeholder="/Media/_incoming">
-      <span class="help">A path on your library share. Tdarr and Unmanic both work this
-        way: they pick the file up, transcode it, and put the result wherever they are
-        configured to. Leave this empty to write straight to the folders on the
-        <a href="#/settings/library">Library</a> page.</span></label>
-  </div></div>${saveBar()}`;
+  <div class="section"><h2>Tell me when</h2><div>
+    <p class="muted">Riparr sends every event ticked here to every channel set up
+      above.${live ? "" : " None is set up yet, so for now nothing is sent anywhere."}</p>
+    <div class="notify-events">
+      ${n.events.map(e => `
+        <label class="switch"><input type="checkbox" data-set="notify_events" data-multi
+                value="${esc(e.key)}" ${on.has(e.key) ? "checked" : ""}>
+          <span class="track"></span><span class="lbl">${esc(e.label)}</span></label>`).join("")}
+    </div>
+  </div></div>
+
+  <div class="section"><h2>Answer from your phone</h2><div>
+    <p class="muted">When a disc stops to ask which film, show or album it is, the
+      notification has buttons with Riparr's best guesses. In ntfy a button answers straight away;
+      Discord and email get links to a page with the button on it. Either way, your
+      phone has to be able to reach Riparr.</p>
+    <label class="f" style="margin-top:14px"><span>Riparr's address</span>
+      <input data-set="public_url" value="${esc(s.public_url || "")}"
+             placeholder="${esc(n.seen_url || "http://192.168.1.10:8080")}">
+      <span class="help">${n.seen_url
+        ? `Empty means the address you signed in at, <code>${esc(n.seen_url)}</code>.`
+        : "Empty means the address you next open Riparr at."} Away from home, the buttons
+        only work if this address reaches Riparr from there too, through a VPN or a
+        reverse proxy.</span></label>
+    ${/^https?:\/\/(localhost|127\.|\[::1\])/.test(s.public_url || n.seen_url || "")
+      ? `<div class="alert warn"><b>Your phone can't reach this address.</b> <code>${esc(
+          s.public_url || n.seen_url)}</code> only means "this computer". Put in the address
+          you'd type on your phone, like <code>http://192.168.1.10:9797</code>.</div>` : ""}
+  </div></div>
+${saveBar()}`;
 };
 
 /* ── is MakeMKV's own infrastructure up? ──
@@ -3263,18 +3312,18 @@ settingsPages.general = async (s) => {
    icon-over-label buttons where a page has actions, and tables at 14px with bold
    sentence-case headers. The *arrs put nothing side by side here and neither do we. */
 const SYSTEM_TABS = [
-  ["status",  "Status"],
-  ["tasks",   "Tasks"],
-  ["backup",  "Backup"],
-  ["updates", "Updates"],
-  ["events",  "Events"],
-  ["logs",    "Log Files"],
+  ["status",  "Status", "Whether Riparr is ready to rip, and what it's running on."],
+  ["tasks",   "Tasks", "What Riparr does on a schedule, and when each last ran."],
+  ["backup",  "Backup", "Copies of Riparr's settings and history, to restore from."],
+  ["updates", "Updates", "Which version of Riparr and MakeMKV you're on."],
+  ["events",  "Events", "What Riparr has been doing, newest first."],
+  ["logs",    "Log Files", "The full log, live, and to download for a bug report."],
 ];
 
 views.system = async (sub = "status") => {
   const body = await (systemPages[sub] || systemPages.status)();
-  const label = (SYSTEM_TABS.find(([k]) => k === sub) || SYSTEM_TABS[0])[1];
-  return `${head(`System — ${label}`, "")}${body}`;
+  const tab = SYSTEM_TABS.find(([k]) => k === sub) || SYSTEM_TABS[0];
+  return `${head(tab[1], tab[2])}${body}`;
 };
 
 const systemPages = {};
@@ -3446,7 +3495,7 @@ systemPages.tasks = async () => {
       <td>${s.last_duration == null ? "—" : hms(s.last_duration)}</td>
       <td>${since(s.next_execution)}</td>
       <td class="act"><button class="icon-btn" data-task="${esc(s.name)}"
-          title="Run now">${icon("arrows-rotate")}</button></td>
+          title="Run now" aria-label="Run ${esc(s.label)} now">${icon("arrows-rotate")}</button></td>
     </tr>`).join("");
 
   const queue = t.queue.length ? t.queue.map(q => `<tr>
@@ -3487,8 +3536,10 @@ systemPages.backup = async () => {
       <td>${filesize(x.size)}</td>
       <td>${stamp(x.modified)}</td>
       <td class="act">
-        <button class="icon-btn" data-restore="${esc(x.name)}" title="Restore">${icon("clock-rotate-left")}</button>
-        <button class="icon-btn" data-delbackup="${esc(x.name)}" title="Delete">${icon("trash-can")}</button>
+        <button class="icon-btn" data-restore="${esc(x.name)}" title="Restore"
+                aria-label="Restore ${esc(x.name)}">${icon("clock-rotate-left")}</button>
+        <button class="icon-btn" data-delbackup="${esc(x.name)}" title="Delete"
+                aria-label="Delete ${esc(x.name)}">${icon("trash-can")}</button>
       </td></tr>`).join("")
     : `<tr><td colspan="5" class="muted">No backups yet.</td></tr>`;
 
@@ -3536,7 +3587,8 @@ function markdown(src) {
     }
     if (/^\s*```/.test(line)) { flush(); code = []; continue; }
     const h = line.match(/^(#{1,4})\s+(.*)$/);
-    if (h) { flush(); out.push(`<h${Math.min(6, h[1].length + 2)}>${inline(h[2])}</h${Math.min(6, h[1].length + 2)}>`); continue; }
+    // Under the page's h2: "##" is h3, so no heading level is skipped.
+    if (h) { flush(); const n = Math.min(6, h[1].length + 1); out.push(`<h${n}>${inline(h[2])}</h${n}>`); continue; }
     const li = line.match(/^\s*(?:[-*]|(\d+)\.)\s+(.*)$/);
     if (li) {
       if (para.length) flush();
@@ -3567,7 +3619,7 @@ function newerVersion(a, b) {
 systemPages.updates = async () => {
   const [u, mk] = await Promise.all([api.get("/api/update"),
                                       api.get("/api/makemkv").catch(() => null)]);
-  const kind = u.status === "update" ? "warn" : u.status === "current" ? "ok" : "";
+  const kind = u.status === "update" ? "warn" : u.status === "current" || u.status === "edge" ? "ok" : "";
   return `
     <div class="toolbar">
       <button class="tool" id="upd-check"><span class="ti">${icon("arrows-rotate")}</span>Check</button>
@@ -3583,12 +3635,12 @@ systemPages.updates = async () => {
           <a href="https://github.com/${esc(u.repo)}" target="_blank" rel="noopener">github.com/${esc(u.repo)}</a></div>
       </div>
       <div class="alert ${u.status === "update" ? "warn" : ""}">${esc(u.message || "")}</div>
-      ${u.how ? `<p class="muted" style="font-size:13px">To update: <code>${esc(u.how)}</code></p>` : ""}
+      ${u.how && u.status !== "edge" ? `<p class="muted" style="font-size:13px">To update: <code>${esc(u.how)}</code></p>` : ""}
       ${u.build && u.build.channel === "edge" ? `<p class="muted" style="font-size:13px">You're on
         <b>edge</b>, built from the newest code on main${u.build.commit ? ` (commit
         <a href="https://github.com/${esc(u.repo)}/commit/${esc(u.build.commit)}" target="_blank"
-        rel="noopener">${esc(u.build.commit)}</a>)` : ""}. Releases are checked above; edge
-        builds aren't, so ${u.build.install === "bare"
+        rel="noopener">${esc(u.build.commit)}</a>)` : ""}. Edge isn't offered releases, since
+        it's already ahead of them: ${u.build.install === "bare"
           ? `<code>sudo /opt/riparr/deploy/install.sh --update</code> picks up the newest
              code. To go back to releases, run it with <code>--release</code>.`
           : `<code>docker compose pull</code> picks up the newest one. To go back to
@@ -3602,7 +3654,7 @@ systemPages.updates = async () => {
         <div class="k">Latest</div><div class="v">${esc(mk.manifest.version)}</div>
         <div class="k">Key</div><div class="v">${esc(keyPhrase(mk.status))}</div>
       </div></div>` : ""}
-    ${u.notes ? `<div class="section"><h2>Release notes</h2>
+    ${u.notes ? `<div class="section"><h2>Release notes${u.latest ? ` \u00b7 ${esc(u.latest)}` : ""}</h2>
       <div class="notes md">${markdown(u.notes)}</div></div>` : ""}`;
 };
 
@@ -3613,7 +3665,10 @@ const EVENT_LEVELS = { info: ["circle-info", ""], warning: ["triangle-exclamatio
 
 systemPages.events = async () => {
   const e = await api.get("/api/system/events?limit=100");
-  const rows = e.events.length ? e.events.map(x => {
+  // Most of the log is routine. "Problems only" is what somebody opening it is after.
+  const problemsOnly = state.evProblems;
+  const shown = e.events.filter(x => !problemsOnly || ["warning", "warn", "error", "critical"].includes(x.level));
+  const rows = shown.length ? shown.map(x => {
     const [ic, cls] = EVENT_LEVELS[x.level] || EVENT_LEVELS.info;
     return `<tr>
       <td class="stat">${icon(ic, cls)}</td>
@@ -3621,11 +3676,15 @@ systemPages.events = async () => {
       <td>${esc(x.component)}</td>
       <td>${esc(x.message)}</td></tr>`;
   }).join("")
-    : `<tr><td colspan="4" class="muted">Nothing logged yet.</td></tr>`;
+    : `<tr><td colspan="4" class="muted">${problemsOnly && e.events.length
+        ? "No warnings or errors among the latest events." : "Nothing logged yet."}</td></tr>`;
 
   return `
     <div class="toolbar">
       <button class="tool" id="ev-refresh"><span class="ti">${icon("arrows-rotate")}</span>Refresh</button>
+      <label class="switch sm" style="margin:auto 12px"><input type="checkbox" id="ev-problems"${
+        problemsOnly ? " checked" : ""}><span class="track"></span>
+        <span class="lbl">Warnings and errors only</span></label>
       <button class="tool" id="ev-clear"><span class="ti">${icon("trash-can")}</span>Clear</button>
     </div>
     <div class="section"><h2>Events<span class="grow"></span>
@@ -4102,7 +4161,8 @@ function wireContent(section, sub) {
     out.className = "test-out";
     out.textContent = mode === "tray" ? "Watch the tray…" : "Watch the drive…";
     try {
-      const r = await api.post("/api/drive/signal-test", { mode });
+      const r = await api.post("/api/drive/signal-test",
+                               { mode, device: ($("#signal-drive") || {}).value || "" });
       out.className = "test-out " + (r.ok ? "ok" : "warn");
       out.textContent = r.message;
     } catch (e) {
@@ -4195,6 +4255,8 @@ function wireContent(section, sub) {
     route();
   });
 
+  const evProblems = $("#ev-problems");
+  if (evProblems) evProblems.onchange = () => { state.evProblems = evProblems.checked; route(); };
   const evRefresh = $("#ev-refresh");
   if (evRefresh) evRefresh.onclick = () => route();
   const evClear = $("#ev-clear");
@@ -4413,11 +4475,11 @@ function wireContent(section, sub) {
       box.querySelectorAll("[data-tmdb-pick]").forEach(x => x.classList.remove("on"));
       c.classList.toggle("on", on);
       box.dataset.picked = on ? c.dataset.tmdbPick : "";
-      const name = askRoot(box).querySelector("#ni-name");
+      const name = askRoot(box).querySelector(".ni-name-input");
       if (name && on) name.value = c.dataset.name;
     });
     wire();
-    const nameInput = askRoot(box).querySelector("#ni-name");
+    const nameInput = askRoot(box).querySelector(".ni-name-input");
     if (nameInput) nameInput.addEventListener("input", () => {
       // A typed name is a different answer from the picked film.
       box.dataset.picked = "";
@@ -4495,7 +4557,7 @@ function wireContent(section, sub) {
   $$("[data-answer]").forEach(b => b.onclick = async () => {
     const root = askRoot(b);
     const picked = root.querySelector('input[name^="ni-title"]:checked');
-    const body = { name: (root.querySelector("#ni-name") || {}).value || "" };
+    const body = { name: (root.querySelector(".ni-name-input") || {}).value || "" };
     if (picked) body.title_index = Number(picked.value);
     const film = $(`[data-tmdb-for="${b.dataset.answer}"]`);
     if (film && film.dataset.picked) body.tmdb_id = Number(film.dataset.picked);
@@ -4605,8 +4667,8 @@ function wireContent(section, sub) {
     const inDrive = ((state.status || {}).drives || []).some(d =>
       d.present && d.known && d.known.fingerprint === b.dataset.rerip);
     if (!confirm(inDrive
-        ? "Rip it again?\n\nThis reads the whole disc again and replaces what's in your library."
-        : "Rip it again?\n\nLeave the disc on the tray — Riparr will pull the tray in. This "
+        ? "Rip again?\n\nThis reads the whole disc again and replaces what's in your library."
+        : "Rip again?\n\nLeave the disc on the tray — Riparr will pull the tray in. This "
           + "reads the whole disc again and replaces what's in your library.")) return;
     // Closing the tray and waiting for the drive to find the disc takes up to half a
     // minute, and a button that sits there looking clickable for half a minute is a
@@ -4850,7 +4912,7 @@ function renderChrome() {
   $("#health-pills").innerHTML = worst
     ? `<a class="pill ${worst.level}" href="#/system/status" title="${esc(
         list.map(p => p.short || p.message).join("\n"))}">${esc(worst.short || "Needs attention")}${
-        list.length > 1 ? ` <b>+${list.length - 1}</b>` : ""}</a>`
+        list.length > 1 ? ` <b>and ${list.length - 1} more</b>` : ""}</a>`
     : "";
   // On a phone the sidebar (and its badge) is hidden behind the menu button.
   $("#hamburger").classList.toggle("has-issues", !!list.length);
@@ -4962,6 +5024,16 @@ function applySearch() {
 }
 const onListPage = () => ["discs", "history"].includes(
   location.hash.replace(/^#\//, "").split("/")[0]);
+
+// On a phone the box is folded into a button; tapping it opens the box over the header.
+const searchToggle = $("#search-toggle");
+const searchOpen = (open) => {
+  $(".topbar").classList.toggle("searching", open);
+  searchToggle.setAttribute("aria-expanded", String(open));
+  if (open) search.focus();
+};
+searchToggle.onclick = () => searchOpen(!$(".topbar").classList.contains("searching"));
+search.addEventListener("blur", () => { if (!search.value) searchOpen(false); });
 search.addEventListener("input", () => { if (onListPage()) applySearch(); });
 search.addEventListener("keydown", (e) => {
   if (e.key === "Escape") { search.value = ""; applySearch(); search.blur(); }
@@ -4992,6 +5064,8 @@ $("#content").addEventListener("change", markDirty);
 
 let currentHash = location.hash;
 window.addEventListener("hashchange", () => {
+  // A dialog belongs to the page it was opened on.
+  document.querySelectorAll("dialog.disc-dlg[open]").forEach(d => { d.close(); d.remove(); });
   if (settingsDirty() && !confirm("You have unsaved changes on this page.\n\nLeave without saving them?")) {
     // Put the address back without routing: the page is still the one with the edits.
     history.replaceState(null, "", currentHash || "#/queue");

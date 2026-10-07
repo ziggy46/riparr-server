@@ -14,7 +14,6 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Riparr">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="preload" href="/static/fonts/RussoOne-Regular.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/static/app.css">
 <!-- After app.css: theme.park themes only set colours, but Windows 98 restyles shapes too,
      and needs to win over app.css at the same specificity. -->
@@ -30,7 +29,7 @@
     <p class="muted" id="gate-sub">Sign in to continue</p>
     <label class="f"><span>Username</span><input id="gate-user" autocomplete="username"></label>
     <label class="f"><span>Password</span><input id="gate-pass" type="password" autocomplete="current-password"></label>
-    <div class="gate-err" id="gate-err"></div>
+    <div class="gate-err" id="gate-err" role="alert"></div>
     <button class="btn primary wide" type="submit">Sign in</button>
   </form>
 
@@ -58,6 +57,8 @@
     <a class="logo" href="#/queue"><img class="logo-mark" src="/static/img/riparr-mark.png" alt=""> <span class="logo-word">Riparr</span></a>
     <label class="search"><span class="mag" data-ic="magnifying-glass"></span>
       <input id="search" type="search" placeholder="Find a disc" aria-label="Find a disc in Discs or History" autocomplete="off"></label>
+    <button class="icon-btn search-toggle" id="search-toggle" aria-label="Find a disc"
+            aria-controls="search" aria-expanded="false" data-ic="magnifying-glass"></button>
     <div class="grow"></div>
     <div class="pills" id="health-pills"></div>
     <!-- Riparr is free and forkable; this is the only ask on the page, and it sits

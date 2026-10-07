@@ -1001,7 +1001,7 @@ tr.hist.cancelled > td.stat { color: var(--fg-muted); }
 
 /* One row per kind of disc, because that is the unit the numbers are true for. */
 .stage-key-full { margin-top: 16px; padding: 16px 18px; }
-.stage-key-full h3 { font-size: 14px; font-weight: 700; color: var(--fg-strong);
+.stage-key-full h3, .stage-key-full h2 { font-size: 14px; font-weight: 700; color: var(--fg-strong);
                      margin: 0 0 12px; text-transform: none; letter-spacing: 0; }
 .kind-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
             padding: 7px 0; border-top: 1px solid var(--line); }
@@ -2346,3 +2346,91 @@ body.has-savebar .toast-host { bottom: 78px; }
 .fam-cd { color: #7fd3b0; border-color: rgba(127,211,176,.45); background: rgba(127,211,176,.12); }
 .mb-search { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .mb-search input { flex: 1 1 160px; min-width: 0; }
+
+/* ── full lookover, 2026-10 ── */
+
+/* Muted text, lifted to pass 4.5:1. theme.park's help-text grey sits at about 4.3:1 on
+   its own panels; mixing a little of the strong text colour in keeps each theme's hue.
+   Themes that set --fg-muted themselves (Windows 98) load after this and keep theirs. */
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  :root { --fg-muted: color-mix(in srgb, var(--text-muted, #999) 82%, var(--text-hover, #fff)); }
+}
+.side-ver, .side-ver .chan-tag { opacity: 1; }
+.pill.bad { color: color-mix(in srgb, var(--bad) 70%, #fff); }
+.hg.failed .hg-result, .np-err { color: color-mix(in srgb, var(--bad) 75%, #fff); }
+code { color: var(--fg); }
+.alert a { color: color-mix(in srgb, var(--link) 70%, #fff); }
+.btn.quiet-danger { color: var(--fg); }
+
+/* Nothing smaller than 11px: badges and disc-type tags are read, not decoration. */
+.badge, .fam, .side-ver { font-size: 11px; }
+
+/* Status is said by the dot and the words, not by a coloured stripe down one side. */
+.site.up, .site.down { border-left-width: 1px; }
+.site.up { border-color: rgba(39,194,76,.35); }
+.site.down { border-color: rgba(255,159,26,.4); }
+.toast { border-left-width: 1px; }
+.toast.ok { border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.toast.bad { border-color: color-mix(in srgb, var(--bad) 55%, transparent); }
+.dupe-note { border-left-width: 1px; }
+
+/* Long help reads as a column, not a banner across a wide screen. */
+.section p.muted, .section p.help, .f .help, .switch .lbl small { max-width: 75ch; }
+
+/* A CD's tracks, in Disc info. */
+.cd-tracks { margin: 12px 0; padding-left: 28px; display: grid; gap: 4px; font-size: 13.5px; }
+.cd-tracks li { display: flex; gap: 12px; padding: 3px 0; border-bottom: 1px solid var(--line); }
+.cd-tracks li span:first-child { flex: 1 1 auto; min-width: 0; }
+.cd-tracks li span:last-child { font-variant-numeric: tabular-nums; }
+
+/* History on a phone: the name takes what's left, a long path ellipses rather than
+   pushing the status icon and the chevron onto lines of their own. */
+.hg-name { flex: 1 1 0; }
+.hg-path { min-width: 0; }
+.hg-path > .hg-path-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Fingers: every control on a phone is at least 44px tall. */
+@media (max-width: 820px) {
+  .btn, .btn.sm, .btn.tiny, .topbar .icon-btn, .icon-btn { min-height: 44px; min-width: 44px; }
+  .btn, .btn.sm, .btn.tiny { display: inline-flex; align-items: center; justify-content: center; }
+  input[type=text], input[type=password], input[type=number], input:not([type]),
+  select { height: 44px; }
+  .sidebar a.nav-sub, .sidebar a.nav-top { min-height: 44px; }
+  .switch { min-height: 44px; align-items: center; }
+  .switch .track { margin-top: 0; }
+}
+
+/* A heading that looks like the h3 it used to be, at the level it belongs. */
+h2.h3 { margin: 0; }
+.hg-body .hist-table th { font-size: 11.5px; font-weight: 500; color: var(--fg-muted);
+                          padding: 2px 8px 6px; border-bottom: 1px solid var(--line); }
+
+/* Search on a phone: a button in the header that opens the box over it. */
+.search-toggle { display: none; }
+@media (max-width: 520px) {
+  .search-toggle { display: inline-flex; align-items: center; justify-content: center; }
+  .topbar.searching .search {
+    display: flex; position: absolute; left: 8px; right: 8px; top: 50%; transform: translateY(-50%);
+    margin: 0; min-width: 0; background: var(--sidebar); padding: 8px 10px; z-index: 2;
+    border: 1px solid var(--line-2); border-radius: var(--radius);
+  }
+}
+
+/* What's in the way, on a phone, where the header's warnings don't fit. */
+.np-notready { display: none; }
+@media (max-width: 700px) {
+  .np-notready {
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px; min-height: 44px;
+    border: 1px solid color-mix(in srgb, var(--bad) 45%, transparent); border-radius: var(--radius);
+    background: color-mix(in srgb, var(--bad) 10%, transparent); color: var(--fg-strong);
+    font-size: 13.5px; text-decoration: none;
+  }
+  .np-notready .ic { color: color-mix(in srgb, var(--bad) 75%, #fff); flex: none; }
+  .np-notready > span:first-of-type { flex: 1 1 auto; min-width: 0; }
+  .np-notready-go { color: var(--link); font-weight: 600; }
+}
+/* A caution, not a failure: "it may still fit". */
+.np-err.np-caution { color: var(--warn); }
+.naming-albums .grow { min-width: 0; padding-top: 6px; }
+.naming-albums .naming-note { margin: 6px 0 0; font-size: 13px; line-height: 20px; max-width: 75ch; }
+@media (max-width: 1200px) { .naming-albums .grow { padding-top: 0; } }

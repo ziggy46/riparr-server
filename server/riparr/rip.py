@@ -1336,8 +1336,10 @@ def purge_staging(need_bytes=0, keep_newest=0):
             except OSError:
                 continue
         if remote != size:
-            log.info("Keeping job %d in staging: the library copy is %s, not %d bytes.",
-                     job["id"], remote, size)
+            log.info("Keeping job %d's staged copy: %s.", job["id"],
+                     "it isn't on the share yet" if remote is None else
+                     "the copy on the share is %d MiB, not %d MiB"
+                     % (remote // 2 ** 20, size // 2 ** 20))
             continue
         _cleanup_staging(job)
         db.update_job(job["id"], local_path=None)
@@ -1488,9 +1490,13 @@ def _plan_transfer(needed_bytes, kind="movie", job_id=None):
         # non-question -- so if we are counting card space at all, either the user
         # chose to stage or the share is away. Telling somebody to buy a bigger card
         # when their NAS is simply asleep sends them to the wrong shop.
-        short = "This disc needs about %d GB and there's %d GB free in staging%s." % (
-            needed_bytes // 2 ** 30, max(0, free) // 2 ** 30,
-            ", once the other drive's rip has the room it needs" if reserved else "")
+        # The working room is said out loud: "needs 7 GB, 8 GB free" reads as a broken
+        # rule when the unstated 4 GB margin is what doesn't fit.
+        short = ("This disc needs about %d GB, plus %d GB of working room, and there's %d GB "
+                 "free in staging%s." % (
+                     -(-needed_bytes // 2 ** 30), WINDOW_BYTES // 2 ** 30,
+                     max(0, free) // 2 ** 30,
+                     " once the other drive's rip has the room it needs" if reserved else ""))
         if (_settings() or {}).get("transfer_mode") == "direct":
             return None, (short + " Rips normally go straight to your library, which "
                           "has no such limit — reconnect the share and this disc will "

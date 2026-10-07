@@ -81,14 +81,19 @@ def check(repo=REPO, timeout=8):
     how, notes = release_how(data.get("body"))
     if how:
         base["how"] = how
+    # An edge build is ahead of every release: "up to date" would be checking it against
+    # something it already has, and a release would be a step back.
+    edge = base["build"].get("channel") == "edge" and not newer
     return dict(base,
-                status="update" if newer else "current",
+                status="update" if newer else "edge" if edge else "current",
                 latest=latest,
                 tag=data.get("tag_name"),
                 notes=notes,
                 published=data.get("published_at"),
                 url=data.get("html_url"),
                 message=("Version %s is available." % latest) if newer
+                        else ("You're on edge, built from the newest code on main: newer "
+                              "than the latest release, %s." % latest) if edge
                         else "Riparr is up to date.")
 
 

@@ -531,6 +531,7 @@ def duplicate_ack(user=Depends(require_user)):
 
 class SignalTest(BaseModel):
     mode: str = "flash"
+    device: str = ""                     # which drive; empty means the one with a disc
 
 
 @app.post("/api/drive/signal-test")
@@ -547,12 +548,16 @@ def drive_signal_test(body: SignalTest = SignalTest(), user=Depends(require_user
         raise HTTPException(status_code=400,
                             detail="Riparr is working on a disc — this would fight it "
                                    "for the drive. Try again when it has finished.")
-    d = next((x for x in P.optical_drives() if x.get("present")), None)
+    if body.device:
+        d = next((x for x in P.optical_drives() if x.get("device") == _device(body.device)
+                  and x.get("present")), None)
+    else:
+        d = next((x for x in P.optical_drives() if x.get("present")), None)
     if body.mode in ("flash", "both") and not d:
         raise HTTPException(status_code=400,
                             detail="Put a disc in first — the light is blinked by "
                                    "reading one.")
-    r = P.duplicate_signal((d or {}).get("device") or "/dev/sr0", mode=body.mode)
+    r = P.duplicate_signal((d or {}).get("device") or _device(body.device), mode=body.mode)
     return {"ok": bool(r.get("ok")), "message": r.get("message")}
 
 
@@ -610,6 +615,7 @@ def _reads_phrase(drive):
         return "capability unknown"
     if drive.get("uhd") == "yes" or drive.get("libredrive") == "enabled":
         parts.append("4K UHD")
+    parts.append("CD")                   # every optical drive reads audio CDs
     return ", ".join(parts)
 
 
@@ -668,8 +674,16 @@ def _known_disc(drive):
         return None
     if not known or not RIP._already_have(known):
         return None
-    return {"fingerprint": known.get("fingerprint"), "title": known.get("title"),
-            "year": known.get("year"), "ripped_at": known.get("ripped_at")}
+    out = {"fingerprint": known.get("fingerprint"), "title": known.get("title"),
+           "year": known.get("year"), "ripped_at": known.get("ripped_at")}
+    if known.get("release_id"):
+        # An album: its artist (from the rip) and its own cover, since a CD has no
+        # label to look a poster up by.
+        prior = db.get_job(known["job_id"]) if known.get("job_id") else None
+        out["artist"] = db.music_plan(prior).get("artist") if prior else None
+        out["art"] = "/api/artwork/image/%s" % ART._remember(
+            MB.cover_url(known["release_id"], 250))
+    return out
 
 
 def _space_warning(drive):

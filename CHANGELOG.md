@@ -16,6 +16,28 @@ doesn't display the line.
 
 ## Unreleased
 
+**A tidier, more honest interface.** From a full review of every page:
+- **The Queue says what's in the way.** A disc that may not fit in staging says so on its
+  card before you press Rip again. On a phone, where the header's warnings don't fit, a
+  "Not ready" line lists what needs fixing. Phones also get a search button.
+- **CDs look like albums.** A known CD's card shows its cover and artist, and Disc info
+  lists its tracks with their lengths, short ones included.
+- **No more "No key entered" on a fresh install:** with "Renew the beta key automatically"
+  on, Riparr puts in the free beta key itself.
+- **Things are where you'd look for them.** Library lists your shares first, says once
+  what mounting would change, and holds the watch folder (moved from Connect) and how
+  albums are named. Connect starts with the channels, and warns when the address for
+  answering from your phone is one your phone can't reach. "Try the light" asks which
+  drive. One name for ripping a disc again: **Rip again**. The transfer settings use the
+  Queue's words: *Each rip goes* and *After each rip*.
+- **Clearer messages.** "Needs about 7 GB and there's 8 GB free" now says the working
+  room it also needs. Edge builds say "edge" rather than "up to date". History's attempts
+  have column headings, a repeated failure is said once, and a rip that never started
+  says so instead of "never". Events can show just warnings and errors.
+- **Easier to read and to tap.** Muted text, badges and the version line pass contrast;
+  every control on a phone is at least 44px tall; History rows no longer break apart on a
+  phone. Screen readers hear the sign-in error and can tell the Tasks buttons apart.
+
 **Audio CDs.** Put a music CD in and Riparr rips it as an album: it recognises the CD on
 MusicBrainz (the artist, album, original year and every track's title), reads each track
 with cdparanoia, and encodes it to FLAC, tagged and with the cover inside. Albums are
