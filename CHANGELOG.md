@@ -14,7 +14,7 @@ doesn't display the line.
 
 ---
 
-## Unreleased
+## 0.8.0
 
 **Fixed: a rip could sit on "Reading the disc" forever.** A Linux-only MakeMKV bug can
 hang it at 100% CPU the first time it meets a drive, while fetching that drive's data,
@@ -24,6 +24,15 @@ DVDs and Blu-rays rip as usual; only 4K LibreDrive features are affected, and Sy
 Status says when it's in effect. Riparr also addresses drives by their device path
 (`/dev/sr0`) rather than MakeMKV's own numbering, and caps the container's open-files
 limit, which can cause a similar hang on some Docker hosts.
+
+**See what MakeMKV is doing.** The rip card has a "What MakeMKV is doing" panel with its
+latest messages, Disc info shows a scan's progress and how long it's been going, and
+MakeMKV's messages go into Riparr's log. A step that sits still no longer looks like
+a frozen page.
+
+**Library problems are named.** Instead of "not mounted" for everything, Library and
+the rip options say what's actually wrong: nothing mounted there, or mounted but not
+writable by the user Riparr runs as (with the owner and the fix).
 
 **A new layout.** The Queue shows the disc being ripped as one large card, phones get
 tabs at the bottom, History is grouped by disc, and Settings are shorter. It replaces the
