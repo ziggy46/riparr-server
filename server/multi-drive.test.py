@@ -81,6 +81,13 @@ check("without a drive named, the free one is used",
       (bool(b), db.get_job(b)["device"]), (True, "/dev/sr0"))
 check("both drives are held", db.busy_devices(), ["/dev/sr0", "/dev/sr1"])
 
+slow = rip._drive_lock("/dev/sr1")
+slow.acquire()                       # a slow check (a 4K disc's probe) on the second drive
+other = rip._drive_lock("/dev/sr0").acquire(timeout=0.2)
+check("one drive's slow claim doesn't hold up the other", other, True)
+rip._drive_lock("/dev/sr0").release()
+slow.release()
+
 print("staging is shared fairly")
 db.update_job(a, mode="burst", state="ripping", bytes_total=10 * 2 ** 30, bytes_ripped=2 ** 30)
 check("a rip still writing holds what it hasn't written yet",
@@ -96,6 +103,19 @@ check("and one that fits beside it isn't", rip._plan_transfer(4 * 2 ** 30, job_i
       ("burst", None))
 
 import threading  # noqa: E402
+
+
+def staged_by_a():
+    """What A has on the disk: what it's written so far, until its file leaves staging."""
+    j = db.get_job(a)
+    if j["state"] in ("ripping", "transferring", "verifying") or j.get("local_path"):
+        return int(j.get("bytes_ripped") or 0)
+    return 0
+
+
+# 20 GB of disk, less whatever A has written: the free space a real disk would report.
+rip._staging_free = lambda: 20 * 2 ** 30 - staged_by_a()
+db.update_job(a, mode="burst", state="ripping", bytes_total=10 * 2 ** 30, bytes_ripped=0)
 got = {}
 waiter = threading.Thread(target=lambda: got.update(
     mode=rip._plan_or_wait(dict(db.get_job(b), bytes_total=8 * 2 ** 30), threading.Event())))
@@ -103,10 +123,16 @@ waiter.start()
 time.sleep(1)
 check("instead, it waits for the other drive's rip", (waiter.is_alive(), db.get_job(b)["phase"]),
       (True, rip.WAIT_FOR_ROOM))
-db.update_job(a, state="transferring")          # done writing: its room is free
+# A finishes writing: its whole file is on the disk now, waiting to be uploaded.
+db.update_job(a, bytes_ripped=10 * 2 ** 30, state="transferring",
+              local_path="/staging/job-a/film.mkv")
+time.sleep(7)
+check("and keeps waiting while that rip's file is still in staging", waiter.is_alive(), True)
+# A is uploaded and its staged copy is gone.
+db.update_job(a, state="done", local_path=None)
 waiter.join(timeout=15)
-check("and starts once that rip has finished writing", got.get("mode"), "burst")
-db.update_job(a, state="ripping")
+check("then starts once that file has left staging", got.get("mode"), "burst")
+db.update_job(a, state="ripping", bytes_ripped=0, local_path=None)
 try:
     rip._plan_or_wait(dict(db.get_job(b), bytes_total=30 * 2 ** 30), threading.Event())
     refused = None

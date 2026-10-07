@@ -1737,6 +1737,10 @@ function episodeCode(e) {
     ? `${head}-E${pad(e.episode_last)}` : head;
 }
 
+/* The question a control belongs to. Two drives can both be asking at once, each card
+   with the same fields, so every lookup is made inside the card the control is in. */
+const askRoot = (el) => el.closest(".job.needs") || document;
+
 function identifyPrompt(j) {
   if ((j.episode_plan || {}).episodes) return seasonPrompt(j);
   const titles = (j.titles || []).filter(t => t.seconds >= 60);
@@ -1771,7 +1775,7 @@ function identifyPrompt(j) {
             <span class="muted">The film is usually the longest. Riparr remembers your pick for this disc.</span></div>
           ${titles.map(t => `
             <label class="ni-title">
-              <input type="radio" name="ni-title" value="${t.index}"
+              <input type="radio" name="ni-title-${j.id}" value="${t.index}"
                      ${t.index === j.chosen_title ? "checked" : ""}>
               <span class="ni-dur">${esc(duration(t.seconds))}</span>
               <span class="ni-name">${esc(t.name || `Title ${t.index}`)}</span>
@@ -4347,11 +4351,11 @@ function wireContent(section, sub) {
       box.querySelectorAll("[data-tmdb-pick]").forEach(x => x.classList.remove("on"));
       c.classList.toggle("on", on);
       box.dataset.picked = on ? c.dataset.tmdbPick : "";
-      const name = $("#ni-name");
+      const name = askRoot(box).querySelector("#ni-name");
       if (name && on) name.value = c.dataset.name;
     });
     wire();
-    const nameInput = $("#ni-name");
+    const nameInput = askRoot(box).querySelector("#ni-name");
     if (nameInput) nameInput.addEventListener("input", () => {
       // A typed name is a different answer from the picked film.
       box.dataset.picked = "";
@@ -4374,8 +4378,9 @@ function wireContent(section, sub) {
   });
 
   $$("[data-answer]").forEach(b => b.onclick = async () => {
-    const picked = $('input[name="ni-title"]:checked');
-    const body = { name: ($("#ni-name") || {}).value || "" };
+    const root = askRoot(b);
+    const picked = root.querySelector('input[name^="ni-title"]:checked');
+    const body = { name: (root.querySelector("#ni-name") || {}).value || "" };
     if (picked) body.title_index = Number(picked.value);
     const film = $(`[data-tmdb-for="${b.dataset.answer}"]`);
     if (film && film.dataset.picked) body.tmdb_id = Number(film.dataset.picked);
@@ -4399,7 +4404,9 @@ function wireContent(section, sub) {
      the server on every poll, so a model would have to be reconciled with it, and the
      reconciliation is more code than the read. */
   $$("[data-answer-season]").forEach(b => b.onclick = async () => {
-    const rows = $$("#ep-rows .ep-row");
+    const root = askRoot(b);
+    const field = (id) => root.querySelector("#" + id) || {};
+    const rows = [...root.querySelectorAll("#ep-rows .ep-row")];
     const include = [], titles = {}, order = [];
     rows.forEach(r => {
       const ti = Number(r.dataset.ti);
@@ -4411,17 +4418,17 @@ function wireContent(section, sub) {
       toast("Tick at least one episode, or skip the disc.", "bad");
       return;
     }
-    const season = ($("#ep-season") || {}).value;
+    const season = field("ep-season").value;
     if (season === "") {
       toast("Give it a season number — the files need one.", "bad");
       return;
     }
-    const picked = ($("#ep-series") || {}).value;
+    const picked = field("ep-series").value;
     const body = {
       season: Number(season),
-      first_episode: Number(($("#ep-first") || {}).value || 1),
+      first_episode: Number(field("ep-first").value || 1),
       include, order, episode_titles: titles,
-      name: (($("#ep-name") || {}).value || "").trim(),
+      name: (field("ep-name").value || "").trim(),
     };
     if (picked) body.series_id = Number(picked);
     b.disabled = true;
@@ -4434,23 +4441,23 @@ function wireContent(section, sub) {
      always describe what would be written if the button were pressed now. Sending a
      move to the server and redrawing would work too and would cost a round trip per
      click on a box that is busy reading a disc. */
-  const moveRow = (ti, delta) => {
-    const box = $("#ep-rows");
+  const moveRow = (root, ti, delta) => {
+    const box = root.querySelector("#ep-rows");
     if (!box) return;
-    const rows = $$("#ep-rows .ep-row");
+    const rows = [...box.querySelectorAll(".ep-row")];
     const i = rows.findIndex(r => Number(r.dataset.ti) === ti);
     const to = i + delta;
     if (i < 0 || to < 0 || to >= rows.length) return;
     // Keep what the user has typed or unticked: the nodes are moved, not re-rendered.
     if (delta < 0) box.insertBefore(rows[i], rows[to]);
     else box.insertBefore(rows[to], rows[i]);
-    renumberRows();
+    renumberRows(root);
   };
-  const renumberRows = () => {
-    const seasonRaw = ($("#ep-season") || {}).value;
+  const renumberRows = (root) => {
+    const seasonRaw = (root.querySelector("#ep-season") || {}).value;
     const season = seasonRaw === "" ? null : Number(seasonRaw);
-    let n = Number(($("#ep-first") || {}).value || 1);
-    $$("#ep-rows .ep-row").forEach((r, i, all) => {
+    let n = Number((root.querySelector("#ep-first") || {}).value || 1);
+    [...root.querySelectorAll("#ep-rows .ep-row")].forEach((r, i, all) => {
       const keep = r.querySelector(".ep-keep").checked;
       const span = r.querySelector(".ep-title").placeholder.startsWith("Two") ? 2 : 1;
       const cell = r.querySelector(".ep-num");
@@ -4465,13 +4472,10 @@ function wireContent(section, sub) {
       r.querySelector("[data-down]").disabled = i === all.length - 1;
     });
   };
-  $$("[data-up]").forEach(b => b.onclick = () => moveRow(Number(b.dataset.up), -1));
-  $$("[data-down]").forEach(b => b.onclick = () => moveRow(Number(b.dataset.down), 1));
-  $$("#ep-rows .ep-keep").forEach(c => c.onchange = renumberRows);
-  ["ep-season", "ep-first"].forEach(id => {
-    const el = $("#" + id);
-    if (el) el.oninput = renumberRows;
-  });
+  $$("[data-up]").forEach(b => b.onclick = () => moveRow(askRoot(b), Number(b.dataset.up), -1));
+  $$("[data-down]").forEach(b => b.onclick = () => moveRow(askRoot(b), Number(b.dataset.down), 1));
+  $$("#ep-rows .ep-keep").forEach(c => c.onchange = () => renumberRows(askRoot(c)));
+  $$("#ep-season, #ep-first").forEach(el => el.oninput = () => renumberRows(askRoot(el)));
 
   $$("[data-skip]").forEach(b => b.onclick = async () => {
     if (!confirm("Skip this disc?\n\nIt will be ejected without being ripped.")) return;

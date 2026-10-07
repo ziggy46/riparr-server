@@ -215,7 +215,16 @@ def _autorip_ready():
 
 # ─────────────────────────────── queueing ───────────────────────────────
 
-_enqueue_lock = threading.Lock()
+# One per drive: the Rip button and Auto Rip racing for the *same* disc is what needs
+# stopping, and a slow check on one drive (a 4K disc's LibreDrive probe is two minutes)
+# mustn't hold up the other.
+_enqueue_locks = {}
+_enqueue_locks_guard = threading.Lock()
+
+
+def _drive_lock(device):
+    with _enqueue_locks_guard:
+        return _enqueue_locks.setdefault(device or "", threading.Lock())
 
 
 def enqueue(force=False, expect=None, device=None):
@@ -227,23 +236,22 @@ def enqueue(force=False, expect=None, device=None):
     is a fingerprint the caller believes is in the tray -- Re-rip supplies it so that
     asking to re-rip one film cannot start a rip of whatever disc actually went in.
     """
-    # Claiming a drive is one step, from the check to the job row that holds it: the
-    # Rip button and Auto Rip can both reach here for the same disc within a second of
-    # each other. Held only that long -- not through the scan, which is minutes, and
-    # which the other drive's disc shouldn't wait behind.
-    lock = _OnceLock(_enqueue_lock)
-    try:
-        if device:
-            d = drive_for(device)
-            if not d:
-                return None, "There's no disc in that drive."
-        else:
-            loaded = [x for x in P.optical_drives() if x.get("present")]
-            if not loaded:
-                return None, "There's no disc in the tray."
-            d = next((x for x in loaded if not db.drive_busy(x.get("device"))), loaded[0])
-        dev = d.get("device")
+    if device:
+        d = drive_for(device)
+        if not d:
+            return None, "There's no disc in that drive."
+    else:
+        loaded = [x for x in P.optical_drives() if x.get("present")]
+        if not loaded:
+            return None, "There's no disc in the tray."
+        d = next((x for x in loaded if not db.drive_busy(x.get("device"))), loaded[0])
+    dev = d.get("device")
 
+    # Claiming the drive is one step, from the check to the job row that holds it: the
+    # Rip button and Auto Rip can both reach here for the same disc within a second of
+    # each other. Held only that long -- not through the scan, which is minutes.
+    lock = _OnceLock(_drive_lock(dev))
+    try:
         # The *drive*, not "anything in flight". A previous rip that is still uploading
         # from the card has already given the disc back, and holding the tray shut for
         # it would waste the very minutes early eject exists to reclaim.
@@ -1313,9 +1321,10 @@ def _plan_or_wait(job, cancel_ev):
     """Plan the transfer, recorded before the next rip is planned: two drives finishing
     their scans together must not both count the same free space.
 
-    When the only reason it won't fit is the other drive's rip, still writing, this
-    disc waits in its tray and starts when there's room -- refusing it would make
-    somebody come back and press Retry for a disc that was never the problem.
+    When it won't fit only because of the other drive's rip -- still writing, or written
+    and waiting to go up to the library -- this disc waits in its tray and starts when
+    that file has left staging. Refusing it would make somebody come back and press
+    Retry for a disc that was never the problem.
     """
     need = int(job.get("bytes_total") or 0)
     kind = job.get("kind") or "movie"
@@ -1327,22 +1336,43 @@ def _plan_or_wait(job, cancel_ev):
                 db.update_job(job["id"], mode=mode,
                               **({"phase": "Starting the rip"} if waited else {}))
                 return mode
-        reserved = _reserved_staging(job["id"])
-        # Only worth waiting for if it would fit once the other rip had its room back.
-        if not reserved or need + WINDOW_BYTES > _staging_free():
+        holders = _staging_holders(job["id"])
+        # Only worth waiting for if it would fit once all of them had gone.
+        if not holders or need + WINDOW_BYTES > _staging_free() + sum(
+                int(h.get("bytes_total") or 0) for h in holders):
             raise RipFailed(refusal)
         if not waited:
             log.info("Job %d: waiting for the other drive's rip to free staging.", job["id"])
             db.update_job(job["id"], phase=WAIT_FOR_ROOM)
             waited = True
-        # Arithmetic only while waiting; the full check (which may ask the share what
-        # it can free) runs again once the numbers say it's worth it.
+        # Planned again (which may ask the share what it can free) each time one of
+        # them moves on, and not every five seconds in between.
+        seen = _holders_key(holders)
         while True:
             if cancel_ev.wait(5) or _stop.is_set():
                 raise Cancelled()
-            reserved = _reserved_staging(job["id"])
-            if not reserved or _staging_free() - reserved >= need + WINDOW_BYTES:
+            if _holders_key(_staging_holders(job["id"])) != seen:
                 break
+
+
+def _staging_holders(job_id=None):
+    """The other rips with a claim on staging: writing to it, or written and waiting to
+    be sent from it. A finished rip's kept copy isn't one -- the purge reclaims that."""
+    out = []
+    for j in db.list_jobs(states=["identifying", "ripping", "transferring", "verifying"],
+                          limit=20):
+        if j["id"] == job_id:
+            continue
+        if j["state"] in ("identifying", "ripping") and j.get("mode") not in ("burst", "stream"):
+            continue
+        if j["state"] in ("transferring", "verifying") and not j.get("local_path"):
+            continue
+        out.append(j)
+    return out
+
+
+def _holders_key(holders):
+    return sorted((h["id"], h["state"]) for h in holders)
 
 
 def _reserved_staging(job_id=None):
