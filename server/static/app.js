@@ -2950,7 +2950,7 @@ settingsPages.connect = async (s) => {
              placeholder="${esc(n.seen_url || "http://192.168.1.10:8080")}">
       <span class="help">${n.seen_url
         ? `Empty means the address you signed in at, <code>${esc(n.seen_url)}</code>.`
-        : "Empty means the address you next sign in at."} Away from home, the buttons
+        : "Empty means the address you next open Riparr at."} Away from home, the buttons
         only work if this address reaches Riparr from there too, through a VPN or a
         reverse proxy.</span></label>
   </div></div>

@@ -369,7 +369,11 @@ def _capacity(free_bytes, direct=None):
 
 
 @app.get("/api/status")
-def status(user=Depends(require_user)):
+def status(request: Request, user=Depends(require_user)):
+    # Signed in from before this was recorded at sign-in: the page loads this first, so
+    # the notification buttons get an address without signing in again. Once only.
+    if not db.get("seen_url"):
+        db.set("seen_url", str(request.base_url).rstrip("/"))
     storage = P.storage_status()
     # The user should never see a gigabyte: capacity is expressed in discs and mode.
     return {

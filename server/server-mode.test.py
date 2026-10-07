@@ -315,7 +315,26 @@ class _Req:  # the two things the answer endpoint reads off a request
         self.headers = {"accept": accept}
 
 
+db.set("seen_url", "")
+
+
+class _Base:
+    base_url = "http://10.0.0.5:8080/"
+
+
+main.status(_Base(), user="admin")
+check("a page load by somebody already signed in records the address",
+      db.get("seen_url"), "http://10.0.0.5:8080")
+_Base.base_url = "http://other:1/"
+main.status(_Base(), user="admin")
+check("once, not on every poll", db.get("seen_url"), "http://10.0.0.5:8080")
+
 db.set("public_url", "")
+db.set("seen_url", "http://10.0.0.5:8080")
+db.set("session_secret", "")
+check("no secret, no buttons -- never signed with an empty key",
+      NT.answer_action(1, "X", {}), None)
+main._secret()                       # as startup does
 db.set("seen_url", "")
 check("no address known, no buttons", NT.actions(NT.answer_action(1, "X", {}), NT.open_action()), [])
 db.set("seen_url", "http://10.0.0.5:8080")

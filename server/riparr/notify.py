@@ -114,8 +114,10 @@ LABEL_MAX = 40
 
 
 def _signer():
-    secret = db.get("session_secret") or ""
-    return URLSafeTimedSerializer(secret, salt=ANSWER_SALT)
+    """None without a secret: never sign with an empty key, which anyone could forge
+    a button with. Startup always makes one, so this is a guard, not a path."""
+    secret = db.get("session_secret")
+    return URLSafeTimedSerializer(secret, salt=ANSWER_SALT) if secret else None
 
 
 def public_url():
@@ -136,10 +138,10 @@ def _label(text):
 
 def answer_action(job_id, label, answer):
     """A button that answers job `job_id` with `answer` (the fields rip.answer takes)."""
-    base = public_url()
-    if not base:
+    base, signer = public_url(), _signer()
+    if not base or not signer:
         return None
-    token = _signer().dumps({"j": int(job_id), "a": answer, "l": _label(label)})
+    token = signer.dumps({"j": int(job_id), "a": answer, "l": _label(label)})
     url = "%s/api/answer/%s" % (base, token)
     return {"kind": "answer", "label": _label(label), "url": url}
 
@@ -160,8 +162,11 @@ ANSWER_FIELDS = {"tmdb_id", "series_id"}
 
 def read_answer(token):
     """{"job", "answer", "label"} from a button's token, or {"error": why}."""
+    signer = _signer()
+    if not signer:
+        return {"error": "Riparr can't check this button. Answer on the Queue page instead."}
     try:
-        got = _signer().loads(token, max_age=ANSWER_MAX_AGE)
+        got = signer.loads(token, max_age=ANSWER_MAX_AGE)
     except BadSignature:
         return {"error": "This button has expired, or Riparr's password was changed "
                          "since it was sent. Answer on the Queue page instead."}
