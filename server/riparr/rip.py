@@ -1386,6 +1386,25 @@ def _reserved_staging(job_id=None):
     return held
 
 
+def kept_copies():
+    """Finished rips whose staged copy is still here, kept so a problem on the share is
+    a re-copy rather than a re-rip: (bytes, how many). `purge_staging` deletes them as
+    soon as a disc needs the room, so they count as room. Read from the database and a
+    stat per file, cheap enough for every status poll; whether the share still has
+    each one is only asked when it's time to delete it."""
+    total = count = 0
+    for j in db.list_jobs(states=["done"], limit=100):
+        local = j.get("local_path")
+        if not local or local.startswith(P.LIBRARY_MOUNT):
+            continue
+        try:
+            total += BK.tree_size(local) if os.path.isdir(local) else os.path.getsize(local)
+            count += 1
+        except OSError:
+            continue
+    return total, count
+
+
 def _plan_transfer(needed_bytes, kind="movie", job_id=None):
     """Mode selection (D11), honest about what this build can actually do.
 

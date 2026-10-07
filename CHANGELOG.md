@@ -14,6 +14,16 @@ doesn't display the line.
 
 ---
 
+## Unreleased
+
+**"Not enough room" no longer counts the copies Riparr keeps.** A finished rip's staged
+copy is kept until the space is needed, so a problem on the share is a re-copy rather
+than a re-rip, and it's deleted the moment a disc needs the room. The sidebar and the
+Queue's space warning counted those copies as used, and said "Not enough room for another
+disc" when there was. They now count as room, and the sidebar says when the room comes
+from clearing them. To delete each copy as soon as it's in your library instead, turn off
+**Settings → Ripping → Keep the local copy**.
+
 ## 0.9.0
 
 **Two drives rip at once.** With more than one drive, each rips its own disc at the same

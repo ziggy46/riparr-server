@@ -261,6 +261,17 @@ db.set("theme", "../../etc/passwd")
 check("anything that isn't a plain name falls back", main.setup_state()["theme"], "servarr")
 db.set("theme", "servarr")
 
+print("copies kept in staging count as room")
+GB = 2 ** 30
+full = main._capacity(5 * GB, direct=False, kept=(0, 0))
+check("a nearly full card with nothing kept has no room", full["mode"], "full")
+kept = main._capacity(5 * GB, direct=False, kept=(40 * GB, 2))
+check("the same card holding two finished films has room", kept["mode"], "burst")
+check("and says the room comes from clearing them",
+      "once Riparr clears 2 copies already in your library" in kept["phrase"], True)
+check("room that's free anyway says nothing about it",
+      "clears" in main._capacity(200 * GB, direct=False, kept=(1 * GB, 1))["phrase"], False)
+
 print("the live log")
 import logging  # noqa: E402
 from riparr import system as SY  # noqa: E402

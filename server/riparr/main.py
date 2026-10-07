@@ -304,7 +304,7 @@ DISC_NAMES = {"uhd": ("4K UHD disc", "4K UHD discs"),
 DISC_ORDER = ("uhd", "bluray", "dvd")
 
 
-def _capacity(free_bytes, direct=None):
+def _capacity(free_bytes, direct=None, kept=None):
     """Capacity, in the terms the engine actually operates in.
 
     `direct` matters because it changes what the card *is*. When rips go straight to
@@ -334,9 +334,16 @@ def _capacity(free_bytes, direct=None):
     streaming = SH.Transport.supports_follow_copy
     if direct is None:
         direct = RIP.use_direct()
+    # Copies of finished rips are kept in staging until the room is needed, and the
+    # engine deletes them the moment a disc needs it -- so they're room, not a full card.
+    kept_bytes, kept_count = kept if kept is not None else RIP.kept_copies()
+    free_now = free_bytes
+    free_bytes = free_bytes + kept_bytes
     usable = max(0, free_bytes - WINDOW_BYTES)
     by_kind = {k: int(usable // v) for k, v in DISC_BYTES.items()}
     discs = by_kind["bluray"]
+    needs_clearing = kept_count and any(
+        by_kind[k] > int(max(0, free_now - WINDOW_BYTES) // v) for k, v in DISC_BYTES.items())
 
     if free_bytes < WINDOW_BYTES:
         mode, phrase = "degraded", "Not enough room to rip safely"
@@ -357,6 +364,9 @@ def _capacity(free_bytes, direct=None):
         phrase = "Room for " + parts[0]
         if len(parts) > 1:
             phrase += " — or " + ", or ".join(parts[1:])
+        if needs_clearing:
+            phrase += (", once Riparr clears %s already in your library"
+                       % ("a copy" if kept_count == 1 else "%d copies" % kept_count))
     elif streaming:
         mode, phrase = "stream", "Streaming — discs are never refused for space"
     else:
@@ -365,6 +375,7 @@ def _capacity(free_bytes, direct=None):
         mode, phrase = "full", "Not enough room for another disc — let the queue drain"
 
     return {"discs_free": discs, "by_kind": by_kind, "mode": mode, "phrase": phrase,
+            "kept_bytes": kept_bytes, "kept_count": kept_count,
             "streaming": streaming, "direct": direct,
             "disc_names": {k: list(v) for k, v in DISC_NAMES.items()},
             "window_bytes": WINDOW_BYTES}
@@ -650,7 +661,7 @@ def _space_warning(drive):
     if SH.Transport.supports_follow_copy:
         return None                      # streaming, so size stopped mattering
     size = drive.get("size_bytes") or 0
-    free = P.storage_status().get("free_bytes") or 0
+    free = (P.storage_status().get("free_bytes") or 0) + RIP.kept_copies()[0]
     if not size or size + WINDOW_BYTES <= free:
         return None
     return ("This is a %d GB disc and there's %d GB free in staging. The film itself "
