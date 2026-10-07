@@ -421,6 +421,14 @@ tbody tr:hover td .btn, tbody tr:hover td .btn * { color: #000; }
 .empty-state { color: #404040; }
 .tray-art { opacity: .12; filter: grayscale(1); }
 
+/* With several drives, each card's drive is its window's title. */
+.np-drive {
+  background: var(--w98-title); color: #fff; padding: 3px 6px; margin: 0 0 2px;
+  font-weight: 700; font-size: 12px;
+}
+.np-drive > span:first-of-type, .np-drive .muted { color: #fff; }
+.np-drive + .np { padding-top: 16px; }
+
 /* ── History ── */
 .hg + .hg { border-top: 1px solid var(--w98-light); }
 .hg-list { background: #fff; box-shadow: var(--w98-field); padding: 2px; }

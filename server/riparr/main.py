@@ -1133,7 +1133,7 @@ def queue(user=Depends(require_user)):
     # MakeMKV is saying about *its* disc.
     by_device = {}
     for dev in devices if len(devices) > 1 else []:
-        f = db.last_finished(since, device=dev)
+        f = db.last_finished(since, device=dev, legacy=dev == devices[0])
         by_device[dev] = {"filed": _filed_out(f) if f else None,
                           "makemkv": RIP.makemkv_recent(device=dev) if jobs else []}
     return {"jobs": [j for j in jobs if j.get("state") not in db.SENDING_STATES],

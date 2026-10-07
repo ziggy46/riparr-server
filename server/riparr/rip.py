@@ -1306,6 +1306,43 @@ def purge_staging(need_bytes=0, keep_newest=0):
 
 
 _plan_lock = threading.Lock()
+WAIT_FOR_ROOM = "Waiting for room in staging \u2014 the other drive's rip is using it"
+
+
+def _plan_or_wait(job, cancel_ev):
+    """Plan the transfer, recorded before the next rip is planned: two drives finishing
+    their scans together must not both count the same free space.
+
+    When the only reason it won't fit is the other drive's rip, still writing, this
+    disc waits in its tray and starts when there's room -- refusing it would make
+    somebody come back and press Retry for a disc that was never the problem.
+    """
+    need = int(job.get("bytes_total") or 0)
+    kind = job.get("kind") or "movie"
+    waited = False
+    while True:
+        with _plan_lock:
+            mode, refusal = _plan_transfer(need, kind, job_id=job["id"])
+            if not refusal:
+                db.update_job(job["id"], mode=mode,
+                              **({"phase": "Starting the rip"} if waited else {}))
+                return mode
+        reserved = _reserved_staging(job["id"])
+        # Only worth waiting for if it would fit once the other rip had its room back.
+        if not reserved or need + WINDOW_BYTES > _staging_free():
+            raise RipFailed(refusal)
+        if not waited:
+            log.info("Job %d: waiting for the other drive's rip to free staging.", job["id"])
+            db.update_job(job["id"], phase=WAIT_FOR_ROOM)
+            waited = True
+        # Arithmetic only while waiting; the full check (which may ask the share what
+        # it can free) runs again once the numbers say it's worth it.
+        while True:
+            if cancel_ev.wait(5) or _stop.is_set():
+                raise Cancelled()
+            reserved = _reserved_staging(job["id"])
+            if not reserved or _staging_free() - reserved >= need + WINDOW_BYTES:
+                break
 
 
 def _reserved_staging(job_id=None):
@@ -3053,14 +3090,7 @@ def _run_job(job):
         if job is None:
             return                       # needs_input, skipped, or ejected
 
-        # Planned one rip at a time, and recorded before the next is planned: two
-        # drives finishing their scans together must not both count the same free space.
-        with _plan_lock:
-            mode, refusal = _plan_transfer(job.get("bytes_total") or 0,
-                                           job.get("kind") or "movie", job_id=job["id"])
-            if refusal:
-                raise RipFailed(refusal)
-            db.update_job(job["id"], mode=mode)
+        mode = _plan_or_wait(job, cancel_ev)
         job["mode"] = mode
 
         # A season disc is one job with many files, which is a different shape all the

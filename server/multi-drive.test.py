@@ -90,11 +90,32 @@ check("but not against itself", rip._reserved_staging(job_id=a), 0)
 rip._staging_free = lambda: 20 * 2 ** 30
 rip.purge_staging = lambda need_bytes=0, keep_newest=0: (0, [])
 mode, refusal = rip._plan_transfer(8 * 2 ** 30, job_id=b)
-check("a second rip that would only fit if the first didn't finish is refused",
+check("on its own, the space check says a second rip won't fit beside the first",
       (mode, "free in staging" in (refusal or "")), (None, True))
 check("and one that fits beside it isn't", rip._plan_transfer(4 * 2 ** 30, job_id=b),
       ("burst", None))
+
+import threading  # noqa: E402
+got = {}
+waiter = threading.Thread(target=lambda: got.update(
+    mode=rip._plan_or_wait(dict(db.get_job(b), bytes_total=8 * 2 ** 30), threading.Event())))
+waiter.start()
+time.sleep(1)
+check("instead, it waits for the other drive's rip", (waiter.is_alive(), db.get_job(b)["phase"]),
+      (True, rip.WAIT_FOR_ROOM))
+db.update_job(a, state="transferring")          # done writing: its room is free
+waiter.join(timeout=15)
+check("and starts once that rip has finished writing", got.get("mode"), "burst")
+db.update_job(a, state="ripping")
+try:
+    rip._plan_or_wait(dict(db.get_job(b), bytes_total=30 * 2 ** 30), threading.Event())
+    refused = None
+except rip.RipFailed as e:
+    refused = str(e)
+check("a disc that wouldn't fit even then is refused straight away",
+      "free in staging" in (refused or ""), True)
 db.update_job(a, mode=None, state="queued", bytes_total=64 * 2 ** 20, bytes_ripped=0)
+db.update_job(b, mode=None, phase="Waiting to start")
 rip._staging_free = lambda: 100 * 2 ** 30
 
 print("both rip at once")
@@ -144,7 +165,9 @@ old = db.create_job(state="ripping", disc_label="OLD", kind="movie", fingerprint
 check("holds every drive, since it can't be told apart",
       (bool(db.drive_busy("/dev/sr0")), bool(db.drive_busy("/dev/sr1"))), (True, True))
 check("and its eject goes to the first drive", rip.device_of(db.get_job(old)), "/dev/sr0")
-db.update_job(old, state="failed")
+db.update_job(old, state="failed", finished_at=int(time.time()) + 60)
+check("it's the first drive's last rip", db.last_finished(0, device="/dev/sr0")["id"], old)
+check("and not the second's", db.last_finished(0, device="/dev/sr1", legacy=False)["id"], a)
 rip.stop()
 
 print()

@@ -129,6 +129,21 @@ decide which you prefer.
 Load discs back to back — rip, eject, next. When rips are staged, there has to be room in
 `/srv/staging` for the one you're putting in; the web UI shows how many more fit.
 
+## More than one drive
+
+Plug in a second drive and Riparr uses both: each rips its own disc, **at the same time**.
+The Queue shows a card for each drive, with its own Rip, Eject and Disc info, and Auto
+Rip picks up a disc in either tray. It's the quickest way through a box set.
+
+The two share the staging folder. If a disc won't fit until the other drive's rip has
+finished writing, it waits in its tray ("Waiting for room in staging") and starts on its
+own when there's room. It's only refused if it wouldn't fit even then. Uploads to your
+library still go one at a time.
+
+In Docker, the compose file's `device_cgroup_rules` already allow every optical drive. If
+you list devices yourself instead, list both nodes (`/dev/srN` and its `/dev/sgN`) for
+each drive.
+
 ## Reading the drive without a browser
 
 The disc itself is the signal. It stays in while there's work to do and comes back out

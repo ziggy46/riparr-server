@@ -16,6 +16,13 @@ doesn't display the line.
 
 ## Unreleased
 
+**Two drives rip at once.** With more than one drive, each rips its own disc at the same
+time. The Queue shows a card per drive, with its own Rip, Eject, Disc info, progress and
+"What MakeMKV is doing", and Auto Rip watches every tray. A disc that won't fit until the
+other drive's rip finishes writing waits for room instead of failing. This also fixes
+Riparr ejecting the first drive after ripping a disc from another one. With one drive,
+nothing looks different.
+
 **Install without Docker.** On Debian or Ubuntu, one command installs Riparr Server as a
 systemd service, with the same MakeMKV build and settings as the Docker image:
 

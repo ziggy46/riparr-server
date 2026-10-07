@@ -608,9 +608,10 @@ def list_jobs(states=None, limit=50):
     return [dict(r) for r in conn().execute(q, args)]
 
 
-def last_finished(since, device=None):
+def last_finished(since, device=None, legacy=True):
     """The most recent rip that ended in a file or a failure after `since`, or None --
-    from `device`'s tray when that's given.
+    from `device`'s tray when that's given. `legacy` counts jobs from before drives were
+    recorded as this drive's, which is right for the first drive and no other.
 
     Cancelled jobs are left out: a skipped disc or a refused duplicate is not an
     outcome anybody waits by the drive for.
@@ -618,7 +619,7 @@ def last_finished(since, device=None):
     q = "SELECT * FROM jobs WHERE state IN ('done','failed') AND finished_at >= ?"
     args = [int(since)]
     if device:
-        q += " AND (device=? OR device IS NULL)"
+        q += " AND (device=? OR device IS NULL)" if legacy else " AND device=?"
         args.append(device)
     r = conn().execute(q + " ORDER BY finished_at DESC LIMIT 1", args).fetchone()
     return dict(r) if r else None

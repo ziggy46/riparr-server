@@ -874,27 +874,44 @@ views.queue = async () => {
   state.typicalStages = q.typical_stages || {};
   state.stageLabels = q.stage_labels || {};
   state.stageLabelSets = q.stage_label_sets || {};
-  state.mkLines = q.makemkv || [];
   state.stageOrder = q.stage_order || [];
   state.status = st;
   const drives = state.status.drives || [];
-  const inTray = drives.find(d => d.present);
-  setDiscArt(inTray && inTray.label);       // fire and forget; never blocks the render
-  const loaded = drives.find(d => d.present);
-  // A rip still uploading whose disc hasn't come out yet stays the hero. Otherwise
-  // the card fell back to "you ripped this … Rip it again" for the length of the
-  // upload, as if nothing had happened.
-  const ownDisc = (j) => loaded && (j.disc_label || "") === (loaded.label || "");
-  const hero = jobs.length ? jobs : sending.filter(ownDisc);
-  const away = jobs.length ? sending : sending.filter(j => !ownDisc(j));
-  const busy = hero.some(j => j.state !== "needs_input");
-  // The rip that just finished stays on the page until the next disc goes in. A
-  // different disc in the tray is the next moment, so the tray takes over again.
-  const filed = !hero.length && showFiled(q.filed, loaded) ? q.filed : null;
   announceFiled(q.filed);
-  announceAsk(hero.filter(j => j.state === "needs_input"));
-  if (filed) setFiledArt(filed);
-  return nowRipping({ q, ar, drives, loaded, hero, away, busy, filed });
+  announceAsk(jobs.filter(j => j.state === "needs_input"));
+
+  // One card per drive once there's more than one: each tray holds its own disc, rips
+  // on its own, and has its own Eject and Disc info. A job from before there could be
+  // two has no drive recorded, and belongs to the first.
+  const first = (drives[0] || {}).device;
+  const onDrive = (dev) => (j) => (j.device || first) === dev;
+  const cardFor = (d, slice) => {
+    const loaded = d && d.present ? d : null;
+    setDiscArt(loaded && loaded.label);      // fire and forget; never blocks the render
+    // A rip still uploading whose disc hasn't come out yet stays the hero. Otherwise
+    // the card fell back to "you ripped this … Rip it again" for the length of the
+    // upload, as if nothing had happened.
+    const ownDisc = (j) => loaded && (j.disc_label || "") === (loaded.label || "");
+    const hero = slice.jobs.length ? slice.jobs : slice.sending.filter(ownDisc);
+    // The rip that just finished stays on the card until the next disc goes in. A
+    // different disc in the tray is the next moment, so the tray takes over again.
+    const filed = !hero.length && showFiled(slice.filed, loaded) ? slice.filed : null;
+    if (filed) setFiledArt(filed);
+    return { d, loaded, hero, filed, busy: hero.some(j => j.state !== "needs_input"),
+             mk: slice.mk, away: slice.jobs.length ? slice.sending : slice.sending.filter(j => !ownDisc(j)) };
+  };
+  let cards;
+  if (drives.length > 1) {
+    const by = q.by_device || {};
+    cards = drives.map(d => cardFor(d, {
+      jobs: jobs.filter(onDrive(d.device)), sending: sending.filter(onDrive(d.device)),
+      filed: (by[d.device] || {}).filed, mk: (by[d.device] || {}).makemkv || [] }));
+  } else {
+    cards = [cardFor(drives.find(x => x.present) || drives[0],
+                     { jobs, sending, filed: q.filed, mk: q.makemkv || [] })];
+  }
+  const away = cards.flatMap(c => c.away);
+  return nowRipping({ q, ar, drives, cards, away });
 };
 
 
@@ -903,54 +920,71 @@ views.queue = async () => {
    one finish time, and the things you can do to it on the card itself. What's still
    uploading and what was filed last sit in a short strip under it, and Auto Rip and
    the rip options -- set once, rarely touched -- fold into a footer. */
-function nowRipping({ q, ar, drives, loaded, hero, away, busy, filed }) {
+function nowRipping({ q, ar, drives, cards, away }) {
+  const multi = drives.length > 1;
+  const html = cards.map((c, i) => discCard(c, { drives: multi ? [c.d] : drives, multi,
+                                                 todo: i === 0 })).join("");
+  // Not while the same film is being ripped again -- that reads as a duplicate.
+  const hero = (cards[0] || {}).hero || [];
+  const last = !multi && hero.length && q.filed && q.filed.state === "done"
+    && (q.filed.disc_label || "") !== (hero[0].disc_label || "")
+    ? `<a class="np-last" href="#/history">${icon("circle-check")}
+         <span>Last filed <b>${esc(filedName(q.filed))}</b> · ${esc(ago(q.filed.finished_at))}</span></a>`
+    : "";
+  return `<div class="np-page${multi ? " np-multi" : ""}">
+    ${head("Queue", multi ? `${drives.length} drives` : "")}
+    ${html}
+    ${sendingStrip(away)}
+    ${last}
+    <div class="np-foot">${autoRipPanel(ar)}</div>
+  </div>`;
+}
+
+/* One drive's card: its disc as large as the page allows -- poster, title, one bar, one
+   finish time -- and the things you can do to it on the card itself. With several
+   drives each has its own, named at the top. */
+function discCard({ d, loaded, hero, busy, filed, mk }, { drives, multi, todo }) {
+  const dev = (d || {}).device || "";
   const poster = (img) => `<div class="np-art">${img
     ? `<img src="${esc(img)}" alt="">`
     : `<span class="np-art-none">${icon("compact-disc")}</span>`}</div>`;
+  const art = artFor(loaded && loaded.label);
   // Eject leads: right after a rip it is the next thing anybody does. Disc info next,
   // then whatever belongs to this card, with the destructive one last.
   const acts = ({ lead = "", trail = "", ejectDisabled = false } = {}) => {
     const disc = loaded ? `
-      <button class="btn sm" id="t-eject" ${busy || ejectDisabled ? "disabled" : ""}
+      <button class="btn sm" data-eject="${esc(dev)}" ${busy || ejectDisabled ? "disabled" : ""}
               ${ejectDisabled ? `title="Answer or skip first"` : busy ? `title="The drive is in use — cancel the rip to eject"` : ""}>${icon("eject")} Eject</button>
-      <button class="btn sm" id="t-disc">${icon("compact-disc")} Disc info</button>` : "";
+      <button class="btn sm" data-disc="${esc(dev)}">${icon("compact-disc")} Disc info</button>` : "";
     return lead || disc || trail ? `<div class="np-acts">${lead}${disc}${trail}</div>` : "";
   };
   const shell = (img, inner, cls = "") =>
     `<div class="np${cls ? " " + cls : ""}">${poster(img)}<div class="np-body">${inner}</div></div>`;
 
   // The drive's own line -- model, device, what it reads -- is the System page's and Disc
-  // info's business. On the card it's only worth room when there's no disc to show.
-  let body, strip = !loaded;
+  // info's business. On the card it's only worth room when there's no disc to show, or
+  // when there's more than one drive and the card has to say which it is.
+  let body, strip = !loaded && !multi;
   if (hero.length) {
     body = hero.map(j => j.state === "needs_input"
-      ? shell(artState.image, npAsk(j, acts), "np-ask")
-      : shell(artState.image, npLive(j, acts), "np-live")).join("");
+      ? shell(art, npAsk(j, acts), "np-ask")
+      : shell(art, npLive(j, acts, mk), "np-live")).join("");
   } else if (filed) {
-    body = shell(filedArt.id === filed.id ? filedArt.image : artState.image, npFiled(filed, acts),
+    body = shell(filedArtFor(filed) || art, npFiled(filed, acts),
                  filed.state === "done" ? "np-done" : "np-bad");
   } else if (loaded && loaded.known && !loaded.cannot_read) {
-    body = shell(artState.image, npKnown(loaded, acts), "np-done");
+    body = shell(art, npKnown(loaded, acts), "np-done");
   } else if (drives.length && !(loaded && loaded.cannot_read)) {
-    body = shell(loaded ? artState.image : null, npIdle(drives, loaded, busy, acts), "np-idle");
+    body = shell(loaded ? art : null, npIdle(drives, loaded, busy, acts, todo), "np-idle");
   } else {
     // No drive at all, or a disc this drive can't read: the tray explains it best.
     body = tray(drives, state.status.optical, loaded && !busy);
     strip = false;           // the tray carries its own drive line
   }
-  // Not while the same film is being ripped again -- that reads as a duplicate.
-  const last = hero.length && q.filed && q.filed.state === "done"
-    && (q.filed.disc_label || "") !== (hero[0].disc_label || "")
-    ? `<a class="np-last" href="#/history">${icon("circle-check")}
-         <span>Last filed <b>${esc(filedName(q.filed))}</b> · ${esc(ago(q.filed.finished_at))}</span></a>`
-    : "";
-  return `<div class="np-page">
-    ${head("Queue", "")}
-    <div class="card np-card">${body}${strip ? trayStrip(drives, state.status.optical) : ""}</div>
-    ${sendingStrip(away)}
-    ${last}
-    <div class="np-foot">${autoRipPanel(ar)}</div>
-  </div>`;
+  const named = multi && d ? `<div class="np-drive">${icon("compact-disc")}
+      <span>${esc(driveName(d))}</span> <span class="muted">${esc(dev)}</span></div>` : "";
+  return `<div class="card np-card"${multi ? ` data-drive="${esc(dev)}"` : ""}>${named}${body}${
+    strip ? trayStrip(drives, state.status.optical) : ""}</div>`;
 }
 
 /* ── one bar for the whole job ──
@@ -988,7 +1022,7 @@ function jobProgress(j) {
            name: stageLabel(j, order[at]), ticks };
 }
 
-function npLive(j, acts) {
+function npLive(j, acts, mk) {
   const p = jobProgress(j);
   const shown = Math.round(p.pct);
   const working = shown <= 0;
@@ -1028,7 +1062,7 @@ function npLive(j, acts) {
       return bits.length ? `<div class="np-step">This step: ${esc(bits.join(" \u00b7 "))}</div>` : "";
     })()}
     ${planned}
-    ${npMakemkv()}
+    ${npMakemkv(mk, j.device || "")}
     ${acts({ trail: `<button class="btn sm" data-cancel="${j.id}">${icon("xmark")} Cancel</button>` })}`;
 }
 
@@ -1056,11 +1090,11 @@ function npPhase(j, stageName) {
 
 /* MakeMKV's own commentary -- what it's reading, which titles it found, what it skips --
    folded away, for anyone who wants to see exactly what it's doing. */
-function npMakemkv() {
-  const lines = state.mkLines || [];
+function npMakemkv(lines, dev) {
+  lines = lines || [];
   if (!lines.length) return "";
   const t = (at) => new Date(at * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" });
-  return `<details class="np-mk" id="np-mk"${state.mkOpen ? " open" : ""}>
+  return `<details class="np-mk" data-mk="${esc(dev)}"${(state.mkOpen || {})[dev] ? " open" : ""}>
     <summary>What MakeMKV is doing</summary>
     <ol class="np-mk-lines">${lines.slice().reverse().map(l =>
       `<li><time>${esc(t(l.at))}</time><span>${esc(l.text)}</span></li>`).join("")}</ol>
@@ -1109,9 +1143,10 @@ function npAsk(j, acts) {
     ${form.outerHTML}`;
 }
 
-function npIdle(drives, loaded, busy, acts) {
+function npIdle(drives, loaded, busy, acts, checklist = true) {
   const d = loaded || drives[0];
-  const blocking = problems(state.status).filter(p => p.level === "bad");
+  // With two drives the checklist is said once, on the first card, not on both.
+  const blocking = checklist ? problems(state.status).filter(p => p.level === "bad") : [];
   if (!loaded && blocking.length) {
     return `
       <div class="np-kicker ask">${icon("triangle-exclamation")} Not ready</div>
@@ -1140,7 +1175,7 @@ function npIdle(drives, loaded, busy, acts) {
     ${acts({ lead: busy ? "" : blocking.length
       // A rip that can only fail isn't offered as though it would work.
       ? `<button class="btn sm" disabled>Fix ${blocking.length} thing${blocking.length === 1 ? "" : "s"} first</button>`
-      : `<button class="btn sm primary" id="rip-now">${icon("play")} Rip this disc</button>` })}`;
+      : `<button class="btn sm primary" data-rip="${esc(d.device || "")}">${icon("play")} Rip this disc</button>` })}`;
 }
 
 /* The end of a path, which is the part that says where it went; the whole of it is one
@@ -1174,7 +1209,7 @@ function npFiled(j, acts) {
     ${acts({ lead: retry ? `<button class="btn sm primary" data-hretry="${j.id}" data-haction="${esc(retry.action)}"
                 title="${esc(retry.why)}">${icon(RETRY_ICON[retry.action] || "arrows-rotate")} ${esc(retry.label)}</button>` : "",
               trail: `<a class="btn sm" href="#/history">History</a>
-      <button class="btn sm" id="filed-dismiss" data-job="${j.id}">Dismiss</button>` })}`;
+      <button class="btn sm" data-filed-dismiss="${j.id}">Dismiss</button>` })}`;
 }
 
 function npKnown(d, acts) {
@@ -1234,14 +1269,21 @@ function focusHeading() {
    the whole box exists for -- the film is in your library -- left no trace unless you
    happened to be looking. This keeps it on the card, with where it went and what it
    cost, until the next disc goes in or it is dismissed. */
-let filedArt = { id: null, image: null };
+const filedArts = {};           // job id -> poster, once looked up (null while asking)
+const filedArtFor = (j) => (j && filedArts[j.id]) || null;
 const FILED_KEY = "riparr.filedDismissed";
+
+// The finished cards dismissed in this browser. One per drive can be showing, so it's a
+// short list; it used to be a single id.
+function dismissedFiled() {
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem(FILED_KEY) || "null"); } catch (e) { /* fine */ }
+  return Array.isArray(v) ? v.map(String) : v != null ? [String(v)] : [];
+}
 
 function showFiled(job, loaded) {
   if (!job) return false;
-  let gone = null;
-  try { gone = localStorage.getItem(FILED_KEY); } catch (e) { /* private window */ }
-  if (gone === String(job.id)) return false;
+  if (dismissedFiled().includes(String(job.id))) return false;
   // Still the same disc (not yet ejected), or nothing in the tray at all.
   return !loaded || (loaded.label || "") === (job.disc_label || "");
 }
@@ -1252,8 +1294,8 @@ function filedName(j) {
 }
 
 async function setFiledArt(j) {
-  if (filedArt.id === j.id) return;
-  filedArt = { id: j.id, image: null };
+  if (j.id in filedArts) return;
+  filedArts[j.id] = null;
   // The title first, then the disc label: the lookup is strict, and either alone can
   // miss where the other is certain.
   let hit = null;
@@ -1262,14 +1304,13 @@ async function setFiledArt(j) {
     catch (e) { return; }
     if (hit && hit.ok) break;
   }
-  if (filedArt.id !== j.id || !hit || !hit.ok) return;
+  if (!hit || !hit.ok) return;
   await new Promise((res) => {
     const img = new Image();
     img.onload = img.onerror = res;
     img.src = hit.image;
   });
-  if (filedArt.id !== j.id) return;
-  filedArt.image = hit.image;
+  filedArts[j.id] = hit.image;
   if ((location.hash.replace(/^#\//, "").split("/")[0] || "queue") === "queue") route({ live: true });
 }
 
@@ -1402,7 +1443,8 @@ function applyTheme(name) {
   if (meta) meta.content = name === "win98" ? "#000080" : "#241155";
 }
 
-async function showDiscDetails() {
+async function showDiscDetails(device = "") {
+  const q = device ? `?device=${encodeURIComponent(device)}` : "";
   const dlg = document.createElement("dialog");
   dlg.className = "notice-dialog disc-dlg";
   document.body.appendChild(dlg);
@@ -1412,14 +1454,15 @@ async function showDiscDetails() {
 
   const paint = async () => {
     let d;
-    try { d = await api.get("/api/disc/details"); }
+    try { d = await api.get(`/api/disc/details${q}`); }
     catch (e) { dlg.innerHTML = `<div class="result bad">${esc(e.message)}</div>`; return; }
     const titles = d.titles || [];
     dlg.innerHTML = `
       <div class="dlg-head"><h3>${esc((d.drive && d.drive.label) || "Disc")}</h3>
         <span class="grow"></span>${familyTag(d.family)}
         <button class="icon-btn" data-close title="Close">${icon("xmark")}</button></div>
-      ${(state.status && state.status.drives || []).map(x => `<p class="disc-drive">${icon("compact-disc")}
+      ${(state.status && state.status.drives || []).filter(x => !d.device || x.device === d.device)
+          .map(x => `<p class="disc-drive">${icon("compact-disc")}
           ${esc(driveName(x))} <span class="muted">${esc(x.device || "")}</span> ${driveTags(x)}</p>`).join("")}
       <p class="muted">${d.drive ? esc([d.drive.vendor, d.drive.model].filter(Boolean).join(" ")) + " · " : ""}${
         d.source === "job" ? "From the rip in progress."
@@ -1451,7 +1494,7 @@ async function showDiscDetails() {
       }).join("")}</div>
       <div class="btn-row">
         ${titles.length ? `<button class="btn" data-copy>Copy as text</button>` : ""}
-        ${d.raw ? `<a class="btn" href="/api/disc/raw" download>MakeMKV's raw output</a>` : ""}
+        ${d.raw ? `<a class="btn" href="/api/disc/raw${q}" download>MakeMKV's raw output</a>` : ""}
         <button class="btn" data-close>Close</button>
       </div>`;
     paintIcons(dlg);
@@ -1464,7 +1507,7 @@ async function showDiscDetails() {
     const scan = dlg.querySelector("[data-scan]");
     if (scan) scan.onclick = async () => {
       scan.disabled = true;
-      try { await api.post("/api/disc/scan", {}); } catch (e) { toast(e.message, "bad"); }
+      try { await api.post("/api/disc/scan", { device }); } catch (e) { toast(e.message, "bad"); }
       paint();
     };
     clearTimeout(timer);
@@ -1861,7 +1904,7 @@ function tray(drives, optical, canRip) {
     <p>${what ? `${esc(what)} \u2014 loaded and ready.` : "Loaded and ready."}</p>
     ${d.space_warning ? `<p class="why warn-text">${esc(d.space_warning)}</p>` : ""}
     ${canRip ? `<div class="btn-row tray-go">
-      <button class="btn primary" id="rip-now">${icon("play")} Rip this disc</button>
+      <button class="btn primary" data-rip="${esc(d.device || "")}">${icon("play")} Rip this disc</button>
     </div>` : ""}
     ${driveLine(d)}
   </div>`;
@@ -3818,16 +3861,16 @@ let liveTimer = null;
    render. The queue re-renders every 2.5s during a rip, so anything that faded itself
    in on each render would strobe. Painting the same background-image is a no-op for
    the browser, so it simply sits there. */
-let artState = { label: null, image: null };
+// label -> poster, per disc: with two drives there are two discs to show at once.
+const discArt = {};
+const artFor = (label) => (label && (discArt[label] || {}).image) || null;
 
 async function setDiscArt(label) {
-  if (!label) { artState = { label: null, image: null }; return; }
-  if (label === artState.label) return;      // same disc, already decided
-  artState = { label: label, image: null };
+  if (!label || discArt[label]) return;      // no disc, or already decided
+  discArt[label] = { image: null };
   let hit;
   try { hit = await api.get(`/api/artwork?label=${encodeURIComponent(label)}`); }
-  catch (e) { return; }                       // offline: no backdrop, no complaint
-  if (artState.label !== label) return;       // disc changed while we were asking
+  catch (e) { delete discArt[label]; return; }   // offline: no backdrop, try again later
   if (!hit || !hit.ok) return;                // not sure enough: show nothing
   // Decode before painting, so it appears complete rather than in bands, and so a
   // failed image never leaves a half-painted panel.
@@ -3836,9 +3879,7 @@ async function setDiscArt(label) {
     img.onload = img.onerror = res;
     img.src = hit.image;
   });
-  if (artState.label !== label) return;
-  artState.image = hit.image;
-  artState.title = hit.title;
+  discArt[label] = { image: hit.image, title: hit.title };
   if ((location.hash.replace(/^#\//, "").split("/")[0] || "queue") === "queue") route({ live: true });
 }
 
@@ -4112,15 +4153,13 @@ function wireContent(section, sub) {
     route();
   };
 
-  const discBtn = $("#t-disc");
-  if (discBtn) discBtn.onclick = () => showDiscDetails();
+  $$("[data-disc]").forEach(b => b.onclick = () => showDiscDetails(b.dataset.disc || ""));
   const refresh = $("#t-refresh");
   if (refresh) refresh.onclick = () => route();
-  const eject = $("#t-eject");
-  if (eject) eject.onclick = async () => {
-    const r = await api.post("/api/drive/eject");
+  $$("[data-eject]").forEach(b => b.onclick = async () => {
+    const r = await api.post("/api/drive/eject", { device: b.dataset.eject || "" });
     toast(r.message, r.ok ? "ok" : "bad");
-  };
+  });
 
   // Offered when the diagnosis says the drive is probably in the socket that cannot
   // host. Reboots, so it borrows the same full-screen overlay as restart.
@@ -4214,15 +4253,16 @@ function wireContent(section, sub) {
     if (open) histOpen.add(k); else histOpen.delete(k);
   });
 
-  const filedX = $("#filed-dismiss");
-  if (filedX) filedX.onclick = () => {
-    try { localStorage.setItem(FILED_KEY, filedX.dataset.job); } catch (e) { /* fine */ }
+  $$("[data-filed-dismiss]").forEach(b => b.onclick = () => {
+    const ids = dismissedFiled().concat(String(b.dataset.filedDismiss)).slice(-20);
+    try { localStorage.setItem(FILED_KEY, JSON.stringify(ids)); } catch (e) { /* fine */ }
     // Focus goes to what replaced the card, not to the top of the page.
     route().then(() => focusHeading());
-  };
+  });
 
-  const mk = $("#np-mk");
-  if (mk) mk.ontoggle = () => { state.mkOpen = mk.open; };
+  $$("[data-mk]").forEach(mk => mk.ontoggle = () => {
+    state.mkOpen = Object.assign(state.mkOpen || {}, { [mk.dataset.mk]: mk.open });
+  });
 
   const ripOpts = $("#rip-opts");
   if (ripOpts) ripOpts.ontoggle = () => {
@@ -4230,8 +4270,7 @@ function wireContent(section, sub) {
     $(".ropt-change", ripOpts).textContent = ripOpts.open ? "Done" : "Change";
   };
 
-  const ripNow = $("#rip-now");
-  if (ripNow) ripNow.onclick = async () => {
+  $$("[data-rip]").forEach(ripNow => ripNow.onclick = async () => {
     // Say something immediately. Starting a rip reads the disc before the job exists,
     // and on a real encrypted DVD that scan is *nine minutes*, not the few seconds
     // this comment used to claim -- so `POST /api/rip` is a nine-minute request. The
@@ -4241,7 +4280,7 @@ function wireContent(section, sub) {
     const was = ripNow.innerHTML;
     ripNow.innerHTML = `<span class="spin"></span> Starting\u2026`;
     try {
-      await api.post("/api/rip", {});
+      await api.post("/api/rip", { device: ripNow.dataset.rip || "" });
     } catch (e) {
       toast(e.message, "bad");
       ripNow.innerHTML = was;
@@ -4249,7 +4288,7 @@ function wireContent(section, sub) {
       return;
     }
     route();   // the job now exists, so the panel becomes the progress view
-  };
+  });
 
   $$("[data-cancel]").forEach(b => b.onclick = async () => {
     if (!confirm("Cancel this rip?\n\nAnything done so far is discarded.")) return;
