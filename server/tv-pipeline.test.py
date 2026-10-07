@@ -94,6 +94,8 @@ def new_job(label):
 
 print("settings and schema came up")
 db.init()
+# Resuming and re-checking a season work from the kept copy; off by default.
+db.set("keep_local_copy", True)
 db.set("setup_complete", True)
 db.set("tv_metadata", False)          # no network in a test; names come from numbers
 db.set("on_season_disc", "auto")      # exercise the unattended path first

@@ -2750,7 +2750,8 @@ def _verify(job, s, transport, name, local_path):
     if not r.get("ok"):
         raise RipFailed("The file reached your library but didn't verify: %s"
                         % r.get("error"))
-    db.update_job(job["id"], verified_mode=r.get("mode") or mode)
+    db.update_job(job["id"], verified_mode=r.get("mode") or mode,
+                  **({"sha256": r["sha256"]} if r.get("sha256") else {}))
 
 
 # ── stage 5: tidy up ──
@@ -2765,11 +2766,12 @@ def _finish(job, s, transport, name, local_path, sent_from_card=False):
                        disc_family=job.get("disc_family"),
                        title_index=job.get("chosen_title"), job_id=job["id"])
 
-    # D6: a verified copy is kept until the space is needed, so a downstream problem
-    # is a re-copy rather than a re-rip. "Not now" is the only correct time to delete
-    # something that took forty minutes to make.
-    if not s.get("keep_local_copy", True):
+    # Verified and in the library, so the staged copy goes now. What it was -- size,
+    # checksum, where it went -- stays on the job for History. Keeping the copy until
+    # the room is needed is a setting (keep_local_copy), off by default.
+    if not s.get("keep_local_copy", False):
         _cleanup_staging(job)
+        db.update_job(job["id"], local_path=None)
 
     db.update_job(job["id"], state="done", phase=None, finished_at=now,
                   eta_seconds=None, error=None,
@@ -2800,8 +2802,9 @@ def _finish_season(job, s, transport, folder, base, sent_from_card=False):
                        series_name=plan.get("series"),
                        first_episode=rows[0]["episode"] if rows else None,
                        job_id=job["id"])
-    if not s.get("keep_local_copy", True):
+    if not s.get("keep_local_copy", False):
         _cleanup_staging(job)
+        db.update_job(job["id"], local_path=None)
 
     db.update_job(job["id"], state="done", phase=None, finished_at=now,
                   eta_seconds=None, error=None, episode_plan=plan,

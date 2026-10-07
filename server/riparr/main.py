@@ -91,6 +91,27 @@ def _check_password_reset():
         return
 
 
+def _stop_keeping_copies():
+    """0.9.1 stopped keeping a verified rip's staged copy. Once, on the way up: turn
+    the old default off, and clear the copies that are already safely on the share --
+    in the background, since it asks the share about each one."""
+    if db.get("kept_copies_cleared"):
+        return
+    db.set("kept_copies_cleared", True)
+    db.set("keep_local_copy", False)
+
+    def clear():
+        try:
+            freed, notes = RIP.purge_staging()
+            if freed:
+                SY.component("Setup").info(
+                    "Cleared %d MiB of rips already in your library from staging: %s",
+                    freed // 2 ** 20, ", ".join(notes))
+        except Exception as e:
+            SY.component("Setup").warning("Couldn't clear old copies from staging: %s", e)
+    threading.Thread(target=clear, name="riparr-clear-kept", daemon=True).start()
+
+
 @app.on_event("startup")
 def _startup():
     db.init()
@@ -99,6 +120,7 @@ def _startup():
     _check_password_reset()
     for key in NM.upgrade_saved_templates(db.get, db.set):
         SY.component("Setup").info("Updated the saved %s to the current TRaSH preset.", key)
+    _stop_keeping_copies()
     SY.start_scheduler()
     RIP.start()
 

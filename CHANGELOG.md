@@ -16,13 +16,15 @@ doesn't display the line.
 
 ## Unreleased
 
-**"Not enough room" no longer counts the copies Riparr keeps.** A finished rip's staged
-copy is kept until the space is needed, so a problem on the share is a re-copy rather
-than a re-rip, and it's deleted the moment a disc needs the room. The sidebar and the
-Queue's space warning counted those copies as used, and said "Not enough room for another
-disc" when there was. They now count as room, and the sidebar says when the room comes
-from clearing them. To delete each copy as soon as it's in your library instead, turn off
-**Settings → Ripping → Keep the local copy**.
+**Staging is cleared as soon as a rip is safe.** Once a rip is in your library and has
+passed its check, its staged copy is deleted. History keeps the record: its size, where
+it went, and its SHA-256 when the full check ran (shown when you open the disc in
+History). Before, copies stayed until the space was needed, which filled staging and made
+the sidebar say "Not enough room for another disc" when there was room. Updating turns
+this on and clears the copies already sitting there, once each is confirmed on your share
+at the right size. To keep copies anyway, turn on **Settings → Ripping → Keep a copy in
+staging**; the room they take then counts as free, since they're cleared when a disc
+needs it.
 
 ## 0.9.0
 

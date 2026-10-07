@@ -55,7 +55,7 @@ os.makedirs(P.STAGING, exist_ok=True)
 db.init()
 db.set("setup_complete", True)
 db.set("transfer_mode", "burst")
-db.set("verify_mode", "quick")
+db.set("verify_mode", "deep")
 db.set("on_unknown_disc", "label")
 db.add_share("Media", "nas", "Media", None, None, make_default=True)
 
@@ -177,6 +177,10 @@ for j in (a, b):
 check("each disc came out of its own tray", sorted(ejected), ["/dev/sr0", "/dev/sr1"])
 films = sorted(os.listdir(os.path.join(SH.MOCK_SHARE_ROOT, "nas", "Media", "Movies")))
 check("and both films are in the library", len(films), 2)
+check("their staged copies are gone once verified",
+      ([db.get_job(j)["local_path"] for j in (a, b)], sorted(os.listdir(P.STAGING))), ([None, None], []))
+check("and the checksum is kept for History",
+      [len(db.get_job(j)["sha256"] or "") for j in (a, b)], [64, 64])
 
 print("what each drive did is kept apart")
 check("the last rip from each drive", (db.last_finished(0, device="/dev/sr1")["id"],

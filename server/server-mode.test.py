@@ -272,6 +272,16 @@ check("and says the room comes from clearing them",
 check("room that's free anyway says nothing about it",
       "clears" in main._capacity(200 * GB, direct=False, kept=(1 * GB, 1))["phrase"], False)
 
+print("verified copies aren't kept any more")
+check("a fresh install doesn't keep them", db.DEFAULTS["keep_local_copy"], False)
+db.set("keep_local_copy", True)                 # how every earlier install was
+db.set("kept_copies_cleared", None)
+main._stop_keeping_copies()
+check("upgrading turns the old default off", db.get("keep_local_copy"), False)
+db.set("keep_local_copy", True)                 # somebody who wants them back
+main._stop_keeping_copies()
+check("but only once, so turning it back on sticks", db.get("keep_local_copy"), True)
+
 print("the live log")
 import logging  # noqa: E402
 from riparr import system as SY  # noqa: E402

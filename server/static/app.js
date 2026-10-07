@@ -2213,7 +2213,8 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
         <span class="hg-chev">${icon("chevron-down")}</span>
       </button>
       <div class="hg-body" id="hg-${esc(k).replace(/[^a-z0-9]/gi, "-")}"${open ? "" : " hidden"}>
-        ${good && good.dest_path ? `<div class="hg-full muted">${esc(good.dest_path)}</div>` : ""}
+        ${good && good.dest_path ? `<div class="hg-full muted">${esc(good.dest_path)}${good.sha256
+          ? `<br>SHA-256 ${esc(good.sha256)}` : ""}</div>` : ""}
         <table class="hist-table"><tbody>${body}</tbody></table>
         ${folded ? `<button class="btn sm hg-more" type="button" data-hgshow="${esc(k)}">Show ${folded} more successful rip${folded === 1 ? "" : "s"}</button>` : ""}
       </div>
@@ -2750,8 +2751,8 @@ settingsPages.ripping = async (s) => {
              whole rip again: it roughly doubles the time after a rip and needs
              <b>as much free staging space as the film itself</b>, on top of the
              rip. Worth it for an archive you will never re-rip; overkill for most.`}</span></label>
-    ${sw("keep_local_copy", "Keep the local copy", s.keep_local_copy,
-        "Retains the rip until the space is needed, so a downstream problem is a re-copy rather than a re-rip.")}
+    ${sw("keep_local_copy", "Keep a copy in staging", s.keep_local_copy,
+        "Off: once a rip is in your library and has passed its check, the staged copy is deleted. History keeps its size, checksum and where it went. On: the copy stays until the room is needed, so a problem on the share can be re-copied rather than re-ripped.")}
   </div></div>
 
   <div class="section"><h2>Already-ripped discs</h2><div>

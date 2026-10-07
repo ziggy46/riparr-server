@@ -120,6 +120,8 @@ db.set("rip_mode", "backup")
 db.set("transfer_mode", "burst")
 db.set("verify_mode", "quick")
 db.set("on_unknown_disc", "label")
+# Kept copies are what the purge and resend checks below are about; off by default.
+db.set("keep_local_copy", True)
 
 # ── the command lines ────────────────────────────────────────────────────────
 

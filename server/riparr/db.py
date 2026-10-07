@@ -126,6 +126,9 @@ ADDED_COLUMNS = {
         # has to know which tray to read from and which to open when it's done. NULL on
         # jobs from before there could be more than one, which mean "the drive".
         ("device", "TEXT"),
+        # SHA-256 of the file in the library, when the full check computed one. Kept
+        # for History after the staged copy itself is gone.
+        ("sha256", "TEXT"),
     ],
     "discs": [
         ("title_index", "INTEGER"),    # the remembered title choice (R5: fix once, ever)
@@ -250,7 +253,9 @@ DEFAULTS = {
     # hashing it against itself is a success it did not earn -- see rip._verify, which
     # downgrades to quick, and DIRECT_FORBIDS below, which stops it being offered.
     "verify_mode": "quick",
-    "keep_local_copy": True,
+    # Off: a verified rip's staged copy is deleted as soon as it's in the library. Its
+    # record -- size, checksum, where it went -- stays in History.
+    "keep_local_copy": False,
     # Looks the disc up on Wikipedia to put its poster faintly behind the page. It is
     # the only feature that tells an outside server what you are ripping, so it is a
     # setting rather than an assumption -- and purely decorative when off.
