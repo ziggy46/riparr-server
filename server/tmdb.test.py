@@ -182,7 +182,7 @@ media = R._media_for(job, 0)
 plex = [p["template"] for p in N.MOVIE_PRESETS if p["id"] == "trash-plex"][0]
 check("the Plex preset gets {tmdb-78}",
       R._render_template(plex, "Blade Runner", 1982, source="bluray", media=media),
-      "Blade Runner (1982)/Blade Runner (1982) {tmdb-78} [Remux-1080p][DTS-HD MA 5.1][AVC].mkv")
+      "Blade Runner (1982) {tmdb-78}/Blade Runner (1982) {tmdb-78} [Remux-1080p][DTS-HD MA 5.1][AVC].mkv")
 check("and {ImdbId} the IMDb one",
       R._render_template("{Title} [imdbid-{ImdbId}].mkv", "Blade Runner", media=media),
       "Blade Runner [imdbid-tt0083658].mkv")
