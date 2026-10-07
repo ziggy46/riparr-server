@@ -163,12 +163,17 @@ else
       tag="$(api releases/latest | json '["tag_name"]')" || die "couldn't ask GitHub for the latest release"
       ref="refs/tags/$tag"; CHANNEL=latest ;;
   esac
-  say "downloading ${ref#refs/tags/} from github.com/$REPO"
+  case "$WANT" in
+    edge) say "downloading the newest code on main (${COMMIT:0:7}) from github.com/$REPO" ;;
+    *) say "downloading ${ref#refs/tags/} from github.com/$REPO" ;;
+  esac
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$ref" -o "$work/src.tar.gz" \
     || die "couldn't download it"
   mkdir "$work/src"
   tar -xzf "$work/src.tar.gz" -C "$work/src" --strip-components=1
   src_dir="$work/src"
+  # A version from before this installer existed would leave nothing to update it with.
+  [ -f "$src_dir/deploy/install.sh" ] || die "${ref#refs/tags/} is older than installing without Docker. Use --edge until a newer release is out."
   bash "$src_dir/deploy/install-tools.sh" --host
 fi
 
