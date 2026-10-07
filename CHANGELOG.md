@@ -14,7 +14,7 @@ doesn't display the line.
 
 ---
 
-## Unreleased
+## 0.10.1
 
 - **The watch folder setting is gone** from Settings → Library. It was never wired up:
   rips always went to the folders above it, whatever it said. If you run Tdarr or
