@@ -20,6 +20,12 @@ services:
       - "9797:9797"
     # Lets Riparr use any optical drive the host has, and pick one up when it's plugged
     # in later, without naming device nodes: sr* is block major 11, sg* char major 21.
+    # MakeMKV hangs at 100% CPU under Docker's default limit of ~1 billion open files.
+    # Riparr caps it at start-up too; this keeps it right if that ever changes.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     device_cgroup_rules:
       - "b 11:* rmw"
       - "c 21:* rmw"

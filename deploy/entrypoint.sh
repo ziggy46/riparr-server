@@ -54,6 +54,15 @@ fi
 
 # ── 4. Riparr ──
 umask "${UMASK:-022}"
+
+# Recent Docker gives containers an open-files limit of about a billion. MakeMKV closes
+# every possible descriptor, one by one, before starting its helper process -- so with
+# that limit it sits at 100% CPU for half an hour and never reads the disc. Cap the soft
+# limit; nothing here needs more than a few thousand.
+NOFILE_CAP="${RIPARR_NOFILE:-65536}"
+if [ "$(ulimit -n)" = "unlimited" ] || [ "$(ulimit -n)" -gt "$NOFILE_CAP" ] 2>/dev/null; then
+  ulimit -n "$NOFILE_CAP" 2>/dev/null || ulimit -Sn "$NOFILE_CAP" 2>/dev/null || true
+fi
 CMD=(/opt/riparr/.venv/bin/python -m uvicorn riparr.main:app
      --host "${RIPARR_HOST:-0.0.0.0}" --port "${RIPARR_PORT:-9797}" "$@")
 if [ "$PUID" = 0 ]; then

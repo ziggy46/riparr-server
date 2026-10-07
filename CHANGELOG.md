@@ -16,6 +16,11 @@ doesn't display the line.
 
 ## Unreleased
 
+**Fixed: MakeMKV could hang at 100% CPU and never read the disc.** Recent Docker gives
+containers an open-files limit of about a billion, and MakeMKV closes every possible file
+handle before it starts reading -- which takes forever. Riparr now caps the limit when it
+starts, and the compose file sets it too.
+
 **A new layout.** The Queue shows the disc being ripped as one large card, phones get
 tabs at the bottom, History is grouped by disc, and Settings are shorter. It replaces the
 old *arr-style layout; there's no switch back.
