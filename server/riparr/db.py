@@ -156,6 +156,9 @@ ADDED_COLUMNS = {
         # "Dune (2021)" with no TMDb key came back as plain "Dune".
         ("year", "INTEGER"),
         ("release_id", "TEXT"),        # an audio CD's MusicBrainz release, once chosen
+        # The poster found for it, so Discs shows it at once instead of looking every
+        # film up again on every visit.
+        ("art_url", "TEXT"),
     ],
 }
 
@@ -692,6 +695,13 @@ def job_for_remote_name(name):
     return dict(row) if row else None
 
 
+def set_disc_art(fingerprints, url):
+    c = conn()
+    c.executemany("UPDATE discs SET art_url=? WHERE fingerprint=?",
+                  [(url, f) for f in fingerprints])
+    c.commit()
+
+
 def forget_disc(fingerprint):
     c = conn()
     c.execute("DELETE FROM discs WHERE fingerprint=?", (fingerprint,))
@@ -931,6 +941,13 @@ def job_for_fingerprint(fingerprint, states=None):
     q += " ORDER BY id DESC LIMIT 1"
     row = conn().execute(q, args).fetchone()
     return dict(row) if row else None
+
+
+def jobs_for_fingerprint(fingerprint, limit=50):
+    """Every rip of one disc, newest first."""
+    return [dict(r) for r in conn().execute(
+        "SELECT * FROM jobs WHERE fingerprint=? ORDER BY id DESC LIMIT ?",
+        (fingerprint, limit))]
 
 
 def get_disc(fingerprint):

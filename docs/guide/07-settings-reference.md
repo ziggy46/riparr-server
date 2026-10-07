@@ -330,6 +330,10 @@ rip attempt is listed; this page is what you have.
 A film with more than one disc (a DVD and a Blu-ray, or a box set) has a **Discs…** menu
 instead, with these two for each disc.
 
+**Click a tile** (its poster or name) for what Riparr knows about it: where each disc
+went in your library, when, its size, how it was checked, how many times it's been
+ripped, an album's tracks, and a link to its TMDb or MusicBrainz page.
+
 This is what makes Riparr only ask you about a problem disc once, ever. A tile with a
 warning triangle is a disc Riparr has seen but never finished a verified rip of.
 

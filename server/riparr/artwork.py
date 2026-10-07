@@ -27,11 +27,15 @@ name the URL -- it gets an opaque token for a URL *we* resolved -- because an en
 that fetches whatever a caller asks for is an open proxy sitting inside the LAN.
 """
 import difflib
+import hashlib
+import os
 import re
 import threading
 import time
 import urllib.parse
 import urllib.request
+
+from . import db
 
 SEARCH = "https://en.wikipedia.org/w/api.php"
 UA = "riparr-server (+https://github.com/ziggy46/riparr-server) python-urllib"
@@ -93,41 +97,80 @@ def _get(url, timeout=12):
         return r.read(6 * 1024 * 1024), r.headers.get("Content-Type", "")
 
 
-# token -> (url, content_type, bytes, fetched_at). Bounded; this is decoration, and a
-# box that rips discs all day must not grow a picture cache in RAM for ever.
+# token -> source URL. The token is a hash of the URL, the same in every process, so the
+# browser can keep a picture for good: the same address is always the same picture.
 _images = {}
 _images_lock = threading.Lock()
-# Sized for the rips gallery rather than the one disc in the tray. Posters are ~70-150
-# KB each, so this is a couple of megabytes at worst on a box with 969 MB.
-MAX_IMAGES = 48
-IMAGE_TTL = 6 * 3600
+MAX_TOKENS = 5000
+
+# The pictures themselves live on disk beside the database, so a restart, or a second
+# visit to Discs, doesn't fetch every poster again. Bounded: posters are ~70-150 KB
+# and covers a little more, so this is a few hundred of them.
+CACHE_DIR = os.path.join(os.path.dirname(db.DB_PATH), "artwork")
+CACHE_BYTES = 80 * 2 ** 20
+_TYPES = {b"\xff\xd8\xff": "image/jpeg", b"\x89PN": "image/png", b"RIFF": "image/webp",
+          b"GIF": "image/gif"}
+
+
+def _token(url):
+    return hashlib.sha1(url.encode("utf-8")).hexdigest()[:20]
 
 
 def _remember(url):
-    token = "%08x" % (abs(hash(url)) & 0xFFFFFFFF)
+    token = _token(url)
     with _images_lock:
-        now = time.time()
-        for k in [k for k, v in _images.items() if now - v[3] > IMAGE_TTL]:
-            _images.pop(k, None)
-        while len(_images) >= MAX_IMAGES:
-            _images.pop(min(_images, key=lambda k: _images[k][3]), None)
-        _images.setdefault(token, (url, None, None, time.time()))
+        if token not in _images and len(_images) >= MAX_TOKENS:
+            _images.pop(next(iter(_images)), None)
+        _images[token] = url
     return token
+
+
+def _ctype(blob):
+    return next((t for sig, t in _TYPES.items() if blob.startswith(sig)), "image/jpeg")
+
+
+def _cached(token):
+    try:
+        with open(os.path.join(CACHE_DIR, token), "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def _store(token, blob):
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        tmp = os.path.join(CACHE_DIR, ".%s.tmp" % token)
+        with open(tmp, "wb") as f:
+            f.write(blob)
+        os.replace(tmp, os.path.join(CACHE_DIR, token))
+        files = [os.path.join(CACHE_DIR, n) for n in os.listdir(CACHE_DIR)
+                 if not n.startswith(".")]
+        files.sort(key=lambda x: os.path.getatime(x))
+        total = sum(os.path.getsize(x) for x in files)
+        while files and total > CACHE_BYTES:
+            old = files.pop(0)
+            total -= os.path.getsize(old)
+            os.remove(old)
+    except OSError:
+        pass                          # decoration: no cache is slower, not broken
 
 
 def image_bytes(token):
     """(bytes, content_type) for a token this process issued, or (None, None).
 
     The fetch happens here rather than at match time so a page that never renders the
-    backdrop costs no bandwidth.
+    picture costs no bandwidth. Once fetched it's kept on disk.
     """
-    with _images_lock:
-        entry = _images.get(token)
-    if not entry:
+    if not re.fullmatch(r"[0-9a-f]{20}", token or ""):
         return None, None
-    url, ctype, blob, at = entry
-    if blob is not None:
-        return blob, ctype
+    blob = _cached(token)
+    if blob:
+        return blob, _ctype(blob)
+    with _images_lock:
+        url = _images.get(token)
+    if not url:
+        return None, None
     host = urllib.parse.urlparse(url).hostname or ""
     if host not in ALLOWED_HOSTS:
         return None, None
@@ -137,8 +180,7 @@ def image_bytes(token):
         return None, None
     if not ctype.startswith("image/"):
         return None, None
-    with _images_lock:
-        _images[token] = (url, ctype, blob, time.time())
+    _store(token, blob)
     return blob, ctype
 
 
@@ -158,8 +200,9 @@ def look_up(label):
         found = tmdb.identify(label)
         film = found["match"]
         if film and film.get("poster_path"):
+            url = tmdb.poster_url(film["poster_path"])
             return {"title": tmdb.display_name(film), "confidence": 1.0,
-                    "token": _remember(tmdb.poster_url(film["poster_path"])),
+                    "token": _remember(url), "url": url,
                     "source": "tmdb", "tmdb_id": film["id"]}
         # TMDb knows several films by exactly this name and wouldn't choose. Wikipedia
         # can't know better -- it would just pick one of them -- so show nothing.
@@ -200,6 +243,6 @@ def look_up(label):
         _lookup_cache[name] = None
         return None
     result = {"title": best[1], "confidence": round(best[0], 3),
-              "token": _remember(best[2])}
+              "token": _remember(best[2]), "url": best[2]}
     _lookup_cache[name] = result
     return result

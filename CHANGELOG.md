@@ -37,6 +37,14 @@ doesn't display the line.
 - **Discs is your collection.** One tile per film, show or album, with all its discs
   inside, and Films / TV / Music filters. Forget sits in a menu, away from Rip again, and
   Rip again, Cancel and Skip ask first in Riparr's own dialog, naming the drive.
+- **Discs opens instantly, and tells you more.** Posters are remembered for each disc
+  and kept on the box, so the page doesn't look every film up again on each visit, and
+  the browser keeps them. Click a tile for what Riparr knows about it: where each disc
+  went, when, how it was checked (with its SHA-256 after a full check), how many times
+  it's been ripped, an album's tracks, and a link to TMDb or MusicBrainz. The tile's
+  buttons line up across a row.
+- **History's timings have room to breathe**, and the stage key stays on one line, or
+  splits evenly on a phone, instead of leaving *Verifying* on its own.
 - **Each setting in one place.** The rip options are set on **Settings → Ripping**; the
   Queue shows a one-line summary that links there. MakeMKV has its own settings page.
   Library lets you **Test** a share again or change its **Sign-in**, and "Share hasn't been

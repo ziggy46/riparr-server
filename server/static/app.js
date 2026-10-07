@@ -1497,6 +1497,83 @@ function askDialog({ title, body = "", ok = "OK", cancel = "Cancel", danger = fa
   });
 }
 
+/* A Discs tile, opened: what Riparr knows about the film or album and each disc of it --
+   where it went, how it was checked, how many times it's been ripped. */
+async function showShelfInfo(fps, el) {
+  const fig = el.closest("figure");
+  const name = (fig && $(".rip-title", fig)?.textContent.trim()) || "Disc";
+  const artEl = fig && $(".rip-art", fig);
+  const bg = artEl && artEl.classList.contains("has") ? artEl.style.backgroundImage : "";
+  const square = artEl && artEl.classList.contains("square");
+  const dlg = document.createElement("dialog");
+  dlg.className = "notice-dialog disc-dlg shelf-dlg";
+  dlg.setAttribute("aria-label", name);
+  dlg.innerHTML = `<div class="result busy"><span class="spin"></span><span>Loading…</span></div>`;
+  document.body.appendChild(dlg);
+  const close = () => { dlg.close(); dlg.remove(); };
+  dlg.addEventListener("cancel", (e) => { e.preventDefault(); close(); });
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) close(); });
+  dlg.showModal();
+  let info;
+  try { info = await Promise.all(fps.map(fp => api.get(`/api/discs/${encodeURIComponent(fp)}`))); }
+  catch (e) { dlg.innerHTML = `<div class="result bad">${esc(e.message)}</div>
+    <div class="btn-row"><button class="btn" data-close>Close</button></div>`;
+    dlg.querySelector("[data-close]").onclick = close; return; }
+  const first = info[0].disc;
+  const kind = first.kind || "movie";
+  const links = [];
+  if (first.tmdb_id) links.push(`<a href="https://www.themoviedb.org/${kind === "tv" ? "tv" : "movie"}/${
+    encodeURIComponent(first.tmdb_id)}" target="_blank" rel="noopener">TMDb ${icon("arrow-up-right-from-square")}</a>`);
+  if (first.release_id) links.push(`<a href="https://musicbrainz.org/release/${
+    encodeURIComponent(first.release_id)}" target="_blank" rel="noopener">MusicBrainz ${icon("arrow-up-right-from-square")}</a>`);
+  const checked = (j) => j.verified_mode === "deep" ? "full check passed"
+    : j.verified_mode && j.verified_mode !== "off" ? "size check passed" : "not checked";
+  const discs = info.map(({ disc: d, jobs }) => {
+    const done = jobs.filter(j => j.state === "done");
+    const last = done[0];
+    const failed = jobs.filter(j => j.state === "failed").length;
+    const tracks = last && last.music && last.music.tracks || [];
+    const size = last && (last.bytes_sent || last.bytes_ripped) || d.size_bytes;
+    return `<div class="shelf-disc">
+      <div class="shelf-disc-h"><b>${esc(pretty(d.label || "") || "Disc")}</b>${familyTag(d.disc_family)}
+        <span class="grow"></span>
+        <button class="btn tiny" data-shelf-rerip="${esc(d.fingerprint)}">Rip again</button>
+        <button class="btn tiny quiet-danger" data-shelf-forget="${esc(d.fingerprint)}">Forget</button></div>
+      <div class="kv">
+        ${last ? `<div class="k">In your library</div><div class="v"><code>${esc(last.dest_path || "")}</code></div>
+          <div class="k">Ripped</div><div class="v">${esc(stamp(last.finished_at))} <span class="muted">(${esc(ago(last.finished_at))})</span></div>
+          ${size ? `<div class="k">Size</div><div class="v">${esc(filesize(size))}${
+            last.output === "backup" ? " \u00b7 full-disc backup" : ""}</div>` : ""}
+          <div class="k">Checked</div><div class="v">${esc(checked(last))}${last.sha256
+            ? `<div class="muted shelf-hash">SHA-256 <code>${esc(last.sha256)}</code></div>` : ""}</div>`
+        : `<div class="k">In your library</div><div class="v muted">Not yet: no rip of it has finished.</div>`}
+        <div class="k">Rips</div><div class="v">${done.length} finished${failed ? `, ${failed} failed` : ""}
+          \u00b7 <a href="#/history" data-close>History</a></div>
+      </div>
+      ${tracks.length ? `<ol class="cd-tracks">${tracks.map(t => `<li><span>${esc(t.title || `Track ${t.number}`)}</span>
+          <span class="muted">${t.seconds ? esc(clockTime(t.seconds)) : ""}</span></li>`).join("")}</ol>` : ""}
+    </div>`;
+  }).join("");
+  dlg.innerHTML = `
+    <div class="dlg-head"><h3>${esc(name)}</h3><span class="grow"></span>
+      <button class="icon-btn" data-close aria-label="Close">${icon("xmark")}</button></div>
+    <div class="shelf-top">
+      ${bg ? `<div class="shelf-art${square ? " square" : ""}" style='background-image:${bg}'></div>` : ""}
+      <div class="shelf-facts">
+        <div class="muted">${esc({ movie: "Film", tv: "TV", music: "Album" }[kind] || "Disc")}${
+          info.length > 1 ? ` \u00b7 ${info.length} discs` : ""}</div>
+        ${links.length ? `<div class="shelf-links">${links.join("")}</div>` : ""}
+      </div>
+    </div>
+    ${discs}`;
+  dlg.querySelectorAll("[data-close]").forEach(b => b.addEventListener("click", close));
+  // The tile's own buttons do the work, so these behave exactly the same way.
+  dlg.querySelectorAll("[data-shelf-rerip]").forEach(b => b.onclick = () => {
+    close(); document.querySelector(`.rip [data-rerip="${CSS.escape(b.dataset.shelfRerip)}"]`)?.click(); });
+  dlg.querySelectorAll("[data-shelf-forget]").forEach(b => b.onclick = () => {
+    close(); document.querySelector(`.rip [data-forget="${CSS.escape(b.dataset.shelfForget)}"]`)?.click(); });
+}
+
 async function showDiscDetails(device = "") {
   const q = device ? `?device=${encodeURIComponent(device)}` : "";
   const dlg = document.createElement("dialog");
@@ -2416,6 +2493,7 @@ views.discs = async (highlight) => {
     const name = nameOf(d);
     const me = list.some(x => highlight && x.fingerprint === highlight);
     const newest = Math.max(...list.map(x => x.ripped_at || 0));
+    const art = d.art || (list.find(x => x.art) || {}).art;
     const families = [...new Set(list.map(x => x.disc_family).filter(Boolean))];
     const menu = list.map(x => `
         ${list.length > 1 ? `<div class="rip-menu-h">${esc(discWord(x))} ${familyTag(x.disc_family)}</div>` : ""}
@@ -2425,16 +2503,19 @@ views.discs = async (highlight) => {
                 title="Forget this disc, so the next time it goes in it is treated as new.">Forget</button>`).join("");
     return `<figure class="rip${me ? " dupe" : ""}"${me ? ` id="dupe-tile"` : ""}
                     data-kind="${esc(d.kind || "movie")}"${only && (d.kind || "movie") !== only ? " hidden" : ""}
-                    ${d.art ? "" : `data-art="${esc(d.title || d.label || "")}"`}
+                    ${art ? "" : `data-art="${esc(d.title || d.label || "")}"
+                    data-fps="${esc(list.map(x => x.fingerprint).join(","))}"`}
                     data-find="${esc([name, ...list.map(x => x.label), d.year].filter(Boolean).join(" "))}">
-      <div class="rip-art${d.art ? " has" : ""}${d.kind === "music" ? " square" : ""}"${d.art ? ` style="background-image:url('${esc(d.art)}')"` : ""}>
+      <div class="rip-art${art ? " has" : ""}${d.kind === "music" ? " square" : ""}"${art ? ` style="background-image:url('${esc(art)}')"` : ""}
+           role="button" tabindex="0" aria-label="About ${esc(name)}"
+           data-shelf="${esc(list.map(x => x.fingerprint).join(","))}">
         <span class="rip-fallback">${icon("compact-disc")}</span>
         ${families.map(f => familyTag(f, "on-art")).join("")}
         ${!d.ripped_at ? `<span class="rip-flag" title="Seen, but never finished a verified rip">${
           icon("triangle-exclamation")}</span>` : ""}
       </div>
       <figcaption>
-        <div class="rip-title" title="${esc(name)}">${esc(name)}</div>
+        <div class="rip-title" title="${esc(name)}" data-shelf="${esc(list.map(x => x.fingerprint).join(","))}">${esc(name)}</div>
         <div class="rip-meta">${list.length > 1 ? `${list.length} discs \u00b7 ` : ""}${newest ? esc(ago(newest))
                                             : `<span class="bad">never finished</span>`}</div>
       </figcaption>
@@ -2489,22 +2570,24 @@ function pretty(label) {
    normalised title, and a miss simply leaves the disc icon showing -- a film we cannot
    identify is a tile without a picture, never a broken image. */
 async function paintRipArt() {
-  const cards = $$(".rip[data-art]");
-  for (const el of cards) {
+  // All at once rather than one after another, and only for discs that have never had
+  // a poster found: once found, it's remembered and arrives with the page.
+  await Promise.all($$(".rip[data-art]").map(async (el) => {
     const label = el.dataset.art;
-    if (!label || el.dataset.done) continue;
+    if (!label || el.dataset.done) return;
     el.dataset.done = "1";
     let hit;
-    try { hit = await api.get(`/api/artwork?label=${encodeURIComponent(label)}`); }
-    catch (e) { continue; }
-    if (!hit || !hit.ok) continue;
+    try { hit = await api.get(`/api/artwork?label=${encodeURIComponent(label)}&fingerprints=${
+      encodeURIComponent(el.dataset.fps || "")}`); }
+    catch (e) { return; }
+    if (!hit || !hit.ok) return;
     const art = el.querySelector(".rip-art");
     if (art) {
       art.style.backgroundImage = `url("${hit.image}")`;
       art.classList.add("has");
       art.title = hit.title;
     }
-  }
+  }));
 }
 
 /* ── settings ── */
@@ -4822,6 +4905,12 @@ function wireContent(section, sub) {
     await api.put("/api/settings", { theme: themePick.value });
     toast(`Theme set to ${themePick.selectedOptions[0].textContent}`, "ok");
   };
+
+  $$("[data-shelf]").forEach(el => {
+    const open = () => showShelfInfo(el.dataset.shelf.split(",").filter(Boolean), el);
+    el.onclick = open;
+    el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } };
+  });
 
   $$("[data-forget]").forEach(b => b.onclick = () => {
     const fp = b.dataset.forget;

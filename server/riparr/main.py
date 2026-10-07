@@ -1649,8 +1649,25 @@ def discs(user=Depends(require_user)):
         if d.get("release_id"):
             d["art"] = "/api/artwork/image/%s" % ART._remember(
                 MB.cover_url(d["release_id"], 250))
+        elif d.get("art_url"):
+            # A tile is ~180px wide: TMDb's 342px poster is a third of the bytes.
+            d["art"] = "/api/artwork/image/%s" % ART._remember(
+                d["art_url"].replace("/t/p/w780/", "/t/p/w342/"))
         out.append(d)
     return {"discs": out}
+
+
+@app.get("/api/discs/{fingerprint}")
+def disc_info(fingerprint: str, user=Depends(require_user)):
+    """One disc on the shelf and every rip of it: what the Discs tile opens."""
+    d = db.get_disc(fingerprint)
+    if not d:
+        raise HTTPException(status_code=404, detail="Riparr doesn't remember that disc.")
+    jobs = [_job_out(j) for j in db.jobs_for_fingerprint(fingerprint)]
+    keep = ("id", "state", "finished_at", "started_at", "dest_path", "bytes_sent",
+            "bytes_ripped", "verified_mode", "sha256", "output", "error", "music",
+            "title_index", "disc_family", "stages")
+    return {"disc": d, "jobs": [{k: j.get(k) for k in keep} for j in jobs]}
 
 
 @app.delete("/api/discs/{fingerprint}")
@@ -1714,7 +1731,7 @@ def makemkv_renewal_dismiss(user=Depends(require_user)):
 
 
 @app.get("/api/artwork")
-def artwork_lookup(label: str = "", user=Depends(require_user)):
+def artwork_lookup(label: str = "", fingerprints: str = "", user=Depends(require_user)):
     """Cover art for a disc label, only when the match is beyond doubt.
 
     Returns `{"ok": false}` far more often than not, and that is the intended
@@ -1725,6 +1742,10 @@ def artwork_lookup(label: str = "", user=Depends(require_user)):
     hit = ART.look_up(label)
     if not hit:
         return {"ok": False}
+    # Found for a disc on the Discs page: remembered, so next time it's there at once.
+    fps = [f for f in fingerprints.split(",") if f]
+    if fps and hit.get("url"):
+        db.set_disc_art(fps, hit["url"])
     return {"ok": True, "title": hit["title"], "confidence": hit["confidence"],
             "image": "/api/artwork/image/%s" % hit["token"]}
 
@@ -1735,14 +1756,14 @@ def artwork_image(token: str, user=Depends(require_user)):
 
     The caller passes a token this process issued, never a URL: an endpoint that
     fetches whatever it is handed is an open proxy sitting inside somebody's LAN.
-    Cached in the browser for a day -- it is decoration, and the disc will be gone
-    long before it goes stale.
+    The token is a hash of the source address, so the same token is always the same
+    picture: the browser keeps it for a year and Discs opens without a flicker.
     """
     blob, ctype = ART.image_bytes(token)
     if not blob:
         raise HTTPException(status_code=404, detail="No image for that token.")
     return Response(content=blob, media_type=ctype,
-                    headers={"Cache-Control": "private, max-age=86400"})
+                    headers={"Cache-Control": "private, max-age=31536000, immutable"})
 
 
 @app.get("/api/makemkv/beta-key")
