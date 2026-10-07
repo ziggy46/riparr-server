@@ -39,8 +39,8 @@ def missing_tools_reason():
     if t["ready"]:
         return None
     need = [n for n in ("cdparanoia", "flac") if not t[n]]
-    return ("Ripping audio CDs needs %s, which this install doesn't have. Update Riparr "
-            "-- the image and the installer include them from 0.10.0." % " and ".join(need))
+    return ("Ripping audio CDs needs %s, which this install doesn't have. Update Riparr: "
+            "the current image and installer include them." % " and ".join(need))
 
 
 # ─────────────────────────────── names ───────────────────────────────

@@ -169,6 +169,9 @@ check("the CD is remembered by its disc ID", db.get_disc("cd:" + disc)["release_
 again, why = rip.enqueue()
 check("so putting it back in is refused as already ripped",
       (again, "already ripped" in (why or "")), (None, True))
+from riparr import main  # noqa: E402
+check("and the card says so before Rip is pressed",
+      (main._known_disc(rip.drive_for()) or {}).get("title"), "Blue Skies")
 
 print("two albums share this CD")
 disc = insert([0, 12000])

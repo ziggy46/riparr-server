@@ -659,7 +659,11 @@ def _known_disc(drive):
     front instead of offering a Rip button whose only effect is to refuse and eject.
     """
     try:
-        known = db.disc_by_label_size(drive.get("label") or "", drive.get("size_bytes"))
+        if RIP.disc_family(drive) == "cd":
+            # A CD has no label, but its fingerprint is its track layout: instant.
+            known = db.get_disc(RIP.fingerprint(drive))
+        else:
+            known = db.disc_by_label_size(drive.get("label") or "", drive.get("size_bytes"))
     except Exception:
         return None
     if not known or not RIP._already_have(known):

@@ -337,7 +337,7 @@ def _enqueue(d, dev, force, expect, claimed):
     # interface already renders ("Reading the disc"), so this costs no new UI.
     job_id = db.create_job(
         title=None, disc_label=label, kind="movie", fingerprint="", device=dev,
-        state="identifying", phase="Reading the disc \u2014 a few minutes on an encrypted DVD",
+        state="identifying", phase=_reading_phase(d),
         mode=None, bytes_total=int(d.get("size_bytes") or 0))
     claimed()                            # the row holds the drive now
 
@@ -1819,9 +1819,15 @@ def _commit_season(job, s, d, titles, plan):
 
 # ── stage 1: work out what this disc is ──
 
+def _reading_phase(drive):
+    if disc_family(drive or {}) == "cd":
+        return "Looking the CD up on MusicBrainz"
+    return "Reading the disc \u2014 a few minutes on an encrypted DVD"
+
+
 def _identify(job, s):
     db.update_job(job["id"], state="identifying",
-                  phase="Reading the disc \u2014 a few minutes on an encrypted DVD",
+                  phase=_reading_phase(drive_for(device_of(job))),
                   started_at=job.get("started_at") or int(time.time()))
     db.stage_enter(job["id"], "identify")
     d = drive_for(device_of(job))

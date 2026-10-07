@@ -867,6 +867,7 @@ views.queue = async () => {
       <p>Taking you to it…</p></div></div>`;
   }
   const jobs = q.jobs;
+  state.lastJobs = jobs;
   const sending = q.sending || [];
   state.autoripOn = !!ar.enabled;
   state.typical = q.typical_seconds;
@@ -4453,7 +4454,10 @@ function wireContent(section, sub) {
       if (!album && !artist) return;
       go.disabled = true;
       let r;
-      const tracks = ((state.status || {}).drives || []).map(d => d.audio_tracks).find(Boolean) || 0;
+      // This question's own CD: with two loaded, the other drive's would reorder wrongly.
+      const job = (state.lastJobs || []).find(j => String(j.id) === box.dataset.musicFor);
+      const drive = ((state.status || {}).drives || []).find(d => job && d.device === job.device);
+      const tracks = (drive && drive.audio_tracks) || (job && (job.titles || []).length) || 0;
       try {
         r = await api.get(`/api/musicbrainz/search?album=${encodeURIComponent(album)}&artist=${
           encodeURIComponent(artist)}&tracks=${tracks}`);
