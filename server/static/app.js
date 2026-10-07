@@ -2747,16 +2747,6 @@ settingsPages.library = async (s) => {
           <p>Finished rips have nowhere to go until you add one above.</p></div>`}
     </div></div>
 
-    <div class="section"><h2>Handoff</h2><div>
-    <p class="muted">Riparr does not transcode. If you run something that does, write
-      each rip where it watches for work instead of straight into your library.</p>
-    <label class="f" style="margin-top:14px"><span>Watch folder</span>
-      <input data-set="watch_folder" value="${esc(s.watch_folder)}" placeholder="/Media/_incoming">
-      <span class="help">A path on your library share. Tdarr and Unmanic both work this
-        way: they pick the file up, transcode it, and put the result wherever they are
-        configured to. Leave this empty to write straight to the folders above.</span></label>
-  </div></div>
-
     <div class="section"><h2>Film lookup (TMDb)</h2><div>
       <p class="muted">With a key from <a href="https://www.themoviedb.org/settings/api"
         target="_blank" rel="noopener">The Movie Database</a>, Riparr looks each film up:

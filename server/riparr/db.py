@@ -286,7 +286,6 @@ DEFAULTS = {
     "tmdb_token": "",
     "tmdb_unsure": "label",
     "webhook_url": "",
-    "watch_folder": "",
     # Notifications. The box's whole promise is "walk away", so these are the only way
     # it can reach someone who did.
     "notify_events": ["done", "ripped", "needs_you", "failed", "share_lost",

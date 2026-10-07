@@ -184,19 +184,8 @@ time and prove nothing. Switch **Each rip goes** to *Staged first, then sent* if
 give `/srv/staging` room for two copies of the largest title you rip: the read-back has
 to land somewhere, because `smbclient` cannot stream it.
 
-## Handoff
-
-For sending finished rips somewhere else — a transcoder, an automation.
-
-| Setting | Notes |
-|---|---|
-| **Watch folder mode** | Write to a staging path instead, for Tdarr / Unmanic to pick up |
-
-The completion webhook moved to **Notifications** below, where the rest of the ways
-Riparr can reach you now live.
-
-**Riparr does not transcode**, by design. It rips; a transcoder is a separate job. Point
-Tdarr or Unmanic at the watch folder and let them do it.
+**Riparr does not transcode**, by design. It rips; a transcoder is a separate job. If
+you run Tdarr or Unmanic, point it at your library folders.
 
 ## Notifications
 

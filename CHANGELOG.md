@@ -14,6 +14,12 @@ doesn't display the line.
 
 ---
 
+## Unreleased
+
+- **The watch folder setting is gone** from Settings → Library. It was never wired up:
+  rips always went to the folders above it, whatever it said. If you run Tdarr or
+  Unmanic, point it at your library folders.
+
 ## 0.10.0
 
 **Audio CDs.** Put a music CD in and Riparr rips it as an album: it recognises the CD on

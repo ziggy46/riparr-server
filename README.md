@@ -122,7 +122,7 @@ Deliberate limits:
 - **The MakeMKV beta key expires monthly.** That's GuinpinSoft's call. Riparr fetches the
   new one itself when it's published, and tells you it did. Buying a licence makes the
   question go away.
-- **No transcoding.** Write to a watch folder and let Tdarr or Unmanic do it properly.
+- **No transcoding.** Point Tdarr or Unmanic at your library and let them do it properly.
 
 ## Run it from source
 
