@@ -4,6 +4,8 @@
 
 ---
 
+*Rather not use Docker? [Install it straight onto Debian or Ubuntu](03-bare-metal.md).*
+
 Riparr Server is one container: the web interface, the rip queue, and MakeMKV. The
 image is published at `ghcr.io/ziggy46/riparr-server` for amd64 and arm64.
 

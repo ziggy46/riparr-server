@@ -456,7 +456,8 @@ def storage_speedtest(body: SpeedTest = SpeedTest(), user=Depends(require_user))
         result["recommend"] = None
         result["why"] = ("Your staging disk writes at about %s MB/s. Riparr can't "
                          "compare that with your library until it is mounted at "
-                         "/srv/library — rips are staged until then, either way." % w)
+                         "%s — rips are staged until then, either way."
+                         % (w, P.LIBRARY_MOUNT))
         return result
     # No network measurement here: it would mean writing a test file into somebody's
     # library, and the honest comparison is against what this box has actually done.

@@ -13,4 +13,13 @@ def build():
     commit = (os.environ.get("RIPARR_COMMIT") or "").strip()
     return {"version": __version__,
             "channel": (os.environ.get("RIPARR_CHANNEL") or "dev").strip() or "dev",
-            "commit": commit[:7] or None}
+            "commit": commit[:7] or None,
+            "install": install()}
+
+
+def install():
+    """How this was installed: "docker", or "bare" for deploy/install.sh, whose
+    service sets RIPARR_INSTALL. It decides what advice the interface gives -- a
+    `docker compose` command is no use to somebody running it under systemd."""
+    import os
+    return "bare" if (os.environ.get("RIPARR_INSTALL") or "").strip() == "bare" else "docker"

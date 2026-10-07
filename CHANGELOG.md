@@ -16,6 +16,16 @@ doesn't display the line.
 
 ## Unreleased
 
+**Install without Docker.** On Debian or Ubuntu, one command installs Riparr Server as a
+systemd service, with the same MakeMKV build and settings as the Docker image:
+
+    curl -fsSL https://raw.githubusercontent.com/ziggy46/riparr-server/main/deploy/install.sh | sudo bash
+
+Run `sudo /opt/riparr/deploy/install.sh --update` to update, or `--uninstall` to remove it.
+On a direct install, the interface's advice (updating, installing MakeMKV, a missing
+drive) gives the commands for that kind of install instead of Docker's. See
+[Installing without Docker](docs/guide/03-bare-metal.md).
+
 **A Windows 98 theme.** Settings → General → Appearance → Theme → Windows 98. It changes
 shapes as well as colours: a navy title bar, bevelled grey buttons, sunken white fields,
 checkboxes, sections as group boxes, Explorer-style navigation, dialogs with title bars,

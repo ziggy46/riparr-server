@@ -14,7 +14,7 @@ import re
 import urllib.error
 import urllib.request
 
-from . import __version__
+from . import __version__, install as install_kind
 
 REPO = os.environ.get("RIPARR_UPDATE_REPO", "ziggy46/riparr-server")
 GITHUB_API = "https://api.github.com"
@@ -25,6 +25,8 @@ def current_version():
 
 
 def how_to_update():
+    if install_kind() == "bare":
+        return "sudo /opt/riparr/deploy/install.sh --update"
     return "docker compose pull && docker compose up -d"
 
 
@@ -33,19 +35,25 @@ def how_to_update():
 #
 #     <!-- riparr-update: docker compose pull && docker compose up -d -->
 #
+# and for an install made by deploy/install.sh, which updates differently:
+#
+#     <!-- riparr-update-bare: sudo /opt/riparr/deploy/install.sh --update -->
+#
 # This exists because the instruction is otherwise fixed in the version already running.
 # 0.5.1 told everybody to `git pull && docker compose up -d --build` for 0.6.0, which no
 # longer worked, and nothing published afterwards could change what 0.5.1 said.
-UPDATE_HINT_RE = re.compile(r"<!--\s*riparr-update:\s*(.+?)\s*-->", re.I | re.S)
+UPDATE_HINT_RE = re.compile(r"<!--\s*riparr-update(-bare)?:\s*(.+?)\s*-->", re.I | re.S)
 
 
-def release_how(notes):
-    """(the release's own update instruction or None, the notes without it)."""
-    m = UPDATE_HINT_RE.search(notes or "")
-    if not m:
-        return None, notes or ""
-    how = " ".join(m.group(1).split())[:300] or None
-    return how, UPDATE_HINT_RE.sub("", notes).strip()
+def release_how(notes, kind=None):
+    """(the release's own update instruction for this kind of install or None, the
+    notes without any of them)."""
+    want = "-bare" if (kind or install_kind()) == "bare" else None
+    how = None
+    for m in UPDATE_HINT_RE.finditer(notes or ""):
+        if (m.group(1) or None) == want:
+            how = " ".join(m.group(2).split())[:300] or None
+    return how, UPDATE_HINT_RE.sub("", notes or "").strip()
 
 
 def check(repo=REPO, timeout=8):

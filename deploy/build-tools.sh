@@ -162,7 +162,7 @@ case "${1:-}" in
   makemkv)
     if [ "${MAKEMKV_ACCEPT_EULA:-}" != "yes" ]; then
       say "MakeMKV is not installed: set MAKEMKV_ACCEPT_EULA=yes once you have read"
-      say "  https://www.makemkv.com/eula/ -- then restart the container."
+      say "  https://www.makemkv.com/eula/ -- then restart Riparr."
       exit 0
     fi
     v="$(makemkv_version)" || { say "can't read $MANIFEST"; exit 1; }

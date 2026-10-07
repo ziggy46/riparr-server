@@ -103,9 +103,15 @@ def can_backup(family):
 # ── installing them ──
 # dvdbackup is in the image; libdvdcss is compiled into /data on the container's first
 # start, by deploy/build-tools.sh. Nothing installs from the web page.
-INSTALL_HINT = ("libdvdcss is compiled when the container starts. If it's missing, the "
-                "container log says why (usually no internet on the first start); "
-                "restart the container to try again.")
+def install_hint():
+    from . import install
+    if install() == "bare":
+        return ("libdvdcss is compiled when Riparr starts. If it's missing, "
+                "journalctl -u riparr says why (usually no internet at the time); "
+                "sudo systemctl restart riparr tries again.")
+    return ("libdvdcss is compiled when the container starts. If it's missing, the "
+            "container log says why (usually no internet on the first start); "
+            "restart the container to try again.")
 
 
 def status():
@@ -113,7 +119,7 @@ def status():
     t = dvd_tools()
     return {"ready": t["ready"], "dvdbackup": t["dvdbackup"],
             "libdvdcss": t["libdvdcss"],
-            "message": None if t["ready"] else INSTALL_HINT}
+            "message": None if t["ready"] else install_hint()}
 
 
 # ── what a folder holds ──

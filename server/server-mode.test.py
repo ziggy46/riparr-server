@@ -25,6 +25,7 @@ os.environ.pop("RIPARR_SCAN_SUBNETS", None)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from riparr import db, platform as P, shares as SH, updater  # noqa: E402
+from riparr import install as riparr_install  # noqa: E402
 
 failures = []
 
@@ -163,11 +164,31 @@ with mock.patch.object(updater.urllib.request, "urlopen", release_with("Just not
     check("without one, the built-in instruction is used",
           updater.check()["how"], updater.how_to_update())
 
+print("a direct install, without Docker")
+check("Docker unless the service says otherwise", riparr_install(), "docker")
+with env(RIPARR_INSTALL="bare"):
+    check("install.sh's service says bare", riparr_install(), "bare")
+    check("and is told to update with the installer", updater.how_to_update(),
+          "sudo /opt/riparr/deploy/install.sh --update")
+    both = ("<!-- riparr-update: docker compose pull -->\n"
+            "<!-- riparr-update-bare: sudo bash install.sh --edge -->\nNotes.")
+    check("a release's instruction for it is the bare one", updater.release_how(both),
+          ("sudo bash install.sh --edge", "Notes."))
+    check("and a Docker-only instruction isn't used for it",
+          updater.release_how("<!-- riparr-update: docker compose pull -->")[0], None)
+    check("MakeMKV's install advice names the settings file",
+          "/etc/riparr/riparr.env" in __import__("riparr.makemkv", fromlist=["x"]).install_hint(),
+          True)
+check("Docker ignores the bare instruction", updater.release_how(
+    "<!-- riparr-update-bare: sudo x -->\n<!-- riparr-update: docker compose pull -->"),
+    ("docker compose pull", ""))
+
 print("which build this is")
 import riparr  # noqa: E402
 with env(RIPARR_CHANNEL="edge", RIPARR_COMMIT="def75c3a9b1e"):
     check("an edge image says so, with a short commit", riparr.build(),
-          {"version": riparr.__version__, "channel": "edge", "commit": "def75c3"})
+          {"version": riparr.__version__, "channel": "edge", "commit": "def75c3",
+           "install": "docker"})
 with env(RIPARR_CHANNEL="latest", RIPARR_COMMIT=""):
     check("a release image is latest", riparr.build()["channel"], "latest")
 with mock.patch.dict(os.environ, {}, clear=False):

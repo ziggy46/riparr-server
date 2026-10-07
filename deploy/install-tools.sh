@@ -1,6 +1,7 @@
 #!/bin/bash
 # Installs the packages the Riparr Server image carries, on Debian, as root. Run by the
-# Dockerfile.
+# Dockerfile, and by install.sh with --host, which leaves apt's package lists in place:
+# emptying them makes sense for an image, not for somebody's server.
 #
 # MakeMKV and libdvdcss are deliberately NOT installed here. MakeMKV is proprietary and
 # can only be fetched by somebody who has accepted its licence, so the published image
@@ -23,5 +24,7 @@ PKGS=(
 
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends "${PKGS[@]}"
-apt-get clean
-rm -rf /var/lib/apt/lists/*
+if [ "${1:-}" != --host ]; then
+  apt-get clean
+  rm -rf /var/lib/apt/lists/*
+fi

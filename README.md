@@ -53,6 +53,15 @@ shows them). Then:
 docker compose up -d
 ```
 
+**Without Docker**, on Debian or Ubuntu:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ziggy46/riparr-server/main/deploy/install.sh | sudo bash
+```
+
+[Installing without Docker](docs/guide/03-bare-metal.md) says what that puts where, and
+how to update and remove it.
+
 Open `http://<server>:9797`. The first start compiles MakeMKV, which takes a few minutes;
 `docker logs -f riparr` shows progress. Optical drives are picked up automatically,
 including a USB drive plugged in later, with no device names to look up.
@@ -64,7 +73,7 @@ a mounted library, Proxmox, updating and password reset.
 
 | | |
 |---|---|
-| **A Docker host** | Linux, amd64 or arm64. A NAS, a home server, a Proxmox VM |
+| **A Linux machine** | amd64 or arm64, running Docker, or Debian/Ubuntu for the direct install. A NAS, a home server, a Proxmox VM or LXC. Not macOS or Windows, except through a Linux VM |
 | **An optical drive** | Internal SATA or USB. [Read this before you buy one](docs/guide/01-what-you-need.md#which-drive), especially for 4K |
 | **A share** | SMB. Any NAS, or a folder on a computer that's usually on |
 | **Staging space** | Room for the biggest disc you rip: ~50 GB for Blu-ray, ~100 GB for 4K |

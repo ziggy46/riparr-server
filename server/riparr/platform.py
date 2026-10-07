@@ -388,6 +388,12 @@ def optical_diagnosis():
         return {"drives": drives, "hint": None, "fixable": None}
     if MOCK:
         hint = "Development mode is simulating no drive (RIPARR_MOCK_DRIVE=none)."
+    elif _bare():
+        hint = (
+            "No /dev/sr* device is visible. Check that the drive is plugged in and "
+            "powered, and that this machine sees it: lsscsi -g lists it, and dmesg says "
+            "what happened when it was connected. In a VM or an LXC container, the drive "
+            "has to be passed through to it first.")
     else:
         hint = (
             "No /dev/sr* device is visible to Riparr. Check that the drive shows up on "
@@ -396,6 +402,11 @@ def optical_diagnosis():
             "what MakeMKV reads from, with --device (or devices: in docker-compose.yml), "
             "then recreate the container. docs/guide/02-docker.md has the details.")
     return {"drives": drives, "hint": hint, "fixable": None}
+
+def _bare():
+    from . import install
+    return install() == "bare"
+
 
 # ─────────────────────────────── the clock ───────────────────────────────
 

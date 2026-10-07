@@ -298,7 +298,8 @@ def info():
         "eula_points": EULA_POINTS,
         "homepage": HOMEPAGE,
         "key_topic": FORUM_KEY_TOPIC,
-        "install_hint": INSTALL_HINT,
+        "install_hint": install_hint(),
+        "install": _install(),
         "upgrade": upgrade_available(st),
         "auto_renew": bool(_db_get("auto_renew_beta_key", True)),
         "buy_url": BUY_URL,
@@ -322,11 +323,21 @@ def _db_get(key, default=None):
 # service can poke. Here the container's entrypoint compiles it on start, as root, before
 # Riparr runs (deploy/build-tools.sh). A web service that can compile and install
 # software as root is not something a server should carry, so this only says where to go.
-INSTALL_HINT = (
-    "MakeMKV is compiled when the container starts, once you've accepted its licence: "
-    "set MAKEMKV_ACCEPT_EULA=yes in the container's environment (docker-compose.yml) "
-    "and restart it. The first start takes a few minutes; the container log shows "
-    "progress, and why if it fails.")
+def _install():
+    from . import install
+    return install()
+
+
+def install_hint():
+    if _install() == "bare":
+        return ("MakeMKV is compiled when Riparr starts, once you've accepted its licence: "
+                "set MAKEMKV_ACCEPT_EULA=yes in /etc/riparr/riparr.env and run "
+                "sudo systemctl restart riparr. That start takes a few minutes; "
+                "journalctl -u riparr shows progress, and why if it fails.")
+    return ("MakeMKV is compiled when the container starts, once you've accepted its licence: "
+            "set MAKEMKV_ACCEPT_EULA=yes in the container's environment (docker-compose.yml) "
+            "and restart it. The first start takes a few minutes; the container log shows "
+            "progress, and why if it fails.")
 
 
 # ── the current beta key ──

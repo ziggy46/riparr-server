@@ -542,8 +542,10 @@ const wizard = {
       <div class="wz-step">Step 2 of 5</div>
       <h1>Disc reading</h1>
       <p class="muted">Riparr doesn't read discs itself — <b>MakeMKV</b> does, and it's
-        made by GuinpinSoft, not by us. It's compiled when the container first starts,
-        once you've accepted its licence with <code>MAKEMKV_ACCEPT_EULA</code>.</p>
+        made by GuinpinSoft, not by us. It's compiled when ${i.install === "bare"
+          ? "Riparr starts" : "the container first starts"}, once you've accepted its
+        licence with <code>MAKEMKV_ACCEPT_EULA</code>${i.install === "bare"
+          ? " in <code>/etc/riparr/riparr.env</code>" : ""}.</p>
 
       <div class="section"><h2>MakeMKV
         <span class="grow"></span>
@@ -3477,8 +3479,11 @@ systemPages.updates = async () => {
         <b>edge</b>, built from the newest code on main${u.build.commit ? ` (commit
         <a href="https://github.com/${esc(u.repo)}/commit/${esc(u.build.commit)}" target="_blank"
         rel="noopener">${esc(u.build.commit)}</a>)` : ""}. Releases are checked above; edge
-        builds aren't, so <code>docker compose pull</code> picks up the newest one. To go back
-        to releases, change the image tag to <code>:latest</code>.</p>` : ""}
+        builds aren't, so ${u.build.install === "bare"
+          ? `<code>sudo /opt/riparr/deploy/install.sh --update</code> picks up the newest
+             code. To go back to releases, run it with <code>--release</code>.`
+          : `<code>docker compose pull</code> picks up the newest one. To go back to
+             releases, change the image tag to <code>:latest</code>.`}</p>` : ""}
     </div>
     ${mk && mk.status.installed ? `<div class="section"><h2>MakeMKV<span class="grow"></span>
       <span class="badge ${mk.upgrade ? "warn" : "ok"}">${mk.upgrade ? "update" : "current"}</span></h2>
@@ -4878,7 +4883,7 @@ const showStarting = (attempt) => showWaiting(
 
 const showUnreachable = () => showWaiting(
   "Can't reach Riparr. It may still be starting; if this keeps happening, "
-  + "check `docker logs riparr` on the server.",
+  + "check `docker logs riparr` on the server (or `journalctl -u riparr` without Docker).",
   { retry: true, spin: false });
 
 /* Tabs at the bottom of a phone, where a thumb reaches, instead of a menu button in the
