@@ -105,7 +105,7 @@ opposed to Riparr's simulated drive:
 - [x] Installing without Docker, on a Linux VM (amd64): MakeMKV built, a DVD scanned and
   ripped through a passed-through USB drive
 - [x] MakeMKV's first-run hang on a new drive, worked around on its own
-- [ ] A Blu-ray (1080p), end to end
+- [x] A Blu-ray (1080p), end to end
 - [ ] **Two or more drives ripping at once.** Only tested with the simulated drives, never
   on real hardware, so two MakeMKV runs sharing one USB bus or host are unknown
 - [ ] A TV season disc on a real drive
