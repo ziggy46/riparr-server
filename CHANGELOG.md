@@ -14,13 +14,7 @@ doesn't display the line.
 
 ---
 
-## Unreleased
-
-**TRaSH folder names for films.** The TRaSH Guides Plex, Emby and Jellyfin presets put
-the TMDb ID on the film's folder as well as its file, as TRaSH recommends:
-`Dune (2021) {tmdb-438631}/Dune (2021) {tmdb-438631} [Remux-2160p]….mkv`. A template
-saved from one of those presets is updated on its own; one you wrote yourself isn't.
-Films already in your library keep their folders.
+## 0.9.0
 
 **Two drives rip at once.** With more than one drive, each rips its own disc at the same
 time. The Queue shows a card per drive, with its own Rip, Eject, Disc info, progress and
@@ -28,6 +22,14 @@ time. The Queue shows a card per drive, with its own Rip, Eject, Disc info, prog
 other drive's rip finishes writing waits for room instead of failing. This also fixes
 Riparr ejecting the first drive after ripping a disc from another one. With one drive,
 nothing looks different.
+
+**Answer a disc from the notification.** When a disc asks "which film is this?", the
+notification has Riparr's two best guesses from TMDb. A season disc gets the two shows
+it's choosing between, or **Looks right, rip it** when only the episode order needs a
+look. In ntfy they're buttons, and one tap starts the rip. Discord and email get links to
+a page with the button, since Discord webhooks can't send buttons. The webhook gets them
+as an `actions` list. Your phone has to reach Riparr: **Settings → Connect → Riparr's
+address** is where the buttons point, and it defaults to the address you sign in at.
 
 **Install without Docker.** On Debian or Ubuntu, one command installs Riparr Server as a
 systemd service, with the same MakeMKV build and settings as the Docker image:
@@ -37,7 +39,7 @@ systemd service, with the same MakeMKV build and settings as the Docker image:
 Run `sudo /opt/riparr/deploy/install.sh --update` to update, or `--uninstall` to remove it.
 On a direct install, the interface's advice (updating, installing MakeMKV, a missing
 drive) gives the commands for that kind of install instead of Docker's. See
-[Installing without Docker](docs/guide/03-bare-metal.md).
+[Installing without Docker](https://github.com/ziggy46/riparr-server/blob/main/docs/guide/03-bare-metal.md).
 
 **A Windows 98 theme.** Settings → General → Appearance → Theme → Windows 98. It changes
 shapes as well as colours: a navy title bar, bevelled grey buttons, sunken white fields,
@@ -48,13 +50,11 @@ MS Sans Serif where your computer has it, and Tahoma or Geneva where it doesn't.
 
 The sign-in page now uses your theme too, in every browser.
 
-**Answer a disc from the notification.** When a disc asks "which film is this?", the
-notification has Riparr's two best guesses from TMDb. A season disc gets the two shows
-it's choosing between, or **Looks right, rip it** when only the episode order needs a
-look. In ntfy they're buttons, and one tap starts the rip. Discord and email get links to
-a page with the button, since Discord webhooks can't send buttons. The webhook gets them
-as an `actions` list. Your phone has to reach Riparr: **Settings → Connect → Riparr's
-address** is where the buttons point, and it defaults to the address you sign in at.
+**TRaSH folder names for films.** The TRaSH Guides Plex, Emby and Jellyfin presets put
+the TMDb ID on the film's folder as well as its file, as TRaSH recommends:
+`Dune (2021) {tmdb-438631}/Dune (2021) {tmdb-438631} [Remux-2160p]….mkv`. A template
+saved from one of those presets is updated on its own; one you wrote yourself isn't.
+Films already in your library keep their folders.
 
 ## 0.8.0
 
