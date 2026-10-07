@@ -119,7 +119,7 @@ on, ship the source too.
 |---|---|
 | Riparr | [jackharvest/riparr](https://github.com/jackharvest/riparr) — GPL-3.0 |
 | Design tokens | [Sonarr](https://github.com/Sonarr/Sonarr) — GPL-3.0 |
-| Themes | [theme.park](https://github.com/themepark-dev/theme.park) — MIT |
+| Themes | [theme.park](https://github.com/themepark-dev/theme.park) — MIT · the Windows 98 theme borrows from [98.css](https://github.com/jdan/98.css) — MIT |
 | Icons | [Font Awesome Free](https://fontawesome.com/license/free) — CC BY 4.0 · brand marks from [Simple Icons](https://simpleicons.org/) — CC0 |
 | Wordmark | [Russo One](server/static/fonts/RussoOne-OFL.txt) — SIL OFL 1.1 |
 | Disc reading | [MakeMKV](https://www.makemkv.com/) — proprietary, by GuinpinSoft. **Not shipped with Riparr Server**, and not in the image. The container downloads and compiles it on first start, after you accept its licence. makemkv.com goes down for weeks at a time, so it tries a list of mirrors in order, and every download is checked against a hash pinned in this repo. libdvdcss is fetched and compiled the same way |

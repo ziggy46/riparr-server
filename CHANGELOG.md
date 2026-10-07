@@ -14,6 +14,17 @@ doesn't display the line.
 
 ---
 
+## Unreleased
+
+**A Windows 98 theme.** Settings → General → Appearance → Theme → Windows 98. It changes
+shapes as well as colours: a navy title bar, bevelled grey buttons, sunken white fields,
+checkboxes, sections as group boxes, Explorer-style navigation, dialogs with title bars,
+navy progress bars and yellow tray-balloon notifications. On a phone the tabs become a
+taskbar and More opens a Start menu, and sign-in is a dialog on the teal desktop. It uses
+MS Sans Serif where your computer has it, and Tahoma or Geneva where it doesn't.
+
+Your browser now remembers your theme, so the sign-in page uses it too.
+
 ## 0.8.0
 
 **Fixed: a rip could sit on "Reading the disc" forever.** A Linux-only MakeMKV bug can

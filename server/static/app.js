@@ -1393,6 +1393,16 @@ function discReport(d) {
   return lines.join("\n");
 }
 
+// The theme is remembered in the browser too, so the sign-in page is drawn in it
+// before the settings can be read. The phone's status bar follows it: Windows 98's
+// title bar is navy.
+function applyTheme(name) {
+  $("#theme").href = `/static/themes/${name}.css`;
+  try { localStorage.setItem("riparr-theme", name); } catch (e) { /* private mode */ }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = name === "win98" ? "#000080" : "#241155";
+}
+
 async function showDiscDetails() {
   const dlg = document.createElement("dialog");
   dlg.className = "notice-dialog disc-dlg";
@@ -3066,7 +3076,8 @@ settingsPages.general = async (s) => {
   state.mkKeyTopic = mk.key_topic;
   const expiringSoon = st.days_left != null && st.days_left < 8;
   const themes = ["servarr", "organizr", "dark", "nord", "dracula", "plex",
-                  "space-gray", "aquamarine", "hotline", "hotpink", "maroon", "overseerr"];
+                  "space-gray", "aquamarine", "hotline", "hotpink", "maroon", "overseerr", "win98"];
+  const themeName = { win98: "Windows 98" };
   return `
     <div class="section"><h2>MakeMKV
       <span class="grow"></span>
@@ -3098,10 +3109,10 @@ settingsPages.general = async (s) => {
 
     <div class="section"><h2>Appearance</h2><div>
       <p class="muted">Riparr uses the theme.park variable set, so a theme you already run
-        on your *arr stack applies here too.</p>
+        on your *arr stack applies here too. Windows 98 is Riparr's own.</p>
       <label class="f" style="margin-top:14px"><span>Theme</span>
         <select id="theme-pick">${themes.map(t =>
-          `<option value="${t}" ${s.theme === t ? "selected" : ""}>${t}</option>`).join("")}</select>
+          `<option value="${t}" ${s.theme === t ? "selected" : ""}>${themeName[t] || t}</option>`).join("")}</select>
       </label>
 
     </div></div>
@@ -4515,9 +4526,9 @@ function wireContent(section, sub) {
 
   const themePick = $("#theme-pick");
   if (themePick) themePick.onchange = async () => {
-    $("#theme").href = `/static/themes/${themePick.value}.css`;
+    applyTheme(themePick.value);
     await api.put("/api/settings", { theme: themePick.value });
-    toast(`Theme set to ${themePick.value}`, "ok");
+    toast(`Theme set to ${themePick.selectedOptions[0].textContent}`, "ok");
   };
 
   $$("[data-forget]").forEach(b => b.onclick = () => {
@@ -4899,6 +4910,10 @@ function renderTabs(section) {
 }
 
 async function boot() {
+  try {
+    const t = localStorage.getItem("riparr-theme");
+    if (t && /^[a-z0-9-]+$/.test(t)) applyTheme(t);
+  } catch (e) { /* no storage: the default theme until settings load */ }
   paintIcons();          // the static chrome in index.html
   let setup;
   for (let attempt = 0; ; attempt++) {
@@ -4929,7 +4944,7 @@ async function boot() {
   try { state.status = await api.get("/api/status"); }
   catch (e) { showGate(); return; }
   state.settings = await api.get("/api/settings");
-  $("#theme").href = `/static/themes/${state.settings.theme || "servarr"}.css`;
+  applyTheme(state.settings.theme || "servarr");
   document.body.classList.add("ui-new");
   renderTabs();
 
