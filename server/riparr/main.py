@@ -1398,7 +1398,10 @@ def answer_from_notification(token: str, request: Request):
 def musicbrainz_search(album: str = "", artist: str = "", tracks: int = 0,
                        user=Depends(require_user)):
     """Albums on MusicBrainz by name and/or artist, for "which album is this CD?"."""
-    return {"results": MB.search(album, artist, tracks=tracks or None)}
+    try:
+        return {"results": MB.search(album, artist, tracks=tracks or None)}
+    except MB.MusicBrainzError as e:
+        raise HTTPException(status_code=502, detail=str(e))
 
 
 @app.get("/api/tv/search")

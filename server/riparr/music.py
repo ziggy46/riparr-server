@@ -74,6 +74,7 @@ def tags(music, track):
         "DISCNUMBER": str(music.get("disc") or 1),
         "DISCTOTAL": str(music.get("discs") or 1),
         "DATE": music.get("date") or (str(music["year"]) if music.get("year") else ""),
+        "ORIGINALDATE": music.get("original_date") or "",
         "MUSICBRAINZ_ALBUMID": music.get("release_id") or "",
         "MUSICBRAINZ_TRACKID": track.get("recording_id") or "",
         "MUSICBRAINZ_RELEASETRACKID": track.get("track_id") or "",
@@ -138,10 +139,12 @@ def encode(wav_path, flac_path, track_tags, cover_path=None):
     cmd = ["flac", "--silent", "--force", "-5", "-o", flac_path]
     for k, v in track_tags.items():
         cmd.append("--tag=%s=%s" % (k, v))
-    if cover_path and os.path.exists(cover_path):
-        cmd.append("--picture=%s" % cover_path)
-    cmd.append(wav_path)
-    p = subprocess.run(cmd, capture_output=True, text=True)
+    picture = ["--picture=%s" % cover_path] if cover_path and os.path.exists(cover_path) else []
+    p = subprocess.run(cmd + picture + [wav_path], capture_output=True, text=True)
+    if p.returncode != 0 and picture:
+        # flac refuses a cover it can't read the size of. The track matters more than
+        # the picture inside it -- cover.jpg is beside it in the folder anyway.
+        p = subprocess.run(cmd + [wav_path], capture_output=True, text=True)
     if p.returncode != 0:
         raise TrackFailed("flac couldn't encode %s: %s" % (
             os.path.basename(flac_path), (p.stderr or p.stdout).strip()[-300:]))

@@ -14,6 +14,18 @@ doesn't display the line.
 
 ---
 
+## Unreleased
+
+**Audio CDs.** Put a music CD in and Riparr rips it as an album: it recognises the CD on
+MusicBrainz (the artist, album, original year and every track's title), reads each track
+with cdparanoia, and encodes it to FLAC, tagged and with the cover inside. Albums are
+filed as `Music/Artist/Album (Year)/01 - Title.flac` with a `cover.jpg`, and the discs of
+a set share one folder (`1-01`, `2-01`…). When MusicBrainz doesn't know the CD, or knows
+more than one album it could be, the card asks, with a MusicBrainz search, and the
+notification has the suggestions as buttons. Tracks cdparanoia couldn't fully correct are
+named on the finished card. A CD needs no MakeMKV key. Set where albums go on **Settings →
+Library → Music**. The Docker image and the installer now include cdparanoia and flac.
+
 ## 0.9.1
 
 **Staging is cleared as soon as a rip is safe.** Once a rip is in your library and has

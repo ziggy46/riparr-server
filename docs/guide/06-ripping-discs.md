@@ -144,6 +144,38 @@ In Docker, the compose file's `device_cgroup_rules` already allow every optical 
 you list devices yourself instead, list both nodes (`/dev/srN` and its `/dev/sgN`) for
 each drive.
 
+## Audio CDs
+
+Put a music CD in and Riparr rips it as an album, in FLAC, without MakeMKV:
+
+1. **It works out which album it is.** A CD has no name on it, only where each track
+   starts. That layout is enough for [MusicBrainz](https://musicbrainz.org) to recognise
+   it, and MusicBrainz gives the artist, the album, the year it first came out and every
+   track's title. The cover comes from the Cover Art Archive.
+2. **It reads every track with cdparanoia**, the standard careful CD reader: it reads
+   each part more than once and corrects what doesn't match. When it can't fully correct
+   a scratch, the finished card says which tracks may have a click or a gap.
+3. **It encodes each track to FLAC** while the next one is being read, tagged with the
+   names and MusicBrainz IDs that Plex, Plexamp, Jellyfin and Picard read, with the cover
+   inside each file.
+4. **It files the album** under Settings → Library → Music:
+
+       Music/Fleetwood Mac/Rumours (1977)/01 - Second Hand News.flac
+                                          …
+                                          cover.jpg
+
+   The discs of a set share one album folder, numbered `1-01`, `1-02`… `2-01`, so the
+   whole set sorts in order. An album with the same name that's actually a different
+   album goes beside it as `Rumours (1977) (2)`.
+
+**When MusicBrainz doesn't know the CD**, or knows several albums it could be, the card
+says *Needs you*: pick one of its suggestions, search MusicBrainz by album and artist, or
+type the names yourself. The notification has the suggestions as buttons, like a film's.
+Riparr remembers your answer, and the CD is recognised as already ripped if it goes back
+in.
+
+A CD doesn't need a MakeMKV key. A data CD, with no music on it, is refused straight away.
+
 ## Reading the drive without a browser
 
 The disc itself is the signal. It stays in while there's work to do and comes back out

@@ -967,10 +967,10 @@ function discCard({ d, loaded, hero, busy, filed, mk }, { drives, multi, todo })
   let body, strip = !loaded && !multi;
   if (hero.length) {
     body = hero.map(j => j.state === "needs_input"
-      ? shell(art, npAsk(j, acts), "np-ask")
-      : shell(art, npLive(j, acts, mk), "np-live")).join("");
+      ? shell(j.art || art, npAsk(j, acts), "np-ask")
+      : shell(j.art || art, npLive(j, acts, mk), "np-live")).join("");
   } else if (filed) {
-    body = shell(filedArtFor(filed) || art, npFiled(filed, acts),
+    body = shell(filed.art || filedArtFor(filed) || art, npFiled(filed, acts),
                  filed.state === "done" ? "np-done" : "np-bad");
   } else if (loaded && loaded.known && !loaded.cannot_read) {
     body = shell(art, npKnown(loaded, acts), "np-done");
@@ -996,7 +996,9 @@ function jobProgress(j) {
   const med = state.typicalStages || {};
   const order = (state.stageOrder && state.stageOrder.length ? state.stageOrder
                  : ["identify", "decrypt", "save", "upload", "verify"])
-    .filter(k => !(k === "verify" && (state.settings || {}).verify_mode === "off"));
+    .filter(k => !(k === "verify" && (state.settings || {}).verify_mode === "off"))
+    // A CD isn't decrypted: cdparanoia reads and saves in one step.
+    .filter(k => !(k === "decrypt" && j.disc_family === "cd"));
   // Steps with no history yet are guessed, scaled to the steps that do have one -- a
   // five-minute guess beside medians of seconds would make one step the whole bar.
   const known = order.filter(k => med[k] && med[k].seconds);
@@ -1031,16 +1033,18 @@ function npLive(j, acts, mk) {
   // The stage's own name, the same words History's legend uses, said once.
   const verb = j.state === "queued" ? "Waiting" : p.name;
   const planned = j.planned && j.planned.path
-    ? (j.planned.kind === "tv"
-        ? `<div class="np-facts">${j.planned.count} episode${j.planned.count === 1 ? "" : "s"}</div>`
+    ? (j.planned.kind === "tv" || j.planned.kind === "music"
+        ? `<div class="np-facts">${j.planned.count} ${j.planned.kind === "tv" ? "episode" : "track"}${
+            j.planned.count === 1 ? "" : "s"}</div>`
         : `<details class="np-path"><summary>${icon("folder-open")}<span>${
-            esc(shortPath(j.planned.path))}</span></summary><code>${esc(j.planned.path)}</code></details>`)
+            esc(shortPath(j.planned.path, isFolderJob(j)))}</span></summary><code>${esc(j.planned.path)}</code></details>`)
     : "";
   return `
     <div class="np-kicker live">${icon("compact-disc")} ${esc(verb)}
       <span class="muted">· step ${p.step} of ${p.steps}</span></div>
     <h2 class="np-title" tabindex="-1">${esc((j.title || j.disc_label || "Unknown disc")
       + (j.title && j.year && j.kind !== "tv" ? ` (${j.year})` : ""))}${seasonTag(j)} ${familyTag(j.disc_family)}</h2>
+    ${j.music && j.music.artist ? `<div class="np-sub">${esc(j.music.artist)}</div>` : ""}
     ${npPhase(j, verb) ? `<div class="np-sub">${esc(npPhase(j, verb))}</div>` : ""}
     ${j.warning ? `<div class="job-warn">${icon("triangle-exclamation")}<span>${esc(j.warning)}</span></div>` : ""}
     <div class="np-bar${working ? " working" : ""}" role="progressbar" aria-label="Progress of the whole rip"
@@ -1105,7 +1109,7 @@ function npAsk(j, acts) {
   // The prompt's form, under the same heading as every other card: what's happening,
   // the disc's name, and the question. The old header (label + badge) goes.
   const holder = document.createElement("div");
-  holder.innerHTML = identifyPrompt(j);
+  holder.innerHTML = j.output === "music" ? musicPrompt(j) : identifyPrompt(j);
   const form = holder.firstElementChild;
   const q = form.querySelector(".job-phase")?.textContent.trim();
   form.querySelector(".job-head")?.remove();
@@ -1114,7 +1118,7 @@ function npAsk(j, acts) {
   // TMDb's suggestions lead when there are any; typing a name is the fallback.
   const picks = form.querySelector(".ni-tmdb");
   const named = form.querySelector("label.f.wide");
-  if (picks && (j.candidates || []).length && named) {
+  if (j.output !== "music" && picks && (j.candidates || []).length && named) {
     const other = document.createElement("details");
     other.className = "ni-other";
     other.innerHTML = `<summary>Not listed? Type the name</summary>`;
@@ -1132,7 +1136,8 @@ function npAsk(j, acts) {
     row.insertAdjacentHTML("beforeend",
       acts({ ejectDisabled: true }).replace(/^<div class="np-acts">|<\/div>$/g, ""));
   }
-  const name = (j.episode_plan || {}).series || j.title || pretty(j.disc_label) || "A disc";
+  const name = (j.episode_plan || {}).series || j.title || pretty(j.disc_label)
+    || (j.output === "music" ? "Audio CD" : "A disc");
   const tv = !!(j.episode_plan || {}).episodes;
   return `
     <div class="np-kicker ask">${icon("circle-question")} Needs you</div>
@@ -1145,8 +1150,11 @@ function npAsk(j, acts) {
 
 function npIdle(drives, loaded, busy, acts, checklist = true) {
   const d = loaded || drives[0];
-  // With two drives the checklist is said once, on the first card, not on both.
-  const blocking = checklist ? problems(state.status).filter(p => p.level === "bad") : [];
+  // With two drives the checklist is said once, on the first card, not on both. A CD
+  // doesn't go anywhere near MakeMKV, so MakeMKV's problems don't block one.
+  const makemkv = ["Riparr can read discs", "The MakeMKV key is current"];
+  const blocking = checklist ? problems(state.status).filter(p => p.level === "bad"
+    && !(loaded && loaded.disc_family === "cd" && makemkv.includes(p.what))) : [];
   if (!loaded && blocking.length) {
     return `
       <div class="np-kicker ask">${icon("triangle-exclamation")} Not ready</div>
@@ -1168,8 +1176,10 @@ function npIdle(drives, loaded, busy, acts, checklist = true) {
   return `
     <div class="np-kicker${blocking.length ? " ask" : ""}">${icon(blocking.length ? "triangle-exclamation" : "compact-disc")} ${
       blocking.length ? "Disc loaded \u00b7 not ready to rip" : "Disc loaded"}</div>
-    <h2 class="np-title" tabindex="-1">${esc(pretty(d.label) || d.label || "A disc")} ${familyTag(d.disc_family)}</h2>
-    ${d.label ? `<div class="np-sub">${esc(d.label)}${d.disc_word ? ` \u00b7 ${esc(d.disc_word)}` : ""}</div>` : ""}
+    <h2 class="np-title" tabindex="-1">${esc(pretty(d.label) || d.label
+      || (d.disc_family === "cd" ? "Audio CD" : "A disc"))} ${familyTag(d.disc_family)}</h2>
+    ${d.label ? `<div class="np-sub">${esc(d.label)}${d.disc_word ? ` \u00b7 ${esc(d.disc_word)}` : ""}</div>`
+      : d.audio_tracks ? `<div class="np-sub">${d.audio_tracks} track${d.audio_tracks === 1 ? "" : "s"} \u00b7 Riparr looks it up on MusicBrainz when you rip it</div>` : ""}
     ${todo}
     ${d.space_warning ? `<p class="np-err">${esc(d.space_warning)}</p>` : ""}
     ${acts({ lead: busy ? "" : blocking.length
@@ -1180,12 +1190,15 @@ function npIdle(drives, loaded, busy, acts, checklist = true) {
 
 /* The end of a path, which is the part that says where it went; the whole of it is one
    tap away. */
-function shortPath(p) {
+function shortPath(p, folder = false) {
   const parts = String(p || "").split("/").filter(Boolean);
   // The folder it's in -- "Movies/The Matrix (1999)" -- not the file name, which on a
-  // TRaSH template is most of a line by itself.
+  // TRaSH template is most of a line by itself. When the destination *is* a folder (an
+  // album, a full-disc backup), its own name and the one above it.
+  if (folder) return parts.length > 2 ? parts.slice(-2).join("/") : String(p || "");
   return parts.length > 2 ? parts.slice(-3, -1).join("/") : String(p || "");
 }
+const isFolderJob = (j) => j && (j.output === "music" || j.output === "backup");
 
 function npFiled(j, acts) {
   const ok = j.state === "done";
@@ -1201,9 +1214,10 @@ function npFiled(j, acts) {
     <div class="np-kicker ${ok ? "ok" : "bad"}">${icon(ok ? "circle-check" : "triangle-exclamation")}
       ${ok ? "In your library" : "Didn't finish"} <span class="muted">· ${esc(ago(j.finished_at))}</span></div>
     <h2 class="np-title" tabindex="-1">${esc(filedName(j))} ${familyTag(j.disc_family)}</h2>
-    ${j.disc_label && j.title ? `<div class="np-sub">${esc(j.disc_label)}</div>` : ""}
+    ${j.music && j.music.artist ? `<div class="np-sub">${esc(j.music.artist)}</div>`
+      : j.disc_label && j.title ? `<div class="np-sub">${esc(j.disc_label)}</div>` : ""}
     ${ok && j.dest_path ? `<details class="np-path"><summary>${icon("hard-drive")}<span>${
-        esc(shortPath(j.dest_path))}</span></summary><code>${esc(j.dest_path)}</code></details>` : ""}
+        esc(shortPath(j.dest_path, isFolderJob(j)))}</span></summary><code>${esc(j.dest_path)}</code></details>` : ""}
     ${!ok && j.error ? `<p class="np-err">${esc(j.error)}</p>` : ""}
     ${ok && facts.length ? `<div class="np-facts">${facts.map(esc).join(" · ")}</div>` : ""}
     ${acts({ lead: retry ? `<button class="btn sm primary" data-hretry="${j.id}" data-haction="${esc(retry.action)}"
@@ -1294,7 +1308,8 @@ function filedName(j) {
 }
 
 async function setFiledArt(j) {
-  if (j.id in filedArts) return;
+  // An album brings its own cover; looking it up by name would find a film.
+  if (j.id in filedArts || j.art || j.kind === "music") return;
   filedArts[j.id] = null;
   // The title first, then the disc label: the lookup is strict, and either alone can
   // miss where the other is certain.
@@ -1328,6 +1343,7 @@ const FAMILY = {
   dvd:    { label: "DVD",     cls: "fam-dvd" },
   bluray: { label: "Blu-ray", cls: "fam-bluray" },
   uhd:    { label: "4K UHD",  cls: "fam-uhd" },
+  cd:     { label: "CD",      cls: "fam-cd" },
 };
 
 function familyTag(family, extra = "") {
@@ -1466,6 +1482,7 @@ async function showDiscDetails(device = "") {
           ${esc(driveName(x))} <span class="muted">${esc(x.device || "")}</span> ${driveTags(x)}</p>`).join("")}
       <p class="muted">${d.drive ? esc([d.drive.vendor, d.drive.model].filter(Boolean).join(" ")) + " · " : ""}${
         d.source === "job" ? "From the rip in progress."
+        : d.source === "toc" ? "From the CD's table of contents. The names come from MusicBrainz when it's ripped."
         : d.source === "scan" ? "From the last scan of this disc."
         : "This disc hasn't been read yet."}
         Titles under a minute are menus and idents and are left out.</p>
@@ -1793,6 +1810,48 @@ const gb = (b) => `${(b / 1073741824).toFixed(1)} GB`;
 
 /* TMDb films as cards. Picking one fills the name in and remembers the ID; the poster
    comes through Riparr's image proxy. */
+/* "Which album is this CD?": MusicBrainz's candidates to pick from, a search, and
+   typing the names as the last resort. */
+function musicPrompt(j) {
+  const cands = j.candidates || [];
+  return `
+    <div class="job needs" data-music-for="${j.id}" data-picked="">
+      <div class="job-head"><div class="grow">
+        <div class="job-title">Audio CD</div>
+        <div class="job-phase">${esc(j.question || "Which album is this?")}</div></div>
+        <span class="badge warn">Needs you</span></div>
+      <div class="ni-tmdb">
+        ${cands.length ? `<div class="ni-label">Pick the album</div>` : ""}
+        <div class="tmdb-picks mb-picks">${albumPicks(cands)}</div>
+        <div class="mb-search">
+          <input class="mb-album" placeholder="Album" aria-label="Album">
+          <input class="mb-artist" placeholder="Artist" aria-label="Artist">
+          <button type="button" class="btn mb-go">Search MusicBrainz</button>
+        </div>
+      </div>
+      <details class="ni-other"><summary>Not on MusicBrainz? Type it</summary>
+        <label class="f wide"><span>Artist</span><input class="mb-typed-artist"></label>
+        <label class="f wide"><span>Album</span><input class="mb-typed-album"
+               placeholder="e.g. Rumours (1977)"></label>
+      </details>
+      <div class="btn-row">
+        <button class="btn primary" data-answer-music="${j.id}">Rip it</button>
+        <button class="btn" data-skip="${j.id}">Skip this disc</button>
+      </div>
+    </div>`;
+}
+
+function albumPicks(albums) {
+  return (albums || []).map(a => `
+    <button type="button" class="tmdb-pick" data-mb-pick="${esc(a.id)}"
+        title="${esc([a.title, a.artist, a.year, a.country].filter(Boolean).join(" · "))}">
+      <span class="tmdb-poster"${a.poster ? ` style="background-image:url('${esc(a.poster)}')"` : ""}></span>
+      <span class="tmdb-name">${esc(a.title)}</span>
+      <span class="tmdb-year muted">${esc([a.artist, a.year, a.country].filter(Boolean).join(" · "))}${
+        a.track_count ? ` · ${a.track_count} tracks` : ""}</span>
+    </button>`).join("");
+}
+
 function tmdbPicks(films, picked) {
   if (!films.length) return "";
   return films.map(f => {
@@ -2198,7 +2257,7 @@ function historyGrouped(jobs, key, row, h, typical, byKind) {
                                      : "triangle-exclamation")}</span>
         <span class="hg-name"><b>${esc(name)}</b> ${familyTag(j.disc_family)}
           <span class="hg-result">${esc(result)}</span>
-          ${good && good.dest_path ? `<span class="hg-path">${icon("hard-drive")} ${esc(shortPath(good.dest_path))}</span>` : ""}</span>
+          ${good && good.dest_path ? `<span class="hg-path">${icon("hard-drive")} ${esc(shortPath(good.dest_path, isFolderJob(good)))}</span>` : ""}</span>
         <span class="hg-meta">${(() => {
           // Successes and the rest counted apart: twelve good rips aren't twelve attempts.
           const ok = list.filter(x => x.state === "done").length;
@@ -2327,9 +2386,9 @@ views.discs = async (highlight) => {
       + (d.title && d.year && d.kind !== "tv" ? ` (${d.year})` : "");
     const me = highlight && d.fingerprint === highlight;
     return `<figure class="rip${me ? " dupe" : ""}" id="${me ? "dupe-tile" : ""}"
-                    data-art="${esc(d.title || d.label || "")}"
+                    ${d.art ? "" : `data-art="${esc(d.title || d.label || "")}"`}
                     data-find="${esc([name, d.label, d.year].filter(Boolean).join(" "))}">
-      <div class="rip-art">
+      <div class="rip-art${d.art ? " has" : ""}"${d.art ? ` style="background-image:url('${esc(d.art)}')"` : ""}>
         <span class="rip-fallback">${icon("compact-disc")}</span>
         ${familyTag(d.disc_family, "on-art")}
         ${!d.ripped_at ? `<span class="rip-flag" title="Seen, but never finished a verified rip">${
@@ -2484,7 +2543,7 @@ settingsPages.library = async (s) => {
           <label class="f"><span>Folder</span>
             <input data-set="${folderKey}" data-dest-folder="${kind}"
                    value="${esc(s[folderKey] || "")}" placeholder="${
-                     kind === "tv" ? "TV" : "Movies"}"></label>
+                     ({ tv: "TV", music: "Music" })[kind] || "Movies"}"></label>
         </div>
         <div class="dest-path" data-dest-path="${kind}">${
           sh ? esc(destPath(sh, s[folderKey])) : "no share configured"}</div>
@@ -2506,6 +2565,7 @@ settingsPages.library = async (s) => {
       ${shares.length ? `<div class="dests">
           ${row("movie", "Films", "movie_folder", "movie_share_id")}
           ${row("tv", "Television", "tv_folder", "tv_share_id")}
+          ${row("music", "Music", "music_folder", "music_share_id")}
         </div>
         ${Object.values(library || {}).some(l => l && !l.mounted) ? `<p class="muted dests-note">That
           works as it is. To write straight into your library instead, mount the share on the
@@ -4376,6 +4436,56 @@ function wireContent(section, sub) {
       go.disabled = false;
     };
     q.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); go.click(); } };
+  });
+
+  $$("[data-music-for]").forEach(box => {
+    const wire = () => box.querySelectorAll("[data-mb-pick]").forEach(c => c.onclick = () => {
+      const on = !c.classList.contains("on");
+      box.querySelectorAll("[data-mb-pick]").forEach(x => x.classList.remove("on"));
+      c.classList.toggle("on", on);
+      box.dataset.picked = on ? c.dataset.mbPick : "";
+    });
+    wire();
+    const go = box.querySelector(".mb-go");
+    const search = async () => {
+      const album = box.querySelector(".mb-album").value.trim();
+      const artist = box.querySelector(".mb-artist").value.trim();
+      if (!album && !artist) return;
+      go.disabled = true;
+      let r;
+      const tracks = ((state.status || {}).drives || []).map(d => d.audio_tracks).find(Boolean) || 0;
+      try {
+        r = await api.get(`/api/musicbrainz/search?album=${encodeURIComponent(album)}&artist=${
+          encodeURIComponent(artist)}&tracks=${tracks}`);
+      } catch (e) { toast(e.message, "bad"); go.disabled = false; return; }
+      box.querySelector(".mb-picks").innerHTML = (r.results || []).length
+        ? albumPicks(r.results) : `<p class="muted">Nothing on MusicBrainz for that.</p>`;
+      box.dataset.picked = "";
+      wire();
+      go.disabled = false;
+    };
+    go.onclick = search;
+    box.querySelectorAll(".mb-album, .mb-artist").forEach(i => i.onkeydown = (e) => {
+      if (e.key === "Enter") { e.preventDefault(); search(); }
+    });
+  });
+
+  $$("[data-answer-music]").forEach(b => b.onclick = async () => {
+    const box = b.closest("[data-music-for]");
+    const body = {};
+    if (box.dataset.picked) body.release_id = box.dataset.picked;
+    else {
+      body.artist = box.querySelector(".mb-typed-artist").value.trim();
+      body.album = box.querySelector(".mb-typed-album").value.trim();
+      if (!body.artist && !body.album) {
+        toast("Pick the album, or type its artist and name.", "bad");
+        return;
+      }
+    }
+    b.disabled = true;
+    try { await api.post(`/api/queue/${b.dataset.answerMusic}/answer`, body); }
+    catch (e) { toast(e.message, "bad"); b.disabled = false; return; }
+    route();
   });
 
   $$("[data-answer]").forEach(b => b.onclick = async () => {

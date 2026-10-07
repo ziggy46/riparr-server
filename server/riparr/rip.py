@@ -162,7 +162,7 @@ def _watch_discs():
                 if not auto:
                     log.info("Disc inserted (%s), but Auto Rip is off.", sig[0])
                     continue
-                if not _autorip_ready():
+                if not _autorip_ready(d):
                     continue
                 # Its own thread: a scan is minutes, and the other drive's disc
                 # shouldn't wait behind it to be noticed.
@@ -209,11 +209,12 @@ def eject(job=None, device=None):
     return P.eject(device or device_of(job))
 
 
-def _autorip_ready():
-    """Auto Rip's own gate, without importing main (which imports this module)."""
+def _autorip_ready(drive=None):
+    """Auto Rip's own gate, without importing main (which imports this module). A CD
+    needs a share but not MakeMKV."""
     if not P.optical_drives():
         return False
-    if not P.makemkv_status().get("installed"):
+    if disc_family(drive or {}) != "cd" and not P.makemkv_status().get("installed"):
         return False
     if not db.default_share():
         return False
@@ -3068,6 +3069,7 @@ def _identify_music(job, s, d):
                        "track_id": t.get("track_id"), "state": "pending"})
     music = {"release_id": rel.get("id"), "artist": rel["artist"], "album": rel["title"],
              "year": rel.get("year"), "date": rel.get("date") or "",
+             "original_date": rel.get("original_date") or "",
              "disc": rel.get("disc") or 1, "discs": rel.get("discs") or 1,
              "disc_id": disc, "tracks": tracks,
              "cover": MB.cover_url(rel["id"], 250) if rel.get("id") else None}

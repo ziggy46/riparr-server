@@ -2341,3 +2341,8 @@ body.has-savebar .toast-host { bottom: 78px; }
 .np-drive > span:first-of-type { color: var(--fg); font-weight: 600; }
 .np-drive + .np { padding-top: 14px; }
 @media (max-width: 620px) { .np-drive { padding: 12px 16px 0; } }
+
+/* Audio CDs. */
+.fam-cd { color: #7fd3b0; border-color: rgba(127,211,176,.45); background: rgba(127,211,176,.12); }
+.mb-search { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.mb-search input { flex: 1 1 160px; min-width: 0; }

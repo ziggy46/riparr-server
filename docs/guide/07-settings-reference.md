@@ -72,6 +72,8 @@ machines" are the same control.
 | **Films → Folder** | The folder inside it, e.g. `Movies` or `Films/Bluray`. Several levels deep is fine |
 | **Television → Share** | Can be the same share, or a different one entirely |
 | **Television → Folder** | e.g. `TV` or `Shows` |
+| **Music → Share** | Where audio CDs go. Same choices again |
+| **Music → Folder** | e.g. `Music`. Each album lands in `Artist/Album (Year)` inside it |
 
 Under each block Riparr shows the full path it adds up to, and whether that share is
 **mounted** — which is what lets a rip be written straight into your library instead of

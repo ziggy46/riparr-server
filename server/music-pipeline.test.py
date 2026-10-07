@@ -119,6 +119,27 @@ check("a data CD has no music", OPT.audio_session({"first": 1, "last": 1, "leado
 check("track lengths come from the layout", MB.track_seconds(150 + 7500, [150, 150 + 4500]),
       [60, 40])
 
+print("what MusicBrainz says is read the way it means it")
+raw = {"id": "r1", "title": "Anthology", "date": "2013-05-01", "country": "GB",
+       "artist-credit": [{"name": "Simon", "joinphrase": " & "}, {"name": "Garfunkel"}],
+       "release-group": {"first-release-date": "1970-01-26"},
+       "media": [{"position": 1, "format": "CD", "track-count": 1, "discs": [{"id": "d1"}],
+                  "tracks": [{"position": 1, "title": "One", "length": 180000,
+                              "recording": {"id": "rec1"}}]},
+                 {"position": 2, "format": "CD", "track-count": 2, "discs": [{"id": "d2"}],
+                  "tracks": [{"position": 1, "title": "Two", "length": 200000,
+                              "artist-credit": [{"name": "Guest"}],
+                              "recording": {"id": "rec2"}},
+                             {"position": 2, "title": "Three", "recording": {"id": "rec3"}}]}]}
+r = MB.release(raw, "d2")
+check("the album's first year, not this pressing's", (r["year"], r["date"], r["original_date"]),
+      (1970, "2013-05-01", "1970-01-26"))
+check("the artists joined as credited", r["artist"], "Simon & Garfunkel")
+check("the disc of the set this CD is", (r["disc"], r["discs"], [t["title"] for t in r["tracks"]]),
+      (2, 2, ["Two", "Three"]))
+check("a track's own artist, else the album's", [t["artist"] for t in r["tracks"]],
+      ["Guest", "Simon & Garfunkel"])
+
 print("tags are the ones Picard and Plex read")
 plan = {"artist": "Fleetwood Mac", "album": "Rumours", "year": 1977, "date": "1977-02-04",
         "disc": 1, "discs": 1, "release_id": "rel", "disc_id": "id", "tracks": [{}] * 11}

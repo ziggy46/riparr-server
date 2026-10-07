@@ -348,12 +348,13 @@ tbody tr:hover td .btn, tbody tr:hover td .btn * { color: #000; }
 .badge.warn { color: var(--warn); }
 .badge.bad { color: var(--bad); }
 .badge.burst { color: var(--w98-navy); }
-.fam, .fam-dvd, .fam-bluray, .fam-uhd {
+.fam, .fam-dvd, .fam-bluray, .fam-uhd, .fam-cd {
   background: var(--w98-face); border: 0; box-shadow: var(--w98-raised);
   color: #000; padding: 2px 6px; letter-spacing: 0;
 }
 .fam-bluray { color: var(--w98-navy); }
 .fam-uhd { color: #800080; }
+.fam-cd { color: #006400; }
 .fam.on-art { background: var(--w98-face); backdrop-filter: none; }
 
 /* ── messages ── */

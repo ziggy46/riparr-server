@@ -29,7 +29,7 @@ getting the discs off your shelf and into your library. That's this.
 > **put a disc in → close the tray → walk away → it ejects when it's done**
 
 The MKV lands on your share, named the way Plex and Jellyfin want it. TV box sets are
-split into episodes. The web interface at `http://<server>:9797` is there for when you
+split into episodes, and music CDs become tagged FLAC albums. The web interface at `http://<server>:9797` is there for when you
 want detail.
 
 <img src="docs/img/web-queue.jpg" alt="The Riparr queue, ripping a Blu-ray with Auto Rip on">
@@ -110,6 +110,8 @@ opposed to Riparr's simulated drive:
   on real hardware, so two MakeMKV runs sharing one USB bus or host are unknown
 - [ ] A TV season disc on a real drive
 - [ ] 4K UHD discs and LibreDrive
+- [ ] **An audio CD on a real drive.** Identifying, encoding to FLAC, tagging and filing are
+  tested; reading a physical CD with cdparanoia isn't yet
 - [ ] Answering a disc from a phone notification (tested against a stand-in ntfy server)
 
 If you try one of the unticked ones, [an issue](../../issues) saying how it went, with

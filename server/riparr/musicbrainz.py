@@ -84,15 +84,20 @@ def _get(path, params=None, base=None):
         _last[0] = time.time()
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT,
                                                "Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-            return json.load(r)
-    except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return None
-        raise MusicBrainzError("MusicBrainz answered HTTP %s." % e.code)
-    except Exception as e:
-        raise MusicBrainzError("Couldn't reach MusicBrainz: %s" % e)
+    for attempt in range(3):
+        try:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            # 503 is MusicBrainz saying "too many requests just now": wait and ask again.
+            if e.code == 503 and attempt < 2:
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise MusicBrainzError("MusicBrainz answered HTTP %s." % e.code)
+        except Exception as e:
+            raise MusicBrainzError("Couldn't reach MusicBrainz: %s" % e)
 
 
 def _artist(credit):
@@ -125,9 +130,14 @@ def release(data, disc=None):
             or album_artist,
             "seconds": int((t.get("length") or rec.get("length") or 0) / 1000),
             "recording_id": rec.get("id"), "track_id": t.get("id")})
+    # The year the album first came out, not this pressing's: Rumours is 1977 whether
+    # the CD in the tray was made in 1984 or 2013. That's the year libraries file by.
+    first = (data.get("release-group") or {}).get("first-release-date") or ""
     return {"id": data.get("id"), "title": data.get("title") or "Unknown Album",
             "artist": album_artist or "Unknown Artist",
-            "date": data.get("date") or "", "year": _year(data.get("date")),
+            "date": data.get("date") or "",
+            "original_date": first or data.get("date") or "",
+            "year": _year(first) or _year(data.get("date")),
             "country": data.get("country") or "",
             "disc": medium.get("position") or 1, "discs": len(media) or 1,
             "format": medium.get("format") or "",
@@ -138,7 +148,7 @@ def release(data, disc=None):
 def lookup(disc, toc=None):
     """Every release this CD is part of, best first. [] when MusicBrainz doesn't know it."""
     try:
-        params = {"inc": "artist-credits+recordings", "cdstubs": "no"}
+        params = {"inc": "artist-credits+recordings+release-groups", "cdstubs": "no"}
         if toc:
             params["toc"] = toc                  # finds unsubmitted pressings by length
         data = _get("/discid/%s" % urllib.parse.quote(disc), params)
@@ -159,7 +169,7 @@ def get_release(release_id, disc=None):
     """One release by its MusicBrainz ID, with its tracks, or None."""
     try:
         data = _get("/release/%s" % urllib.parse.quote(release_id),
-                    {"inc": "artist-credits+recordings+discids"})
+                    {"inc": "artist-credits+recordings+discids+release-groups"})
     except MusicBrainzError:
         return None
     return release(data, disc) if data else None
@@ -171,7 +181,7 @@ def _quoted(text):
 
 def search(album="", artist="", tracks=None, limit=8):
     """Releases matching an album and/or artist name, CDs first, and ones with this
-    disc's number of tracks before others."""
+    disc's number of tracks before others. Raises MusicBrainzError when it can't ask."""
     album, artist = (album or "").strip(), (artist or "").strip()
     if not album and not artist:
         return []
@@ -181,13 +191,12 @@ def search(album="", artist="", tracks=None, limit=8):
     if artist:
         terms.append("artist:%s" % _quoted(artist))
     query = " AND ".join(terms) + " AND format:CD"
-    try:
-        data = _get("/release", {"query": query, "limit": limit})
-        if not (data or {}).get("releases"):
-            # Some releases have no format recorded; ask again without it.
-            data = _get("/release", {"query": " AND ".join(terms), "limit": limit})
-    except MusicBrainzError:
-        return []
+    # Raises MusicBrainzError: "nothing found" and "couldn't ask" are different answers
+    # to somebody typing in a search box.
+    data = _get("/release", {"query": query, "limit": limit})
+    if not (data or {}).get("releases"):
+        # Some releases have no format recorded; ask again without it.
+        data = _get("/release", {"query": " AND ".join(terms), "limit": limit})
     out = []
     for r in (data or {}).get("releases") or []:
         media = r.get("media") or []
