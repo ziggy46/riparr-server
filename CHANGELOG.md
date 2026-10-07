@@ -14,7 +14,7 @@ doesn't display the line.
 
 ---
 
-## Unreleased
+## 0.10.2
 
 - **History's time bars are bigger.** Each rip's bar is twice as thick and fills its
   column, so the short stages are no longer slivers.
