@@ -1,5 +1,5 @@
 """Riparr Server — the service. Single process, SQLite, no external daemons (D2)."""
-__version__ = "0.9.1"
+__version__ = "0.10.0"
 
 
 def build():
