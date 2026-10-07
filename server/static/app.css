@@ -971,12 +971,13 @@ tr.hist.cancelled > td.stat { color: var(--fg-muted); }
 
 /* One stage, one colour, used identically in the bar, the numbers under it and the
    key in the header -- so the wide band a user asks about is findable. */
-/* Capped, not stretched: the bar is a proportion, and a proportion drawn across
-   half the page reads as a progress bar for something still happening. */
-.stagebar { display: flex; height: 7px; border-radius: 4px; overflow: hidden;
-            width: 220px; max-width: 100%; background: var(--panel); }
-.stagebar i { display: block; min-width: 2px; }
-.stagenums { display: flex; gap: 4px 16px; margin-top: 7px; font-size: 12px;
+/* It fills its column: at a couple of hundred pixels the short stages were slivers
+   nobody could see. A hairline between segments keeps neighbours apart. */
+.stagebar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; gap: 2px;
+            width: 100%; min-width: 220px; background: var(--panel); }
+.stagebar i { display: block; min-width: 4px; }
+.hist-table td.hist-stages { width: 55%; }
+.stagenums { display: flex; gap: 4px 18px; margin-top: 8px; font-size: 12.5px;
              color: var(--fg-muted); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
 .stagenums span { white-space: nowrap; }
 .stagenums i, .sk i { display: inline-block; width: 8px; height: 8px; border-radius: 2px;
@@ -1055,9 +1056,7 @@ tr.hist.cancelled > td.stat { color: var(--fg-muted); }
     content: attr(data-label); display: block; color: var(--fg-muted);
     font-size: 11px; margin-bottom: 4px;
   }
-  /* Full width on a phone, capped on a tablet -- a proportion drawn across 780px of
-     empty space starts to read as a progress bar for something still running. */
-  .stagebar { width: 100%; max-width: 460px; }
+  .stagebar { width: 100%; min-width: 0; }
   .hist-table tr.hist > td.act { flex: 1 0 100%; text-align: left; padding-top: 10px;
                                  order: 2; }
   .hist-table .act .btn { margin: 0 6px 6px 0; }

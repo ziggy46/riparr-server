@@ -14,6 +14,11 @@ doesn't display the line.
 
 ---
 
+## Unreleased
+
+- **History's time bars are bigger.** Each rip's bar is twice as thick and fills its
+  column, so the short stages are no longer slivers.
+
 ## 0.10.1
 
 - **The watch folder setting is gone** from Settings → Library. It was never wired up:
