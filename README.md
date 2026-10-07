@@ -87,7 +87,7 @@ server already has:
 
 | Upstream | Riparr Server |
 |---|---|
-| Preparer app writes an SD card and installs over SSH | `docker compose up -d`, image on ghcr.io |
+| Preparer app writes an SD card and installs over SSH | `docker compose up -d`, image on ghcr.io — or one command on Debian/Ubuntu |
 | Detects real hardware by the board's device tree | Any Linux is real hardware; `RIPARR_MOCK=1` simulates |
 | MakeMKV built on the box from the web page | Compiled on the container's first start, once you accept its licence |
 | Updates itself in place | Checks for releases; you pull the new image |
@@ -142,6 +142,7 @@ on, ship the source too.
 |---|---|
 | Riparr | [jackharvest/riparr](https://github.com/jackharvest/riparr) — GPL-3.0 |
 | Design tokens | [Sonarr](https://github.com/Sonarr/Sonarr) — GPL-3.0 |
+| Album data | [MusicBrainz](https://musicbrainz.org) — CC0 · covers from the [Cover Art Archive](https://coverartarchive.org) |
 | Themes | [theme.park](https://github.com/themepark-dev/theme.park) — MIT · the Windows 98 theme borrows from [98.css](https://github.com/jdan/98.css) — MIT |
 | Icons | [Font Awesome Free](https://fontawesome.com/license/free) — CC BY 4.0 · brand marks from [Simple Icons](https://simpleicons.org/) — CC0 |
 | Wordmark | [Russo One](server/static/fonts/RussoOne-OFL.txt) — SIL OFL 1.1 |

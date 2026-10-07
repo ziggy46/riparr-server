@@ -11,7 +11,8 @@ Organized by **what you actually observed**.
 Riparr is at `http://<server>:9797` — your server's name or IP address, port 9797.
 
 1. **Is the container running?** `docker ps` should list `riparr`. If it isn't there, or
-   keeps restarting, read why with `docker logs riparr`.
+   keeps restarting, read why with `docker logs riparr`. Without Docker:
+   `systemctl status riparr`, and `journalctl -u riparr` for why.
 2. **Is the port published?** `docker-compose.yml` maps `9797:9797`. If you changed the
    left-hand side, use that port instead.
 3. **Is a firewall on the host blocking it?** Try from the server itself:
@@ -73,6 +74,9 @@ To undo it, delete that line and restart the container.
 
 **Docker inside a Proxmox LXC** only sees what the LXC was given, so pass both nodes into
 the LXC first. See [Run it in Docker](02-docker.md#on-proxmox).
+
+**Without Docker**, only step 1 applies: Riparr sees the machine's own drives, through the
+`cdrom` group. In a VM or an LXC, the drive has to be passed through to it first.
 
 ## Nothing happens when I insert a disc
 
@@ -203,7 +207,8 @@ If it happens, something downstream is stuck:
 1. **Check the library share** — if uploads have been failing, staging is holding
    everything
 2. **Look for stuck rips** in the queue
-3. **Settings → Storage** shows what's held and why
+3. **System → Status → Storage** shows how much room there is, and the sidebar counts
+   copies Riparr will clear as room
 
 If the volume behind `/srv/staging` is simply too small for the discs you rip, move it to
 a bigger disk.
@@ -223,6 +228,8 @@ volume and restart the container:
 ```
 docker exec riparr touch /data/riparr-reset && docker restart riparr
 ```
+
+Without Docker: `sudo touch /var/lib/riparr/riparr-reset && sudo systemctl restart riparr`.
 
 The web UI asks you to create an account again. Riparr deletes the file as it acts on it.
 Only the account is cleared: your shares, settings and every disc it remembers are all

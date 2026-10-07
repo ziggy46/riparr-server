@@ -8,9 +8,9 @@
 
 | Part | Notes |
 |---|---|
-| **A server running Docker** | Anything Linux: a NAS, a home server, a Proxmox VM. MakeMKV is happiest with 2 GB of RAM to itself, and decrypting a disc is CPU work, so a faster CPU rips faster. amd64 and arm64 both work. |
-| **An optical drive** | See [which drive](#which-drive) below. This is the choice that matters most, and the only one you can get expensively wrong. |
-| **Staging space** | Room for the biggest disc you rip, on top of everything else: about **10 GB for DVDs, 50 GB for Blu-ray, 100 GB for 4K**. Not needed for rips that go [straight to your library](02-docker.md#optional-rip-straight-into-your-library). |
+| **A Linux machine** | Running Docker, or Debian/Ubuntu for the [direct install](03-bare-metal.md): a NAS, a home server, a Proxmox VM or LXC. MakeMKV is happiest with 2 GB of RAM to itself, and decrypting a disc is CPU work, so a faster CPU rips faster. amd64 and arm64 both work. macOS and Windows only through a Linux VM. |
+| **An optical drive** | See [which drive](#which-drive) below. This is the choice that matters most, and the only one you can get expensively wrong. Two or more drives rip at the same time. |
+| **Staging space** | Room for the biggest disc you rip, on top of everything else: about **10 GB for DVDs, 50 GB for Blu-ray, 100 GB for 4K**, under 1 GB for a CD. Each rip is deleted from staging once it's safely in your library. Not needed for rips that go [straight to your library](02-docker.md#optional-rip-straight-into-your-library). |
 | **A share** | SMB, on a NAS or any computer that is usually on. This is where finished rips go. |
 
 ## Which drive
@@ -24,6 +24,7 @@ There are two separate questions, and shops answer neither clearly.
 
 | You want to rip | Drive |
 |---|---|
+| **Music CDs** | Any optical drive. CDs don't need MakeMKV or a key. |
 | **DVDs only** | Any DVD drive. Nothing special, nothing to check. |
 | **Blu-ray (1080p)** | Any Blu-ray reader. Also nothing special — 1080p Blu-ray is not firmware-sensitive, and every working BD drive does DVDs too. |
 | **4K / UHD Blu-ray** | **Specific models, often on specific firmware.** Most Blu-ray drives cannot rip a UHD disc at all, and they do not say so anywhere on the box. |

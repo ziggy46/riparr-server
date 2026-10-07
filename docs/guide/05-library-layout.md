@@ -24,6 +24,20 @@ TV/
       Twin Peaks - S01E01 - Pilot.mkv
 ```
 
+**Music** (audio CDs)
+```
+Music/
+  Fleetwood Mac/
+    Rumours (1977)/
+      01 - Second Hand News.flac
+      02 - Dreams.flac
+      cover.jpg
+```
+
+The discs of a set share the album folder as `1-01`, `1-02`… `2-01`. Each FLAC is tagged
+with what MusicBrainz knows and carries the cover inside it. See
+[Audio CDs](06-ripping-discs.md#audio-cds).
+
 These follow the conventions Plex, Jellyfin, and Emby all expect. Files land already
 matched — no "fix match" pass in Plex afterward.
 
@@ -138,25 +152,29 @@ To tag every rip from the start instead, put `{Source}` in the template:
 
 ## How Riparr identifies a disc
 
-**The name comes off the disc label.** Most Blu-rays carry a usable one —
-`BLADE_RUNNER_2049` becomes `Blade Runner 2049`. Riparr tidies it and files it under
-that.
+**A film's name starts from the disc label.** Most Blu-rays carry a usable one —
+`BLADE_RUNNER_2049` becomes `Blade Runner 2049`. With a TMDb key (see
+[Film lookup](#film-lookup-tmdb) above), that name is looked up and the film's real title,
+year and IDs are used — but only when the match is clear-cut.
 
 **DVDs are rougher.** DVD volume labels are frequently garbage like `LOGICAL_VOLUME_ID`.
 When the label gives nothing a person would accept as a name, Riparr asks rather than
 inventing one.
 
-**It does not guess a year.** A year only appears in a filename if it was in brackets on
-the disc label or you typed one into the prompt. `Blade Runner 2049.mkv` is a name Plex
-matches and claims nothing untrue; `Blade Runner (2049).mkv` would be a confident lie.
+**It does not guess a year.** A year only appears in a filename if TMDb was sure of it,
+it was in brackets on the disc label, or you typed one into the prompt. `Blade Runner
+2049.mkv` is a name Plex matches and claims nothing untrue; `Blade Runner (2049).mkv`
+would be a confident lie.
+
+**A music CD has no label at all.** Its track layout identifies it on MusicBrainz instead,
+which gives the artist, album, year and every track's title. When MusicBrainz doesn't
+know the CD, Riparr asks.
 
 **It only asks once per disc.** Riparr remembers your correction against that specific
 disc's fingerprint. Rip the same disc on the same box a year later and it already knows.
 
-There is no film-metadata lookup. Riparr names films from the disc and lets Plex,
-Jellyfin or Emby do the matching, which they are better at and already do. The one
-exception is television, below, where the numbers have to be right *before* the file is
-written.
+Television is the case where the numbers have to be right *before* the file is written,
+below.
 
 ## Two cases worth knowing about
 

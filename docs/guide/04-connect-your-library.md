@@ -65,18 +65,18 @@ finishes and has nowhere to go.
 Riparr copies files over SMB with `smbclient`, so none of this needs anything mounted on
 the server or in the container.
 
-## Where films and television go
+## Where films, television and music go
 
 **Settings → Library → Where things go** has one block per kind of disc, and each block
 names a **share** and a **folder inside it**. That means all four of these are the same
 control:
 
-| What you want | Films | Television |
-|---|---|---|
-| Everything in one place | `Media` · `Movies` | `Media` · `TV` |
-| Two folders, one server | `Media` · `Films/Bluray` | `Media` · `Shows` |
-| Two different machines | `Media` on the NAS | `Video` on another server |
-| Straight into an existing library | `Media` · `Movies` | `Media` · `TV Shows` |
+| What you want | Films | Television | Music |
+|---|---|---|---|
+| Everything in one place | `Media` · `Movies` | `Media` · `TV` | `Media` · `Music` |
+| Separate folders, one server | `Media` · `Films/Bluray` | `Media` · `Shows` | `Media` · `Audio/CDs` |
+| Different machines | `Media` on the NAS | `Video` on another server | `Music` on a third |
+| Straight into an existing library | `Media` · `Movies` | `Media` · `TV Shows` | `Media` · `Music` |
 
 Add a second share from the **Shares** section on the same page, then pick it in the
 dropdown. Riparr creates per-title folders inside whatever you choose, and does not touch
