@@ -186,6 +186,39 @@ with mock.patch.object(P, "MOCK", False), mock.patch.object(P, "LIBRARY_MOUNT", 
     with mock.patch.object(P.os.path, "ismount", return_value=True):
         check("a writable mount has no problem", P.library_problem(), None)
 
+print("MakeMKV's SDF hang is worked around")
+from riparr import makemkv as MKV  # noqa: E402
+_home = tempfile.mkdtemp(prefix="riparr-home-")
+_bin = os.path.join(_home, "makemkvcon")
+
+
+def fake_makemkv(hang):
+    # A stand-in makemkvcon: prints its start line, writes the debug log line naming
+    # the drive, then either hangs (the bug) or lists drives like a working one.
+    with open(_bin, "w") as f:
+        f.write("#!/bin/sh\n"
+                "echo 'MSG:1005,0,1,\"MakeMKV started\",\"\",\"\"'\n"
+                "printf 'SDF auto v0a6: hp_TEST_DRIVE_123\\n' > \"$HOME/MakeMKV_log.txt\"\n"
+                + ("sleep 30\n" if hang else "echo 'DRV:0,2,999,1,\"BD-ROM hp\",\"X\",\"/dev/sr0\"'\n"))
+    os.chmod(_bin, 0o755)
+
+
+with mock.patch.dict(os.environ, {"HOME": _home}), mock.patch.object(MKV.P, "MOCK", False), \
+        mock.patch.object(MKV.shutil, "which", return_value=_bin), \
+        mock.patch.object(MKV, "PROBE_SECONDS", 3):
+    fake_makemkv(hang=False)
+    MKV._probed.clear()
+    check("a drive MakeMKV reads normally is left alone",
+          (MKV.ensure_drive_ready("dev:/dev/sr0"), MKV.conf_value("sdf_Stop")), (None, None))
+    fake_makemkv(hang=True)
+    MKV._probed.clear()
+    note = MKV.ensure_drive_ready("dev:/dev/sr0")
+    check("a hang names the drive and sets sdf_Stop for it",
+          (bool(note), MKV.conf_value("sdf_Stop")), (True, "hp_TEST_DRIVE_123"))
+    check("and it's only probed once per drive", MKV.ensure_drive_ready("dev:/dev/sr0"), None)
+check("drives are addressed by path, not MakeMKV's index",
+      (RIP_disc := __import__("riparr.rip", fromlist=["x"])._disc_arg("/dev/sr1")), "dev:/dev/sr1")
+
 print("the password reset file")
 from riparr import main  # noqa: E402  (imported late: it reads RIPARR_DB at import)
 db.create_user("admin", "a-test-password")

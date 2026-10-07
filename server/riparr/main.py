@@ -368,7 +368,7 @@ def status(user=Depends(require_user)):
         "storage": dict(storage, **_capacity(storage["free_bytes"])),
         "optical": P.optical_diagnosis(),
         "clock": P.clock_status(),
-        "makemkv": P.makemkv_status(),
+        "makemkv": dict(P.makemkv_status(), sdf_stop=MK.conf_value("sdf_Stop")),
         "drives": _drive_report(),
         # Four fields, not the row. The row carries the SMB password, and the browser
         # has never needed it -- same argument as /api/setup/state, which was handing

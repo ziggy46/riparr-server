@@ -3224,6 +3224,10 @@ systemPages.status = async () => {
       <div class="kv">
         <div class="k">MakeMKV</div><div class="v">${m.installed ? esc(m.version || "installed") : "not installed"}</div>
         <div class="k">Key</div><div class="v">${esc(keyPhrase(m))}</div>
+        ${m.sdf_stop ? `<div class="k">Drive data</div><div class="v">Skipped for this drive, to
+          avoid a MakeMKV bug that hangs fetching it. DVDs and Blu-rays rip as usual; 4K
+          LibreDrive features are off. <span class="muted">(<code>sdf_Stop</code> in
+          MakeMKV's settings)</span></div>` : ""}
         <div class="k">Drive</div><div class="v">${(st.drives && st.drives.length)
           ? st.drives.map(d => `${esc(driveName(d))} <span class="muted">· ${esc(d.reads || "capability unknown")}</span>`).join("<br>")
           : `<span class="muted">${esc((st.optical && st.optical.summary) || "no drive detected")}</span>`}</div>

@@ -131,7 +131,7 @@ check("into <dest>/disc", (dvd[dvd.index("-o") + 1], dvd[dvd.index("-n") + 1]),
       ("/x", "disc"))
 bd = BK.command("bluray", "/dev/sr1", "/x")
 check("a Blu-ray goes through makemkvcon backup, decrypted",
-      bd[-4:], ["--decrypt", "backup", "disc:1", "/x/disc"])
+      bd[-4:], ["--decrypt", "backup", "dev:/dev/sr1", "/x/disc"])
 check("in robot mode", "-r" in bd, True)
 
 # ── staged Blu-ray ───────────────────────────────────────────────────────────

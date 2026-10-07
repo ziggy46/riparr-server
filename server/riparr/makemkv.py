@@ -13,8 +13,12 @@ length.
 import calendar
 import datetime
 import json
+import logging
 import os
+import queue
 import re
+import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -22,6 +26,8 @@ import urllib.error
 import urllib.request
 
 from . import platform as P
+
+log = logging.getLogger("riparr.MakeMKV")
 
 EULA_URL = "https://www.makemkv.com/eula/"
 HOMEPAGE = "https://www.makemkv.com/"
@@ -725,6 +731,47 @@ def settings_conf_path():
     return os.path.expanduser(SETTINGS_CONF)
 
 
+def _set_conf(name, value):
+    """Set one `name = "value"` line in MakeMKV's settings.conf (None removes it).
+
+    Replaces any existing line for the name rather than appending: MakeMKV reads the file
+    top to bottom and the last assignment wins, so a second line would work by luck and
+    the file would grow by one line per save. Written via a temporary file and renamed,
+    so a power cut mid-write leaves the old settings.conf rather than half of a new one.
+    """
+    path = settings_conf_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    lines = []
+    if os.path.exists(path):
+        with open(path) as f:
+            lines = f.read().splitlines()
+    out = [l for l in lines if not re.match(r"\s*%s\s*=" % re.escape(name), l)]
+    if value:
+        out.append('%s = "%s"' % (name, str(value).replace('\\', '\\\\').replace('"', '\\"')))
+    body = "\n".join(out).rstrip("\n") + "\n"
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".settings.conf.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(body)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except Exception:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def conf_value(name):
+    """The value of one setting in MakeMKV's settings.conf, or None."""
+    try:
+        with open(settings_conf_path()) as f:
+            m = re.search(r'^\s*%s\s*=\s*"(.*)"\s*$' % re.escape(name), f.read(), re.M)
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
 def apply_key(key):
     """Put the key where MakeMKV will actually read it. Returns (ok, message).
 
@@ -740,39 +787,97 @@ def apply_key(key):
     path = settings_conf_path()
     if P.MOCK:
         return True, "Simulated: would write app_Key to %s" % path
-
     try:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        lines = []
-        if os.path.exists(path):
-            with open(path) as f:
-                lines = f.read().splitlines()
-
-        # Replace the existing app_Key rather than appending a second one: MakeMKV reads
-        # the file top to bottom and the last assignment wins, so an appended key would
-        # work by luck and a duplicated file would grow by one line per save.
-        out = [l for l in lines if not re.match(r"\s*app_Key\s*=", l)]
-        if key:
-            out.append('app_Key = "%s"' % key.replace('\\', '\\\\').replace('"', '\\"'))
-        body = "\n".join(out).rstrip("\n") + "\n"
-
-        # Written via a temporary file in the same directory and renamed, so a power cut
-        # mid-write leaves the old settings.conf rather than half of a new one.
-        d = os.path.dirname(path)
-        fd, tmp = tempfile.mkstemp(dir=d, prefix=".settings.conf.")
-        try:
-            with os.fdopen(fd, "w") as f:
-                f.write(body)
-            os.chmod(tmp, 0o600)
-            os.replace(tmp, path)
-        except Exception:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-            raise
+        _set_conf("app_Key", key or None)
     except OSError as e:
         return False, ("Saved, but MakeMKV could not be registered: %s could not be "
                        "written (%s)." % (path, e))
     return True, ("Registered." if key else "Key cleared.")
+
+
+# ── the SDF hang ──────────────────────────────────────────────────────────────
+#
+# A Linux-only MakeMKV bug since 1.17.8: the first time it meets a drive it fetches
+# that drive's data ("SDF auto ...: <drive id>" in its debug log) and the fetch can
+# spin at 100% CPU forever. Nothing after it runs -- not the drive scan, not the disc
+# -- so a rip sits on "Reading the disc" until it times out. The known workaround is
+# `sdf_Stop = "<drive id>"` in settings.conf, which skips that step for that drive. It
+# only costs LibreDrive (4K UHD firmware features); DVDs and Blu-rays rip as usual.
+# https://forum.makemkv.com/forum/viewtopic.php?p=204167
+#
+# So before the first MakeMKV run on a drive, a short probe: if MakeMKV gets as far as
+# listing drives, all is well; if it goes silent after starting, read the drive id from
+# its debug log, set sdf_Stop, and carry on.
+
+SDF_LINE = re.compile(r"SDF(?:\s+auto)?\s+v\w+:\s+(\S+)")
+PROBE_SECONDS = 60
+_probed = set()
+_probe_lock = threading.Lock()
+
+
+def ensure_drive_ready(disc_arg):
+    """Work around MakeMKV's SDF hang for this drive if needed. Returns a note or None."""
+    if P.MOCK or not disc_arg:
+        return None
+    with _probe_lock:
+        if disc_arg in _probed:
+            return None
+        _probed.add(disc_arg)
+        if conf_value("sdf_Stop"):
+            return None
+        binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"
+        if not os.path.exists(binary):
+            return None
+        log_path = os.path.join(os.path.expanduser("~"), "MakeMKV_log.txt")
+        proc = subprocess.Popen([binary, "-r", "--debug", "info", disc_arg],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1)
+        lines = queue.Queue()
+
+        def pump():
+            for ln in proc.stdout:
+                lines.put(ln)
+            lines.put(None)
+        threading.Thread(target=pump, daemon=True).start()
+
+        healthy, start = False, time.time()
+        while time.time() - start < PROBE_SECONDS:
+            try:
+                ln = lines.get(timeout=1)
+            except queue.Empty:
+                continue
+            if ln is None or ln.startswith("DRV:"):
+                healthy = True          # listed the drives, or finished on its own
+                break
+        try:
+            proc.terminate()
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+        if healthy:
+            return None
+
+        try:
+            with open(log_path, errors="replace") as f:
+                ids = SDF_LINE.findall(f.read())
+        except OSError:
+            ids = []
+        if not ids:
+            log.warning("MakeMKV went quiet after starting, but its log names no drive "
+                        "to work around; the scan may hang.")
+            return None
+        drive_id = ids[-1]
+        try:
+            _set_conf("sdf_Stop", drive_id)
+        except OSError as e:
+            log.warning("MakeMKV hangs fetching drive data (known MakeMKV bug); "
+                        "couldn't write sdf_Stop: %s", e)
+            return None
+        note = ("MakeMKV was hanging on a known bug while fetching data for this drive "
+                "(%s), so Riparr told it to skip that step. DVDs and Blu-rays rip as "
+                "usual; only 4K LibreDrive features are affected." % drive_id)
+        log.warning(note)
+        return note
 
 
 def key_is_registered():

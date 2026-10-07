@@ -41,6 +41,7 @@ import time
 from . import db, tv, notify, platform as P, shares as SH, system as SY
 from . import backup as BK
 from . import naming
+from . import makemkv as MK
 from . import tmdb as TM
 
 log = SY.component("Rip")
@@ -833,6 +834,10 @@ def read_titles(device, disc=None, on_progress=None):
     binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"
     if not os.path.exists(binary):
         return []
+    # Before MakeMKV's first look at this drive: catch its SDF hang and work round it.
+    note = MK.ensure_drive_ready(_disc_arg(device))
+    if note:
+        _mk_note(note)
     # 300s was killing real discs mid-scan. An encrypted retail DVD makes MakeMKV do
     # the decryption work in software, and on four A53 cores that is CPU-bound for
     # minutes -- measured on the reference board with nothing else touching the drive:
@@ -932,11 +937,15 @@ def read_titles(device, disc=None, on_progress=None):
 
 
 def _disc_arg(device):
-    """MakeMKV addresses drives by its own index, not by /dev path."""
+    """How MakeMKV is told which drive: by its /dev path.
+
+    Its own index (disc:N) is the order it happens to enumerate drives in, which needn't
+    match srN -- in a container it can see drives in /sys it can't open. dev:/dev/srN
+    names the drive Riparr actually means.
+    """
     if not device:
         return "disc:0"
-    m = re.search(r"sr(\d+)$", device)
-    return "disc:%s" % (m.group(1) if m else "0")
+    return "dev:%s" % device if device.startswith("/dev/") else "disc:0"
 
 
 _JUNK_LABEL = re.compile(r"^(?:logical_volume_id|dvd_video|bluray|untitled|unknown)$", re.I)
@@ -1798,6 +1807,9 @@ def _run_makemkv(job, s, title_index, out_dir, cancel_ev, total_bytes,
     two progress callbacks are the whole of the interface.
     """
     binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"
+    note = MK.ensure_drive_ready(_disc_arg(job.get("_device")))
+    if note:
+        _mk_note(note)
     cmd = [binary, "-r", "--progress=-same",
            "--minlength=%d" % s["min_title_seconds"],
            "mkv", _disc_arg(job.get("_device")), str(title_index), out_dir]

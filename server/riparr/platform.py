@@ -359,9 +359,11 @@ def _libredrive_probe(key, drive, ev):
     """Ask MakeMKV, once per drive model, off the request path."""
     try:
         binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"
-        m = re.search(r"sr(\d+)$", drive.get("device") or "")
-        out = _run([binary, "-r", "--cache=1", "info",
-                    "disc:%s" % (m.group(1) if m else "0")], timeout=120) or ""
+        dev = drive.get("device") or ""
+        arg = "dev:%s" % dev if dev.startswith("/dev/") else "disc:0"
+        from . import makemkv as MK          # here, not at the top: makemkv imports us
+        MK.ensure_drive_ready(arg)
+        out = _run([binary, "-r", "--cache=1", "info", arg], timeout=120) or ""
         _libredrive_cache[key] = DRV.parse_libredrive(out)
     except Exception:
         # A probe that blew up must not be retried on every poll for ever, but it also

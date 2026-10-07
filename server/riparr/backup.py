@@ -167,15 +167,17 @@ def command(family, device, dest, name="disc"):
         return ["dvdbackup", "-M", "-r", "b", "-i", device or "/dev/sr0",
                 "-o", dest, "-n", name]
     binary = shutil.which("makemkvcon") or "/usr/local/bin/makemkvcon"
+    from . import makemkv as MK
+    MK.ensure_drive_ready(_disc_arg(device))
     return [binary, "-r", "--progress=-same", "--decrypt", "backup",
             _disc_arg(device), os.path.join(dest, name)]
 
 
 def _disc_arg(device):
+    # By /dev path, like rip._disc_arg: MakeMKV's own index needn't match srN.
     if not device:
         return "disc:0"
-    m = re.search(r"sr(\d+)$", device)
-    return "disc:%s" % (m.group(1) if m else "0")
+    return "dev:%s" % device if device.startswith("/dev/") else "disc:0"
 
 
 _PRGC = re.compile(r'^PRGC:\d+,\d+,"(.*)"')

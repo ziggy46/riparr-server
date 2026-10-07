@@ -16,10 +16,14 @@ doesn't display the line.
 
 ## Unreleased
 
-**Fixed: MakeMKV could hang at 100% CPU and never read the disc.** Recent Docker gives
-containers an open-files limit of about a billion, and MakeMKV closes every possible file
-handle before it starts reading -- which takes forever. Riparr now caps the limit when it
-starts, and the compose file sets it too.
+**Fixed: a rip could sit on "Reading the disc" forever.** A Linux-only MakeMKV bug can
+hang it at 100% CPU the first time it meets a drive, while fetching that drive's data,
+before it reads anything. Riparr now checks for this before MakeMKV's first run on a drive
+and, if it hangs, tells MakeMKV to skip that step for the drive (its `sdf_Stop` setting).
+DVDs and Blu-rays rip as usual; only 4K LibreDrive features are affected, and System →
+Status says when it's in effect. Riparr also addresses drives by their device path
+(`/dev/sr0`) rather than MakeMKV's own numbering, and caps the container's open-files
+limit, which can cause a similar hang on some Docker hosts.
 
 **A new layout.** The Queue shows the disc being ripped as one large card, phones get
 tabs at the bottom, History is grouped by disc, and Settings are shorter. It replaces the

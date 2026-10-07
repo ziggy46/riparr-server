@@ -38,6 +38,20 @@ leaves Auto Rip on but explains why a disc you just put in might not get ripped.
 **All green and still nothing?** Check the switch is actually on — the checklist tells you
 Riparr *could* rip, not that you've asked it to. Then read the next section.
 
+## Stuck on "Reading the disc"
+
+Reading an encrypted DVD takes a few minutes at 100% CPU, and some studios fill their
+discs with dummy titles that stretch it further. **What MakeMKV is doing** on the rip card
+shows its messages; if titles are being added, it's working.
+
+If MakeMKV prints nothing after starting, for many minutes, it has probably hit a
+Linux-only MakeMKV bug: it hangs fetching data for a drive it hasn't seen before. Riparr
+works round this automatically: before MakeMKV's first run on a drive it checks, and if
+MakeMKV hangs it adds `sdf_Stop = "<drive id>"` to MakeMKV's settings
+(`data/.MakeMKV/settings.conf`), which skips that step for that drive. System → Status
+shows **Drive data: Skipped** when it's in effect. It only costs 4K LibreDrive features.
+To undo it, delete that line and restart the container.
+
 ## No drive found
 
 1. **Check the host sees it:** `lsscsi -g` on the host should show a `cd/dvd` line. If it
