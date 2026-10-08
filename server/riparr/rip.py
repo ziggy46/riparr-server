@@ -1365,7 +1365,7 @@ def _plan_or_wait(job, cancel_ev):
     that file has left staging. Refusing it would make somebody come back and press
     Retry for a disc that was never the problem.
     """
-    need = int(job.get("bytes_total") or 0)
+    need = int(job.get("bytes_total") or 0) + _extras_bytes(job)
     kind = job.get("kind") or "movie"
     waited = False
     while True:
@@ -2176,6 +2176,24 @@ def pick_extras(titles, main, min_seconds):
     return out[:MAX_EXTRAS]
 
 
+def _wants_extras(job, s=None):
+    s = s or _settings()
+    return (s.get("rip_mode") == "all" and (job.get("kind") or "movie") == "movie"
+            and (job.get("output") or MKV) == MKV)
+
+
+def _extras_bytes(job):
+    """What this film's extras will take in staging, so it's planned for with the film."""
+    if not _wants_extras(job):
+        return 0
+    s = _settings()
+    titles = _job_titles(job)
+    main = job.get("_title") or next(
+        (t for t in titles if t["index"] == job.get("chosen_title")), None)
+    return sum(int(t.get("bytes") or 0)
+               for t in pick_extras(titles, main, s["min_title_seconds"]))
+
+
 def _extra_name(n, t):
     secs = int(t.get("seconds") or 0)
     length = "%d min" % round(secs / 60.0) if secs >= 90 else "%d s" % secs
@@ -2183,8 +2201,7 @@ def _extra_name(n, t):
 
 
 def _rip_extras(job, s, out_dir, cancel_ev):
-    if s.get("rip_mode") != "all" or (job.get("kind") or "movie") != "movie" \
-            or (job.get("output") or MKV) != MKV:
+    if not _wants_extras(job, s):
         return
     titles = _job_titles(job)
     picks = pick_extras(titles, job.get("_title"), s["min_title_seconds"])
@@ -2194,6 +2211,9 @@ def _rip_extras(job, s, out_dir, cancel_ev):
                                     "so no extras were ripped from it.")
         return
     extras, failed = [], 0
+    # Reading the extras is more saving off the disc, and History's breakdown should
+    # say where those minutes went rather than lose them between stages.
+    db.stage_start(job["id"], "save")
     for n, t in enumerate(picks, 1):
         if cancel_ev.is_set():
             raise Cancelled()
@@ -2216,6 +2236,7 @@ def _rip_extras(job, s, out_dir, cancel_ev):
         extras.append({"index": t["index"], "seconds": t["seconds"],
                        "bytes": os.path.getsize(path), "path": path,
                        "state": "ripped", "name": _extra_name(n, t)})
+    db.stage_end(job["id"])
     job["extras"] = extras
     db.update_job(job["id"], extras=extras)
     log.info("Job %d: %d extra%s read", job["id"], len(extras), "" if len(extras) == 1 else "s")
@@ -2744,7 +2765,7 @@ def _transfer(job, s, local_path, cancel_ev):
     name, warning = _avoid_clobbering(transport, name, job, s)
     if warning:
         log.warning("Job %d: %s", job["id"], warning)
-        db.update_job(job["id"], warning=warning)
+        _add_warning(job["id"], warning)
 
     total = os.path.getsize(local_path)
     db.stage_start(job["id"], "upload")
@@ -2856,7 +2877,7 @@ def _place_directly(job, s, local_path, name, transport, kind="movie"):
     name, warning = _avoid_clobbering(transport, name, job, s)
     if warning:
         log.warning("Job %d: %s", job["id"], warning)
-        db.update_job(job["id"], warning=warning)
+        _add_warning(job["id"], warning)
 
     # `name` is relative to the *configured library path*, which is
     # "SHARE/subdirectory" -- and the mount is only the share. Joining it to the mount
@@ -3042,7 +3063,7 @@ def _verify(job, s, transport, name, local_path):
     if local_path.startswith(P.LIBRARY_MOUNT) and mode == "deep":
         log.info("Job %d: deep verification is not possible on a direct rip; "
                  "checking the size instead.", job["id"])
-        db.update_job(job["id"], warning="Written straight to your library, so there "
+        _add_warning(job["id"], "Written straight to your library, so there "
                                          "is no second copy to hash. Riparr checked "
                                          "the size instead.")
         mode = "quick"

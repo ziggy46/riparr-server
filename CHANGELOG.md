@@ -34,7 +34,9 @@ every rip kept MakeMKV's default tracks, and still does until you turn this on.
 featurettes, deleted scenes and trailers are ripped too, into a `Featurettes` folder
 beside the film, which Plex and Jellyfin show as its extras. Riparr skips other cuts of
 the film, decoy playlists and "play all" titles. This replaces the **All titles**
-option, which also never did anything. Click a film on **Discs** to see where its extras
+option, which also never did anything, so if you had **All titles** chosen, rips now
+include extras. Everything goes in `Featurettes`, since a disc doesn't say which title
+is a deleted scene and which a trailer. Click a film on **Discs** to see where its extras
 went.
 
 ## 0.10.2

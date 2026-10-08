@@ -921,8 +921,8 @@ def _strip_tags(html):
 # nothing and costs nothing.
 #
 # Riparr only touches the line when the user has asked it to keep some languages. Off,
-# it removes the line it wrote (never one somebody put there themselves), and MakeMKV
-# goes back to its own default.
+# it puts back whatever was there before it first wrote one -- somebody's own rules, or
+# nothing, which is MakeMKV's own default.
 
 # ISO 639-1 -> the 639-2 spellings MakeMKV might use for it.
 LANGS = {
@@ -1002,11 +1002,14 @@ def apply_selection(rules):
     from . import db
     try:
         if rules:
+            if not db.get("makemkv_selection_ours"):
+                # Somebody's own rules, kept to put back when this is turned off.
+                db.set("makemkv_selection_before", conf_value(_SELECTION) or "")
             if conf_value(_SELECTION) != rules:
                 _set_conf(_SELECTION, rules)
             db.set("makemkv_selection_ours", True)
         elif db.get("makemkv_selection_ours"):
-            _set_conf(_SELECTION, None)
+            _set_conf(_SELECTION, db.get("makemkv_selection_before") or None)
             db.set("makemkv_selection_ours", False)
     except OSError as e:
         log.warning("Couldn't write MakeMKV's track selection: %s", e)

@@ -219,10 +219,25 @@ ripping a 90-minute loop of the same scene.
 
 ## What tracks get kept
 
-Sensible defaults: your language, the main audio track, forced subtitles, no commentary.
+By default, the tracks MakeMKV picks. Turn on **Keep only the languages below** in
+[Settings → Ripping](07-settings-reference.md#audio-and-subtitles) to keep just your
+audio and subtitle languages, forced subtitles and the film's original language, and
+leave out commentary. A disc can carry a dozen dubs, so this is the biggest saving on
+file size.
 
-Adjustable in [settings](07-settings-reference.md#track-selection) — keeping every dub and
-commentary track can easily double file size.
+## Extras
+
+With **Titles** set to **The film and its extras**, a film's featurettes, deleted scenes
+and trailers go into a `Featurettes` folder beside it, which Plex and Jellyfin show as
+the film's extras:
+
+```
+Movies/Arrival (2016)/Arrival (2016).mkv
+Movies/Arrival (2016)/Featurettes/Extra 01 (24 min).mkv
+Movies/Arrival (2016)/Featurettes/Extra 02 (2 min).mkv
+```
+
+See [Extras](07-settings-reference.md#extras) for what Riparr counts as one.
 
 ---
 

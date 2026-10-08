@@ -154,6 +154,28 @@ db.set("keep_original_audio", True)
 db.set("tracks_filter", False)
 TM.details = _real_details
 
+print("somebody's own MakeMKV rules are put back")
+_conf = os.path.join(_tmp, "settings.conf")
+with open(_conf, "w") as f:
+    f.write('app_Key = "x"\napp_DefaultSelectionString = "-sel:all,+sel:video"\n')
+_real_path, MK.settings_conf_path = MK.settings_conf_path, lambda: _conf
+P.MOCK = False
+try:
+    MK.apply_selection("-sel:all,+sel:(audio&eng)")
+    check("theirs replaced while on", MK.conf_value("app_DefaultSelectionString"),
+          "-sel:all,+sel:(audio&eng)")
+    MK.apply_selection("-sel:all,+sel:(audio&fre)")
+    MK.apply_selection(None)
+    check("theirs back when off", MK.conf_value("app_DefaultSelectionString"),
+          "-sel:all,+sel:video")
+    check("the key untouched", MK.conf_value("app_Key"), "x")
+    MK.apply_selection(None)
+    check("off twice changes nothing", MK.conf_value("app_DefaultSelectionString"),
+          "-sel:all,+sel:video")
+finally:
+    P.MOCK = True
+    MK.settings_conf_path = _real_path
+
 # ── which titles are extras ───────────────────────────────────────────────────
 
 print("which titles are extras")
@@ -191,6 +213,8 @@ check("film and extras", share_files(), [
     "The Matrix/Featurettes/Extra 02 (24 min).mkv",
     "The Matrix/The Matrix.mkv"])
 check("each extra recorded as filed", [e["state"] for e in rip._job_extras(job)], ["done", "done"])
+check("reading the extras counts as Saving",
+      [st["name"] for st in json.loads(job["stages"])].count("save"), 2)
 check("staging emptied", os.path.exists(os.path.join(P.STAGING, "job-%d" % job["id"])), False)
 
 print("a film with its extras, straight to the library")

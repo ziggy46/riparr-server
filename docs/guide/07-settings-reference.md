@@ -174,7 +174,8 @@ left out, and the rip says so; it never fails the film.
 
 Extras need the film in a folder of its own. If your naming template files films loose
 in `Movies/`, the film is ripped and the rip says the extras weren't kept. TV discs rip
-their episodes whichever is set.
+their episodes whichever is set. A staged rip plans room in `/srv/staging` for the
+extras as well as the film.
 
 ## Audio and subtitles
 
@@ -193,8 +194,8 @@ tracks MakeMKV picks by default.
 Riparr hands these to MakeMKV as its track selection rules
 (`app_DefaultSelectionString` in MakeMKV's `settings.conf`), just before each rip. If
 none of a disc's audio is in your languages, every track is kept instead of making a
-silent film, and the rip says so. Turned off, Riparr takes its rules back out, and
-leaves alone any you wrote yourself.
+silent film, and the rip says so. Turned off, Riparr puts back whatever was there
+before: rules you'd written yourself, or none, which is MakeMKV's own default.
 
 ## Television
 
