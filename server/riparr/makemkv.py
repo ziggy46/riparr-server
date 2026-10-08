@@ -909,3 +909,104 @@ def _strip_tags(html):
     return re.sub(r"<[^>]+>", " ", html)
 
 
+
+
+# ─────────────────────────────── which tracks to keep ───────────────────────────────
+#
+# MakeMKV decides which audio and subtitle tracks go into the MKV from one setting,
+# `app_DefaultSelectionString` in settings.conf: a list of rules, each adding tracks
+# to the selection or taking them out ("-sel:all,+sel:(audio&eng)"). It names
+# languages by their three-letter ISO 639-2/B codes ("fre", "ger"), so both that and
+# the /T spelling ("fra", "deu") are put in -- a code MakeMKV doesn't use matches
+# nothing and costs nothing.
+#
+# Riparr only touches the line when the user has asked it to keep some languages. Off,
+# it removes the line it wrote (never one somebody put there themselves), and MakeMKV
+# goes back to its own default.
+
+# ISO 639-1 -> the 639-2 spellings MakeMKV might use for it.
+LANGS = {
+    "en": ["eng"], "fr": ["fre", "fra"], "de": ["ger", "deu"], "es": ["spa"],
+    "it": ["ita"], "ja": ["jpn"], "ko": ["kor"], "zh": ["chi", "zho"],
+    "pt": ["por"], "ru": ["rus"], "nl": ["dut", "nld"], "sv": ["swe"],
+    "da": ["dan"], "no": ["nor"], "nb": ["nob", "nor"], "nn": ["nno", "nor"],
+    "fi": ["fin"], "pl": ["pol"], "cs": ["cze", "ces"], "sk": ["slo", "slk"],
+    "hu": ["hun"], "el": ["gre", "ell"], "tr": ["tur"], "he": ["heb"],
+    "ar": ["ara"], "hi": ["hin"], "th": ["tha"], "vi": ["vie"], "id": ["ind"],
+    "ms": ["may", "msa"], "uk": ["ukr"], "ro": ["rum", "ron"], "bg": ["bul"],
+    "hr": ["hrv"], "sr": ["srp"], "sl": ["slv"], "is": ["ice", "isl"],
+    "et": ["est"], "lv": ["lav"], "lt": ["lit"], "fa": ["per", "fas"],
+    "ta": ["tam"], "te": ["tel"], "bn": ["ben"], "ca": ["cat"], "eu": ["baq", "eus"],
+    "gl": ["glg"], "cy": ["wel", "cym"], "ga": ["gle"], "tl": ["tgl"], "fil": ["fil"],
+    "cn": ["chi", "zho"],             # TMDb's code for Cantonese films
+}
+_TO_PAIR = {}
+for _two, _threes in LANGS.items():
+    for _t in _threes:
+        _TO_PAIR.setdefault(_t, set()).update(_threes)
+
+
+def lang_codes(values):
+    """Every spelling of the given languages, from what somebody typed ("en", "eng",
+    "fra") or TMDb said ("ja"). Unknown three-letter codes pass through as they are."""
+    if isinstance(values, str):
+        values = re.split(r"[,\s]+", values)
+    out = set()
+    for v in values or []:
+        v = (v or "").strip().lower()
+        if not v:
+            continue
+        if v in LANGS:
+            out.update(LANGS[v])
+        elif re.fullmatch(r"[a-z]{3}", v):
+            out.update(_TO_PAIR.get(v, {v}))
+    return out
+
+
+def selection_string(audio, subtitles, forced=True, commentary=False, keep_3d=False,
+                     first=None):
+    """MakeMKV's selection rules for these languages. `audio` and `subtitles` are sets
+    of codes from lang_codes; `first` is the one code to put first. Video is always kept, and audio with no language marked
+    (common on DVDs) is kept too, since nothing says it isn't the film's."""
+    def alt(codes):
+        return "|".join(sorted(codes))
+    rules = ["-sel:all", "+sel:video"]
+    rules.append("+sel:(audio&(%s))" % alt(set(audio) | {"nolang"}))
+    if subtitles:
+        rules.append("+sel:(subtitle&(%s))" % alt(subtitles))
+    if forced:
+        rules.append("+sel:(subtitle&forced)")
+    if not commentary:
+        rules.append("-sel:special")         # director's commentary and the like
+    rules.append("-sel:(havemulti)")         # a stereo copy of a surround track
+    if not keep_3d:
+        rules.append("-sel:mvcvideo")
+    rules.append("=100:all")
+    if first:
+        rules.append("-10:%s" % first)       # their own language first in the file
+    return ",".join(rules)
+
+
+SELECTION_LOCK = threading.Lock()
+_SELECTION = "app_DefaultSelectionString"
+
+
+def apply_selection(rules):
+    """Put the rules where the next makemkvcon will read them, or take Riparr's out.
+
+    Callers hold SELECTION_LOCK from here until makemkvcon has started, because two
+    drives ripping at once may want different rules (one film's original language is
+    Japanese, the other's French) and the file is shared."""
+    if P.MOCK:
+        return
+    from . import db
+    try:
+        if rules:
+            if conf_value(_SELECTION) != rules:
+                _set_conf(_SELECTION, rules)
+            db.set("makemkv_selection_ours", True)
+        elif db.get("makemkv_selection_ours"):
+            _set_conf(_SELECTION, None)
+            db.set("makemkv_selection_ours", False)
+    except OSError as e:
+        log.warning("Couldn't write MakeMKV's track selection: %s", e)

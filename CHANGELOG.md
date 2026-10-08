@@ -14,6 +14,29 @@ doesn't display the line.
 
 ---
 
+## Unreleased
+
+**Plex, Jellyfin and Emby are told when a rip lands.** Set your media server, its address
+and a token on **Settings → Library → Media server**, and a finished film, season or album
+shows up there in seconds instead of at the server's next scan. Riparr asks for a scan of
+just the new folder when the server's library folder has the same name as its own
+(`Movies`), and of the whole library of that kind when it hasn't. A media server that's
+down never fails a rip.
+
+**Keep only the languages you want.** **Settings → Ripping → Audio and subtitles** now
+works: turn on **Keep only the languages below** and each rip keeps your audio and
+subtitle languages, forced subtitles, and the film's own original language from TMDb, so
+a Japanese film keeps its Japanese. A disc with none of your languages keeps every track
+rather than coming out silent. These settings were on the page before but did nothing;
+every rip kept MakeMKV's default tracks, and still does until you turn this on.
+
+**Rip a film's extras.** Set **Titles** to **The film and its extras** and the disc's
+featurettes, deleted scenes and trailers are ripped too, into a `Featurettes` folder
+beside the film, which Plex and Jellyfin show as its extras. Riparr skips other cuts of
+the film, decoy playlists and "play all" titles. This replaces the **All titles**
+option, which also never did anything. Click a film on **Discs** to see where its extras
+went.
+
 ## 0.10.2
 
 - **History's time bars are bigger.** Each rip's bar is twice as thick and fills its

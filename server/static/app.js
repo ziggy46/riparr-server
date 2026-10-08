@@ -1547,6 +1547,9 @@ async function showShelfInfo(fps, el) {
           <div class="k">Checked</div><div class="v">${esc(checked(last))}${last.sha256
             ? `<div class="muted shelf-hash">SHA-256 <code>${esc(last.sha256)}</code></div>` : ""}</div>`
         : `<div class="k">In your library</div><div class="v muted">Not yet: no rip of it has finished.</div>`}
+        ${last && (last.extras || []).length ? `<div class="k">Extras</div><div class="v">${
+          last.extras.filter(e => e.state === "done").length} in <code>${esc(
+          ((last.extras.find(e => e.remote) || {}).remote || "").replace(/\/[^/]*$/, "") || "Featurettes")}</code></div>` : ""}
         <div class="k">Rips</div><div class="v">${done.length} finished${failed ? `, ${failed} failed` : ""}
           \u00b7 <a href="#/history" data-close>History</a></div>
       </div>
@@ -2176,7 +2179,9 @@ function ripOptions() {
   return `
   <a class="rip-opts-d rip-opts-link" href="#/settings/ripping">
     <span class="ropt-k">${icon("gears")} Rip options</span>
-    <span class="ropt-sum">${esc(route)} · ${esc(check)}</span>
+    <span class="ropt-sum">${esc([
+      s.rip_mode === "all" ? "film and extras" : s.rip_mode === "backup" ? "full disc backup" : "",
+      s.tracks_filter ? "your languages only" : "", route, check].filter(Boolean).join(" \u00b7 "))}</span>
     <span class="ropt-change">Change</span></a>`;
 }
 
@@ -2747,6 +2752,37 @@ settingsPages.library = async (s) => {
           <p>Finished rips have nowhere to go until you add one above.</p></div>`}
     </div></div>
 
+    <div class="section"><h2>Media server</h2><div>
+      <p class="muted">Riparr tells Plex, Jellyfin or Emby the moment a rip is in your
+        library, so it shows up there at once instead of at the server's next scan.</p>
+      <label class="f"><span>Tell</span>
+        <select data-set="media_server" id="ms-kind">
+          ${opt("", "Nobody (default)", s.media_server || "")}
+          ${opt("plex", "Plex", s.media_server)}
+          ${opt("jellyfin", "Jellyfin", s.media_server)}
+          ${opt("emby", "Emby", s.media_server)}
+        </select></label>
+      <div class="ms-fields"${s.media_server ? "" : " hidden"}>
+      <label class="f"><span>Address</span>
+        <input data-set="media_server_url" id="ms-url" value="${esc(s.media_server_url || "")}"
+               placeholder="http://192.168.1.10:32400" autocomplete="off" spellcheck="false">
+        <span class="help">As this box reaches it: the server's IP address and port.
+          Plex usually listens on 32400, Jellyfin on 8096, Emby on 8096.</span></label>
+      <label class="f"><span>Token</span>
+        <input data-set="media_server_token" id="ms-token" value="${esc(s.media_server_token || "")}"
+               autocomplete="off" spellcheck="false">
+        <span class="help">Plex: the <code>X-Plex-Token</code> from <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/"
+          target="_blank" rel="noopener">Plex's own instructions</a>. Jellyfin and Emby:
+          make an API key in the dashboard, under <b>API Keys</b>.</span></label>
+      <div class="f"><span></span><div class="btn-row" style="margin:0">
+        <button class="btn" id="ms-test">Test</button>
+        <span class="test-out" id="ms-test-out"></span></div></div>
+      <p class="muted ms-note">Riparr finds the library whose folder has the same name as
+        its own (<code>Movies</code>, say) and asks for a scan of just the new folder in it.
+        If none matches, it scans your film, TV or music libraries whole.</p>
+      </div>
+    </div></div>
+
     <div class="section"><h2>Film lookup (TMDb)</h2><div>
       <p class="muted">With a key from <a href="https://www.themoviedb.org/settings/api"
         target="_blank" rel="noopener">The Movie Database</a>, Riparr looks each film up:
@@ -2839,10 +2875,14 @@ settingsPages.ripping = async (s) => {
     <label class="f"><span>Titles</span>
       <select data-set="rip_mode">
         ${opt("main", "Main title (default)", s.rip_mode)}
-        ${opt("all", "All titles", s.rip_mode)}
+        ${opt("all", "The film and its extras", s.rip_mode)}
         ${opt("backup", "Full disc backup", s.rip_mode)}
       </select>
-      <span class="help"><b>Full disc backup</b> keeps the whole disc instead of one
+      <span class="help"><b>The film and its extras</b> also rips the disc's
+        featurettes, deleted scenes and trailers, into a <code>Featurettes</code> folder
+        beside the film, where Plex and Jellyfin show them as its extras. A disc doesn't
+        say what each one is, so they're named by number and length. TV discs rip their
+        episodes either way.<br><br><b>Full disc backup</b> keeps the whole disc instead of one
         film file: a <code>VIDEO_TS</code> or <code>BDMV</code> folder with the menus,
         extras and every audio track, decrypted, so it plays from the folder and can be
         made into an ISO later. It lands where the film would have, in
@@ -2914,18 +2954,30 @@ settingsPages.ripping = async (s) => {
         season to 0 on the episode plan to file a disc here.</span></label>
   </div></div>
 
-  <div class="section"><h2>Tracks
+  <div class="section"><h2>Audio and subtitles
     <span class="grow"></span>
     <span class="badge">Biggest effect on file size</span></h2><div>
+    ${sw("tracks_filter", "Keep only the languages below", s.tracks_filter,
+        "Off, every rip keeps the tracks MakeMKV picks by default. A disc can carry a dozen dubs and subtitle tracks; keeping your own makes each file smaller and saves choosing in Plex.")}
+    <div class="tracks-fields"${s.tracks_filter ? "" : " hidden"}>
     <label class="f"><span>Audio languages</span>
-      <input data-set="audio_languages" data-list value="${esc((s.audio_languages || []).join(", "))}">
-      <span class="help">Comma separated ISO codes, e.g. eng, fra.</span></label>
+      <input data-set="audio_languages" data-list value="${esc((s.audio_languages || []).join(", "))}"
+             placeholder="en, fr">
+      <span class="help">Two- or three-letter codes, separated by commas: <code>en</code>,
+        <code>fr</code>, <code>ja</code>, or <code>eng</code>, <code>fre</code>. Audio with
+        no language marked is always kept. If none of a disc's audio is in these, every
+        track is kept rather than leaving a silent film.</span></label>
+    ${sw("keep_original_audio", "Also keep the film's original language", s.keep_original_audio,
+        "From TMDb, so a Japanese or French film keeps its own audio as well as yours. Needs a TMDb key.")}
     <label class="f"><span>Subtitle languages</span>
-      <input data-set="subtitle_languages" data-list value="${esc((s.subtitle_languages || []).join(", "))}"></label>
+      <input data-set="subtitle_languages" data-list value="${esc((s.subtitle_languages || []).join(", "))}"
+             placeholder="en">
+      <span class="help">Empty keeps none, apart from forced subtitles.</span></label>
     ${sw("keep_forced_subtitles", "Keep forced subtitles", s.keep_forced_subtitles,
-        "The subtitles for alien or foreign dialogue. Almost always wanted.")}
+        "The subtitles for alien or foreign dialogue, in any language. Almost always wanted.")}
     ${sw("keep_commentary", "Keep commentary tracks", s.keep_commentary,
-        "Keeping every language and commentary can roughly double file size.")}
+        "Director's commentary and the like.")}
+    </div>
   </div></div>
 
   <div class="section"><h2>Transfer</h2><div>
@@ -4947,6 +4999,32 @@ function wireContent(section, sub) {
   /* The destination path preview. "Share" and "folder" only mean anything together,
      and seeing the whole thing is how somebody notices they have typed the share name
      into the folder box. */
+  const tracksOn = $('[data-set="tracks_filter"]');
+  if (tracksOn) tracksOn.addEventListener("change", () => {
+    const f = $(".tracks-fields");
+    if (f) f.hidden = !tracksOn.checked;
+  });
+  const msKind = $("#ms-kind");
+  if (msKind) msKind.addEventListener("change", () => {
+    const f = $(".ms-fields");
+    if (f) f.hidden = !msKind.value;
+  });
+  const msTest = $("#ms-test");
+  if (msTest) msTest.onclick = async () => {
+    const out = $("#ms-test-out");
+    msTest.disabled = true;
+    out.className = "test-out";
+    out.textContent = "Asking…";
+    try {
+      const r = await api.post("/api/media-server/test", {
+        media_server: $("#ms-kind").value, media_server_url: $("#ms-url").value.trim(),
+        media_server_token: $("#ms-token").value.trim() });
+      out.className = "test-out ok";
+      out.textContent = r.message + " Save to use it.";
+    } catch (e) { out.className = "test-out bad"; out.textContent = e.message; }
+    msTest.disabled = false;
+  };
+
   const tmdbTest = $("#tmdb-test");
   if (tmdbTest) tmdbTest.onclick = async () => {
     const out = $("#tmdb-test-out");

@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 
 from . import (__version__, build, artwork as ART, backup as BK, db, drives as DRV,
-               makemkv as MK,
+               makemkv as MK, mediaserver as MSV,
                naming as NM, musicbrainz as MB, notify as NT, tmdb as TM, platform as P, rip as RIP, shares as SH, system as SY,
                tv as TV, updater)
 
@@ -872,7 +872,7 @@ def autorip_set(body: AutoRip, user=Depends(require_user)):
 # back the same way when untouched, which is what makes "save" on a page you did not
 # retype your SMTP password into not wipe it. `list_shares` established the precedent
 # of never returning a stored password at all; these follow it.
-SECRET_SETTINGS = ("smtp_password", "ntfy_token", "tmdb_token")
+SECRET_SETTINGS = ("smtp_password", "ntfy_token", "tmdb_token", "media_server_token")
 SECRET_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 
 
@@ -1176,6 +1176,10 @@ def _job_out(j):
         j["episode_plan"] = db.episode_plan(j)
     if j.get("music"):
         j["music"] = db.music_plan(j)
+    if j.get("extras"):
+        # Where each extra went, for History and the Discs tile; not the staging paths.
+        j["extras"] = [{k: e.get(k) for k in ("name", "seconds", "bytes", "state", "remote")}
+                       for e in RIP._job_extras(j)]
     if j.get("release_id"):
         # An album's cover, through the same proxy as film posters. The page must not
         # look an album up by name the way it does a film: it would find a film.
@@ -1666,7 +1670,7 @@ def disc_info(fingerprint: str, user=Depends(require_user)):
     jobs = [_job_out(j) for j in db.jobs_for_fingerprint(fingerprint)]
     keep = ("id", "state", "finished_at", "started_at", "dest_path", "bytes_sent",
             "bytes_ripped", "verified_mode", "sha256", "output", "error", "music",
-            "title_index", "disc_family", "stages")
+            "title_index", "disc_family", "stages", "extras")
     return {"disc": d, "jobs": [{k: j.get(k) for k in keep} for j in jobs]}
 
 
@@ -1764,6 +1768,26 @@ def artwork_image(token: str, user=Depends(require_user)):
         raise HTTPException(status_code=404, detail="No image for that token.")
     return Response(content=blob, media_type=ctype,
                     headers={"Cache-Control": "private, max-age=31536000, immutable"})
+
+
+class MediaServerTest(BaseModel):
+    media_server: str = ""
+    media_server_url: str = ""
+    media_server_token: str = ""
+
+
+@app.post("/api/media-server/test")
+def media_server_test(body: MediaServerTest, user=Depends(require_user)):
+    """Try the address and token on the page, before or after saving them."""
+    s = db.all_settings()
+    s["media_server"] = body.media_server
+    s["media_server_url"] = body.media_server_url
+    if body.media_server_token and body.media_server_token != SECRET_MASK:
+        s["media_server_token"] = body.media_server_token
+    r = MSV.test(s)
+    if not r.get("ok"):
+        raise HTTPException(status_code=400, detail=r["error"])
+    return r
 
 
 @app.get("/api/makemkv/beta-key")

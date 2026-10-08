@@ -46,6 +46,7 @@ from . import musicbrainz as MB
 from . import music as MU
 from . import optical as OPT
 from . import tmdb as TM
+from . import mediaserver as MS
 
 log = SY.component("Rip")
 
@@ -929,6 +930,7 @@ def _mock_titles():
         _mt(0, 7860, gb, name="The Matrix", source="00001.mpls", segments="1",
             chapters=32),
         _mt(1, 132, 0.39, name="Trailer", source="00002.mpls", segments="20"),
+        _mt(3, 1452, 1.1, name="Making of", source="00004.mpls", segments="30"),
         _mt(2, 61, 0.09, name="Menu loop", source="00003.mpls", segments="21"),
     ]
 
@@ -2043,9 +2045,12 @@ def _rip(job, s, cancel_ev):
     # opens the output file, and that silent stretch is the one users read as a hang --
     # so it is timed separately, and the split point is the moment a byte lands.
     db.stage_start(job["id"], "decrypt")
+    job["_rules"] = _track_rules(job, s, title.get("streams"))
 
     if P.MOCK:
-        return _mock_rip(job, out_dir, cancel_ev)
+        path = _mock_rip(job, out_dir, cancel_ev)
+        _rip_extras(job, s, out_dir, cancel_ev)
+        return path
 
     total = job.get("bytes_total") or title.get("bytes") or 0
 
@@ -2060,7 +2065,233 @@ def _rip(job, s, cancel_ev):
     db.stage_end(job["id"])
     db.update_job(job["id"], local_path=path, bytes_ripped=os.path.getsize(path),
                   bytes_total=os.path.getsize(path), eta_seconds=None)
+    _rip_extras(job, s, out_dir, cancel_ev)
     return path
+
+
+def _job_extras(job):
+    """A job's extras as a list, read back from the database when the job in hand
+    doesn't carry them (a send resumed after a restart)."""
+    extras = job.get("extras")
+    if extras is None:
+        extras = (db.get_job(job["id"]) or {}).get("extras")
+    if isinstance(extras, str):
+        try:
+            extras = json.loads(extras)
+        except ValueError:
+            extras = []
+    return [e for e in extras or [] if isinstance(e, dict)]
+
+
+def _job_titles(job):
+    """The disc's titles as a list, whether the job came from the database (decoded) or
+    was built in memory with the JSON still a string."""
+    titles = job.get("titles") or []
+    if isinstance(titles, str):
+        try:
+            titles = json.loads(titles)
+        except ValueError:
+            titles = []
+    return [t for t in titles if isinstance(t, dict)]
+
+
+def _add_warning(job_id, text):
+    """One more sentence on the job's warning, keeping what was already said."""
+    row = db.get_job(job_id) or {}
+    have = row.get("warning") or ""
+    if text and text not in have:
+        db.update_job(job_id, warning=(have + " " + text).strip())
+
+
+# ── which tracks ──
+
+def _track_rules(job, s, streams=None):
+    """MakeMKV selection rules for this rip, or None to leave MakeMKV's own choice.
+
+    The film's original language comes from TMDb, so a Japanese film keeps its
+    Japanese audio for somebody who listed only English. When none of the disc's audio
+    is in a wanted language the rules would leave a silent film, so every track is kept
+    instead and the job says why."""
+    if not s.get("tracks_filter"):
+        return None
+    wanted = list(s.get("audio_languages") or [])
+    audio = MK.lang_codes(wanted)
+    if not audio:
+        _add_warning(job["id"], "No audio languages are set in Settings → Ripping, "
+                                "so every track was kept.")
+        return None
+    if s.get("keep_original_audio", True) and job.get("tmdb_id") \
+            and (job.get("kind") or "movie") == "movie":
+        orig = (TM.details(job["tmdb_id"]) or {}).get("original_language")
+        audio |= MK.lang_codes([orig])
+    on_disc = [(x.get("lang") or "").lower() for x in streams or []
+               if (x.get("type") or "").lower().startswith("audio")]
+    if on_disc and not any(not l or l in audio for l in on_disc):
+        _add_warning(job["id"], "None of this disc's audio is in your languages (it has "
+                                "%s), so every track was kept."
+                     % ", ".join(sorted(set(on_disc))))
+        return None
+    first = sorted(MK.lang_codes(wanted[:1]))
+    return MK.selection_string(
+        audio, MK.lang_codes(s.get("subtitle_languages")),
+        forced=s.get("keep_forced_subtitles", True),
+        commentary=s.get("keep_commentary", False),
+        keep_3d=s.get("title_3d") == "3d", first=first[0] if first else None)
+
+
+# ── a film's extras ──
+#
+# "The film and its extras" rips the other titles on the disc too -- featurettes,
+# deleted scenes, trailers -- into a Featurettes folder beside the film, which Plex and
+# Jellyfin both show as the film's extras. A disc doesn't say what each title is, so
+# they're named by number and length. Extras never fail the film: one that can't be
+# read is left out and the job says so.
+
+EXTRAS_FOLDER = "Featurettes"
+MAX_EXTRAS = 40
+
+
+def pick_extras(titles, main, min_seconds):
+    """The titles worth keeping as extras: not the film, not another cut or a decoy
+    copy of it, not a "play all" of the others, and each only once."""
+    if not main or looks_obfuscated(titles, min_seconds):
+        return []
+    cands = [t for t in titles
+             if t["index"] != main["index"] and t["seconds"] >= min_seconds
+             and t["seconds"] < main["seconds"] * 0.6]
+
+    def segs(t):
+        return [x.strip() for x in (t.get("segments") or "").split(",") if x.strip()]
+    singles = {x for t in cands if len(segs(t)) == 1 for x in segs(t)}
+    cands = [t for t in cands
+             if not (len(segs(t)) > 1 and all(x in singles for x in segs(t)))]
+    seen, out = set(), []
+    for t in sorted(cands, key=lambda t: t["index"]):
+        key = (("segments", t["segments"]) if t.get("segments")
+               else ("length", t["seconds"], (t.get("bytes") or 0) >> 20))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(t)
+    return out[:MAX_EXTRAS]
+
+
+def _extra_name(n, t):
+    secs = int(t.get("seconds") or 0)
+    length = "%d min" % round(secs / 60.0) if secs >= 90 else "%d s" % secs
+    return "Extra %02d (%s).mkv" % (n, length)
+
+
+def _rip_extras(job, s, out_dir, cancel_ev):
+    if s.get("rip_mode") != "all" or (job.get("kind") or "movie") != "movie" \
+            or (job.get("output") or MKV) != MKV:
+        return
+    titles = _job_titles(job)
+    picks = pick_extras(titles, job.get("_title"), s["min_title_seconds"])
+    if not picks:
+        if looks_obfuscated(titles, s["min_title_seconds"]):
+            _add_warning(job["id"], "This disc hides its film among look-alike titles, "
+                                    "so no extras were ripped from it.")
+        return
+    extras, failed = [], 0
+    for n, t in enumerate(picks, 1):
+        if cancel_ev.is_set():
+            raise Cancelled()
+        d = os.path.join(out_dir, "extras", "%02d" % n)
+        os.makedirs(d, exist_ok=True)
+        where = "Extra %d of %d" % (n, len(picks))
+        db.update_job(job["id"], phase=where, eta_seconds=None)
+        try:
+            if P.MOCK:
+                path = _mock_extra(d, t, cancel_ev)
+            else:
+                path = _run_makemkv(job, s, t["index"], d, cancel_ev, t.get("bytes") or 0,
+                                    on_progress=lambda *_a, _w=where:
+                                        db.update_job(job["id"], phase=_w))
+        except RipFailed as e:
+            log.warning("Job %d: extra %d (title %d) couldn't be read: %s",
+                        job["id"], n, t["index"], e)
+            failed += 1
+            continue
+        extras.append({"index": t["index"], "seconds": t["seconds"],
+                       "bytes": os.path.getsize(path), "path": path,
+                       "state": "ripped", "name": _extra_name(n, t)})
+    job["extras"] = extras
+    db.update_job(job["id"], extras=extras)
+    log.info("Job %d: %d extra%s read", job["id"], len(extras), "" if len(extras) == 1 else "s")
+    if failed:
+        _add_warning(job["id"], "%d extra%s couldn't be read and %s left out."
+                     % (failed, "" if failed == 1 else "s",
+                        "was" if failed == 1 else "were"))
+
+
+def _mock_extra(out_dir, t, cancel_ev):
+    path = os.path.join(out_dir, "title_t%02d.mkv" % t["index"])
+    with open(path, "wb") as f:
+        for _ in range(4):
+            if cancel_ev.is_set():
+                raise Cancelled()
+            f.write(b"\0" * (256 * 1024))
+            _mock_pause(0.2)
+    return path
+
+
+def _extras_folder(name, folder):
+    """Where a film's extras go, beside it -- or None when the film has no folder of its
+    own, because Featurettes straight inside Movies/ would belong to every film."""
+    film_dir = os.path.dirname(name).strip("/")
+    if not film_dir or film_dir == (folder or "").strip("/"):
+        return None
+    return "%s/%s" % (film_dir, EXTRAS_FOLDER)
+
+
+def _send_extras(job, transport, name, cancel_ev=None, direct_root=None):
+    """File the extras next to the film: a rename in direct mode, an upload otherwise.
+    Each is size-checked; one that doesn't arrive is reported, not fatal."""
+    extras = _job_extras(job)
+    if not extras:
+        return
+    _share, folder = db.destination(job.get("kind") or "movie")
+    dest = _extras_folder(name, folder)
+    if not dest:
+        _add_warning(job["id"], "Extras need the film in a folder of its own, and your "
+                                "naming template puts films straight into %s, so they "
+                                "weren't kept." % (folder or "the library"))
+        return
+    todo = [e for e in extras if e.get("state") != "done"]
+    failed = 0
+    for n, e in enumerate(todo, 1):
+        if cancel_ev is not None and cancel_ev.is_set():
+            raise Cancelled()
+        remote = "%s/%s" % (dest, e["name"])
+        db.update_job(job["id"], phase="Filing the extras (%d of %d)" % (n, len(todo)))
+        ok = False
+        if e.get("path") and os.path.exists(e["path"]):
+            if direct_root:
+                target = os.path.join(direct_root, remote)
+                try:
+                    os.makedirs(os.path.dirname(target), exist_ok=True)
+                    shutil.move(e["path"], target)
+                    ok = os.path.getsize(target) == e["bytes"]
+                except OSError as err:
+                    log.warning("Job %d: couldn't file %s: %s", job["id"], remote, err)
+            else:
+                r = transport.put(e["path"], remote, cancel=cancel_ev)
+                if cancel_ev is not None and cancel_ev.is_set():
+                    raise Cancelled()
+                try:
+                    ok = bool(r.get("ok")) and transport.size(remote) == e["bytes"]
+                except Exception:
+                    ok = False
+        e["state"] = "done" if ok else "failed"
+        e["remote"] = remote
+        failed += not ok
+    db.update_job(job["id"], extras=extras)
+    log.info("Job %d: %d extra%s filed in %s", job["id"], len(todo) - failed,
+             "" if len(todo) - failed == 1 else "s", transport.describe(dest))
+    if failed:
+        _add_warning(job["id"], "%d extra%s didn't arrive in %s." % (
+            failed, "" if failed == 1 else "s", transport.describe(dest)))
 
 
 def _run_makemkv(job, s, title_index, out_dir, cancel_ev, total_bytes,
@@ -2080,9 +2311,18 @@ def _run_makemkv(job, s, title_index, out_dir, cancel_ev, total_bytes,
            "--minlength=%d" % s["min_title_seconds"],
            "mkv", _disc_arg(job.get("_device")), str(title_index), out_dir]
     log.info("Job %d: %s", job["id"], " ".join(cmd))
+    rules = job.get("_rules")
+    if rules:
+        log.info("Job %d: keeping tracks by %s", job["id"], rules)
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, bufsize=1)
+    # The track rules live in MakeMKV's settings.conf, which every makemkvcon reads as
+    # it starts. Held until this one has read it, so a second drive starting a film in
+    # another language can't swap the rules underneath it.
+    with MK.SELECTION_LOCK:
+        MK.apply_selection(rules)
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1)
+        time.sleep(2)
     last_msg = ""
     first_byte_at = None
     try:
@@ -2199,6 +2439,9 @@ def _rip_season(job, s, cancel_ev):
     db.update_job(job["id"], state="ripping", phase="Reading the disc",
                   local_path=base, bytes_ripped=0, stage_pct=0)
     db.stage_start(job["id"], "decrypt")
+    by_index = {t["index"]: t for t in _job_titles(job)}
+    job["_rules"] = _track_rules(
+        job, s, (by_index.get(rows[0]["title_index"]) or {}).get("streams") if rows else None)
 
     total = sum(e.get("bytes") or 0 for e in rows) or 1
     done_before = [0]
@@ -2545,6 +2788,7 @@ def _transfer(job, s, local_path, cancel_ev):
         raise Cancelled()
     if not r.get("ok"):
         raise RipFailed("Couldn't write to your library: %s" % r.get("error"))
+    _send_extras(job, transport, name, cancel_ev)
     db.stage_end(job["id"])
     db.update_job(job["id"], bytes_sent=total, eta_seconds=None)
     # The third value is where the file is *now*. In direct mode the transfer moves it,
@@ -2635,6 +2879,7 @@ def _place_directly(job, s, local_path, name, transport, kind="movie"):
             raise RipFailed("The rip finished but couldn't be filed in your library: %s"
                             % e2)
 
+    _send_extras(job, transport, name, direct_root=_library_root(kind))
     db.stage_end(job["id"])
     db.update_job(job["id"], bytes_sent=total, eta_seconds=None,
                   local_path=dest, remote_name=name,
@@ -2849,6 +3094,9 @@ def _finish(job, s, transport, name, local_path, sent_from_card=False):
     if not sent_from_card:
         eject(job)
     log.info("Job %d finished: %s", job["id"], transport.describe(name))
+    # A film's name is its file; an album or a backup is already a folder.
+    MS.after_rip(job.get("kind") or "movie",
+                 os.path.dirname(name) if name.lower().endswith(".mkv") else name)
     what = ("Backed up, menus and all, and verified" if job.get("output") == BACKUP
             else "Every track ripped and verified" if job.get("output") == MUSIC
             else "Ripped and verified")
@@ -2888,6 +3136,7 @@ def _finish_season(job, s, transport, folder, base, sent_from_card=False):
         span = (" (%s)" % episode_label(first) if len(rows) == 1
                 else " (%s to %s)" % (episode_label(first), episode_label(last)))
     log.info("Job %d finished: %d episodes into %s", job["id"], len(rows), folder)
+    MS.after_rip("tv", folder)
     notify.send("done", title=plan.get("series") or job.get("title") or "A disc",
                 body="%d episode%s ripped and verified%s. They're in your library at %s."
                      % (len(rows), "" if len(rows) == 1 else "s", span,

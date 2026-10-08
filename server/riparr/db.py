@@ -134,6 +134,9 @@ ADDED_COLUMNS = {
         # many, MusicBrainz IDs, and every track with its title and how far it got.
         ("music", "TEXT"),
         ("release_id", "TEXT"),        # the MusicBrainz release, chosen or found
+        # A film's extras, when they're ripped too: [{"index", "seconds", "bytes",
+        # "path", "state", "name"}], so a send that resumes after a restart knows them.
+        ("extras", "TEXT"),
     ],
     "discs": [
         ("title_index", "INTEGER"),    # the remembered title choice (R5: fix once, ever)
@@ -232,6 +235,10 @@ DEFAULTS = {
     # prefers a descriptive name over S00E01 when the metadata does not know the
     # special. Both read this folder as season zero.
     "tv_specials_folder": "Season 00",
+    # Which tracks go into the MKV. Off keeps MakeMKV's own choice, which is what every
+    # rip did before these settings worked; on keeps the languages below.
+    "tracks_filter": False,
+    "keep_original_audio": True,      # the film's own language, from TMDb, as well
     "audio_languages": ["eng"],
     "subtitle_languages": ["eng"],
     "keep_forced_subtitles": True,
@@ -286,6 +293,11 @@ DEFAULTS = {
     "tmdb_token": "",
     "tmdb_unsure": "label",
     "webhook_url": "",
+    # Plex, Jellyfin or Emby to tell when a rip lands, so it shows up at once instead
+    # of at the server's next scheduled scan. Empty: tell nobody.
+    "media_server": "",
+    "media_server_url": "",
+    "media_server_token": "",
     # Notifications. The box's whole promise is "walk away", so these are the only way
     # it can reach someone who did.
     "notify_events": ["done", "ripped", "needs_you", "failed", "share_lost",
@@ -735,7 +747,7 @@ INTERRUPTIBLE = ["identifying", "ripping", "transferring", "verifying"]
 # Columns held as JSON text. Encoding them in one place rather than at each call site
 # is what stopped `episode_plan` from being written as a Python repr the first time a
 # caller forgot -- which SQLite accepts happily and json.loads does not.
-_JSON_COLUMNS = ("titles", "episode_plan", "candidates", "music")
+_JSON_COLUMNS = ("titles", "episode_plan", "candidates", "music", "extras")
 
 
 def _encode_json(fields):

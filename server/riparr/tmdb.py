@@ -125,6 +125,7 @@ def _film(r):
             "year": _year(r.get("release_date")),
             "poster_path": r.get("poster_path") or "",
             "votes": int(r.get("vote_count") or 0),
+            "original_language": r.get("original_language") or "",
             "overview": (r.get("overview") or "")[:280]}
 
 

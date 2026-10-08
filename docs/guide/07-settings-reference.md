@@ -105,6 +105,26 @@ adding a share for box sets cannot quietly redirect your films.
 > rather than confirm which shares exist. Check the **Share** box first. Riparr's error
 > message says so, and prints the exact path it was trying to write to.
 
+### Media server
+
+On **Settings → Library**. Riparr tells Plex, Jellyfin or Emby the moment a rip is in
+your library, so it shows up there in seconds instead of at the server's next scheduled
+scan.
+
+| Setting | Notes |
+|---|---|
+| **Tell** | `Nobody` *(default)*, `Plex`, `Jellyfin` or `Emby` |
+| **Address** | As this box reaches it, e.g. `http://192.168.1.10:32400`. Plex usually listens on 32400, Jellyfin and Emby on 8096 |
+| **Token** | Plex: your `X-Plex-Token` ([how to find it](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/)). Jellyfin and Emby: an API key from the dashboard's **API Keys** page |
+| **Test** | Connects with the address and token on the page and lists the server's libraries |
+
+The media server sees your library through its own paths (`/data/Movies`, say), not
+Riparr's share. So Riparr looks for the server's library whose folder has the same name
+as its own folder for that kind of disc (`Movies`), and asks for a scan of just the new
+film's folder inside it. If no library's folder has that name, it scans your film, TV or
+music libraries whole, which is slower on a big library but gets there. A media server
+that's down or turns the token away never fails a rip: it's noted on **System → Events**.
+
 ## Naming
 
 | Setting | Default |
@@ -131,20 +151,50 @@ rather than straight into a library somebody is browsing. A folder named off the
 label is something you can fix in ten seconds; a queue that stopped at 2am waiting for
 you is not. Switch it to `Ask me` if your rips go directly into a library you browse.
 
-## Track selection
+## What to rip
 
-Bigger effect on file size than anything else here.
+On **Settings → Ripping**.
 
 | Setting | Default |
 |---|---|
-| **Audio languages** | Your locale language + original |
-| **Subtitle languages** | Your locale language |
-| **Keep forced subtitles** | On — these are the subtitles for alien/foreign dialogue |
-| **Keep commentary tracks** | Off |
-| **Minimum title length** | 120 seconds — filters menus and logo stings |
-| **Rip mode** | Main title *(default)* / All titles / **Full disc backup** — the whole disc as a `VIDEO_TS` or `BDMV` folder, menus and all. DVDs use `dvdbackup` and `libdvdcss`, which are built into the image |
+| **Titles** | **Main title** *(default)* — the film, one file. **The film and its extras** — the disc's other titles too (featurettes, deleted scenes, trailers), each its own file in a `Featurettes` folder beside the film, which Plex and Jellyfin show as the film's extras. **Full disc backup** — the whole disc as a `VIDEO_TS` or `BDMV` folder, menus and all. DVDs use `dvdbackup` and `libdvdcss`, which are built into the image |
+| **Minimum title length** | 120 seconds — filters menus and logo stings, and the shortest extras with them |
 | **When Riparr can't tell which title is the film** | **Use the most likely one** *(default)* / Ask me |
 | **On a disc with a 3D version** | **Rip the 2D version** *(default)* / Rip the 3D version |
+
+### Extras
+
+A disc doesn't say what each of its titles is, so extras are named by number and
+length: `Featurettes/Extra 01 (24 min).mkv`. Riparr leaves out what isn't an extra:
+another cut of the film or one of the decoy copies some Blu-rays carry (anything longer
+than 60% of the film), a "play all" that strings the others together, and the same
+title listed twice. A disc that hides its film among dozens of look-alike titles gets no
+extras at all, rather than dozens of copies of the film. An extra that can't be read is
+left out, and the rip says so; it never fails the film.
+
+Extras need the film in a folder of its own. If your naming template files films loose
+in `Movies/`, the film is ripped and the rip says the extras weren't kept. TV discs rip
+their episodes whichever is set.
+
+## Audio and subtitles
+
+Bigger effect on file size than anything else here. Off by default: every rip keeps the
+tracks MakeMKV picks by default.
+
+| Setting | Default |
+|---|---|
+| **Keep only the languages below** | Off |
+| **Audio languages** | `eng`. Two- or three-letter codes: `en`, `fr`, `ja`, or `eng`, `fre`. Audio with no language marked, common on DVDs, is always kept |
+| **Also keep the film's original language** | On. From TMDb (it needs a key), so a Japanese film keeps its Japanese audio for someone who listed only English. Films only |
+| **Subtitle languages** | `eng`. Empty keeps none, apart from forced subtitles |
+| **Keep forced subtitles** | On — these are the subtitles for alien/foreign dialogue, in any language |
+| **Keep commentary tracks** | Off |
+
+Riparr hands these to MakeMKV as its track selection rules
+(`app_DefaultSelectionString` in MakeMKV's `settings.conf`), just before each rip. If
+none of a disc's audio is in your languages, every track is kept instead of making a
+silent film, and the rip says so. Turned off, Riparr takes its rules back out, and
+leaves alone any you wrote yourself.
 
 ## Television
 
@@ -161,8 +211,7 @@ it, use the arrows to move an episode, type over a name to correct it, or change
 episode** to shift the whole disc — the numbers and names update together as you go.
 Later discs of the same season carry on from where the last one stopped without asking.
 
-Keeping every language and commentary can roughly double file size for no benefit most
-people notice.
+
 
 ## Storage & transfer
 
